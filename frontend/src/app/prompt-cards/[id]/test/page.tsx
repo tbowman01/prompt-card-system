@@ -34,7 +34,7 @@ export default function TestExecutionPage() {
     try {
       setLoading(true);
       const card = await api.getPromptCard(promptCardId);
-      setPromptCard(card);
+      setPromptCard(card as PromptCard);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch prompt card');

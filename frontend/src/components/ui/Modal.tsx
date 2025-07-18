@@ -9,7 +9,7 @@ interface ModalProps {
   size?: 'sm' | 'md' | 'lg' | 'xl'
 }
 
-export default function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalProps) {
+function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalProps) {
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -65,3 +65,6 @@ export default function Modal({ isOpen, onClose, title, children, size = 'md' }:
 
   return createPortal(modalContent, document.body)
 }
+
+export { Modal }
+export default Modal

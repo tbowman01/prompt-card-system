@@ -7,7 +7,7 @@ interface SearchInputProps {
   className?: string
 }
 
-export default function SearchInput({ value, onChange, placeholder = 'Search...', className = '' }: SearchInputProps) {
+function SearchInput({ value, onChange, placeholder = 'Search...', className = '' }: SearchInputProps) {
   return (
     <div className={`relative ${className}`}>
       <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -25,3 +25,6 @@ export default function SearchInput({ value, onChange, placeholder = 'Search...'
     </div>
   )
 }
+
+export { SearchInput }
+export default SearchInput
