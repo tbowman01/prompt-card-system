@@ -1,11 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  swcMinify: true,
-  experimental: {
-    // appDir is no longer experimental in Next.js 13.4+
-    // Remove this line or use app directory features directly
-  },
+  // swcMinify is deprecated in Next.js 15+ - SWC minification is now enabled by default
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001',
   },
