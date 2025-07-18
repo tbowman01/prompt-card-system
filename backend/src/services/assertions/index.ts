@@ -7,8 +7,7 @@
  */
 
 export { 
-  AssertionEngine, 
-  assertionEngine
+  AssertionEngine
 } from './AssertionEngine';
 
 export type { 
@@ -257,5 +256,13 @@ export class AssertionUtils {
   }
 }
 
-// Export the default assertion engine instance
+// Create and export the default assertion engine instance
+import { AssertionEngine } from './AssertionEngine';
+
+export const assertionEngine = new AssertionEngine();
+
+// Initialize the global assertion engine
+assertionEngine.initialize().catch(console.error);
+
+// Export as default
 export default assertionEngine;

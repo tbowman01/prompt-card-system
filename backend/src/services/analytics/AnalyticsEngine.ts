@@ -209,7 +209,7 @@ export class AnalyticsEngine {
         HAVING COUNT(*) > 1
       )
     `);
-    const activeTests = activeTestsQuery.get()?.count || 0;
+    const activeTests = (activeTestsQuery.get() as any)?.count || 0;
 
     const testsPerSecond = recentTests.length / 60;
     const passedTests = recentTests.filter(t => t.data.passed).length;
@@ -247,13 +247,13 @@ export class AnalyticsEngine {
     const startTime = performance.now();
     // Get total tests from database
     const totalTestsQuery = this.db.prepare(`SELECT COUNT(*) as count FROM test_results`);
-    const totalTests = totalTestsQuery.get()?.count || 0;
+    const totalTests = (totalTestsQuery.get() as any)?.count || 0;
 
     // Get total executions (unique execution_ids)
     const totalExecutionsQuery = this.db.prepare(`
       SELECT COUNT(DISTINCT execution_id) as count FROM test_results
     `);
-    const totalExecutions = totalExecutionsQuery.get()?.count || 0;
+    const totalExecutions = (totalExecutionsQuery.get() as any)?.count || 0;
 
     // Get overall success rate
     const successRateQuery = this.db.prepare(`
@@ -262,7 +262,7 @@ export class AnalyticsEngine {
         SUM(CASE WHEN passed = 1 THEN 1 ELSE 0 END) as passed
       FROM test_results
     `);
-    const successData = successRateQuery.get();
+    const successData = successRateQuery.get() as any;
     const overallSuccessRate = successData && successData.total > 0 
       ? successData.passed / successData.total 
       : 0;
@@ -271,7 +271,7 @@ export class AnalyticsEngine {
     const avgTimeQuery = this.db.prepare(`
       SELECT AVG(execution_time_ms) as avg_time FROM test_results
     `);
-    const avgTime = avgTimeQuery.get()?.avg_time || 0;
+    const avgTime = (avgTimeQuery.get() as any)?.avg_time || 0;
 
     // Get most used models from events
     const modelUsageEvents = await this.eventStore.getEvents({
@@ -320,27 +320,27 @@ export class AnalyticsEngine {
     
     const startTime = performance.now();
     const now = new Date();
-    const startTime = new Date();
+    const periodStartTime = new Date();
     
     switch (period) {
       case 'hour':
-        startTime.setHours(now.getHours() - limit);
+        periodStartTime.setHours(now.getHours() - limit);
         break;
       case 'day':
-        startTime.setDate(now.getDate() - limit);
+        periodStartTime.setDate(now.getDate() - limit);
         break;
       case 'week':
-        startTime.setDate(now.getDate() - (limit * 7));
+        periodStartTime.setDate(now.getDate() - (limit * 7));
         break;
       case 'month':
-        startTime.setMonth(now.getMonth() - limit);
+        periodStartTime.setMonth(now.getMonth() - limit);
         break;
     }
 
     // Get test execution events for the period
     const events = await this.eventStore.getEvents({
       event_type: 'test_execution',
-      start_time: startTime,
+      start_time: periodStartTime,
       end_time: now
     });
 

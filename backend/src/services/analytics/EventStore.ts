@@ -180,17 +180,20 @@ export class EventStore {
     const stmt = this.db.prepare(sql);
     const rows = stmt.all(...params);
 
-    return rows.map(row => ({
-      id: row.id,
-      event_type: row.event_type,
-      entity_id: row.entity_id,
-      entity_type: row.entity_type,
-      data: JSON.parse(row.data),
-      timestamp: new Date(row.timestamp),
-      user_id: row.user_id,
-      session_id: row.session_id,
-      metadata: row.metadata ? JSON.parse(row.metadata) : null
-    }));
+    return rows.map(row => {
+      const typedRow = row as any;
+      return {
+        id: typedRow.id,
+        event_type: typedRow.event_type,
+        entity_id: typedRow.entity_id,
+        entity_type: typedRow.entity_type,
+        data: JSON.parse(typedRow.data),
+        timestamp: new Date(typedRow.timestamp),
+        user_id: typedRow.user_id,
+        session_id: typedRow.session_id,
+        metadata: typedRow.metadata ? JSON.parse(typedRow.metadata) : null
+      };
+    });
   }
 
   public async getEventCount(query: EventQuery): Promise<number> {
@@ -227,7 +230,7 @@ export class EventStore {
     }
 
     const stmt = this.db.prepare(sql);
-    const result = stmt.get(...params);
+    const result = stmt.get(...params) as any;
     return result.count;
   }
 
@@ -287,13 +290,16 @@ export class EventStore {
     const stmt = this.db.prepare(sql);
     const rows = stmt.all(...params);
 
-    return rows.map(row => ({
-      metric_name: row.metric_name,
-      value: row.value,
-      dimensions: row.dimensions ? JSON.parse(row.dimensions) : null,
-      timestamp: new Date(row.timestamp),
-      period: row.period
-    }));
+    return rows.map(row => {
+      const typedRow = row as any;
+      return {
+        metric_name: typedRow.metric_name,
+        value: typedRow.value,
+        dimensions: typedRow.dimensions ? JSON.parse(typedRow.dimensions) : null,
+        timestamp: new Date(typedRow.timestamp),
+        period: typedRow.period
+      };
+    });
   }
 
   public async clearOldEvents(olderThanDays: number = 90): Promise<number> {

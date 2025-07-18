@@ -7,7 +7,7 @@ import { Semaphore } from './Semaphore';
 import { ResourceManager, ResourceRequirement } from './ResourceManager';
 import { performance } from 'perf_hooks';
 import { Worker } from 'worker_threads';
-import LRU from 'lru-cache';
+import { LRUCache } from 'lru-cache';
 import { promisify } from 'util';
 import { setTimeout } from 'timers/promises';
 
@@ -79,7 +79,7 @@ export class TestQueueManager extends EventEmitter {
   private resourceManager: ResourceManager;
   private defaultConfiguration: TestConfiguration;
   private activeJobs: Map<string, ExecutionProgress> = new Map();
-  private testCaseCache: LRU<string, TestCase[]>;
+  private testCaseCache: LRUCache<string, TestCase[]>;
   private performanceMetrics: Map<string, number[]>;
   private connectionPool: any[];
   private maxConnections: number;
@@ -104,7 +104,7 @@ export class TestQueueManager extends EventEmitter {
     };
 
     // Initialize caching
-    this.testCaseCache = new LRU({
+    this.testCaseCache = new LRUCache({
       max: 1000,
       ttl: 1000 * 60 * 10 // 10 minutes
     });

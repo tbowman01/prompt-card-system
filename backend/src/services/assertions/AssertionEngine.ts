@@ -21,7 +21,7 @@ export interface AssertionContext {
   metadata?: Record<string, any>;
 }
 
-export interface EnhancedAssertionResult extends AssertionResult {
+export interface EnhancedAssertionResult {
   assertion: EnhancedAssertionType;
   passed: boolean;
   error?: string;
@@ -584,5 +584,4 @@ export class AssertionEngine {
   }
 }
 
-// Export singleton instance
-export const assertionEngine = new AssertionEngine();
+// The AssertionEngine class is exported for instantiation in index.ts

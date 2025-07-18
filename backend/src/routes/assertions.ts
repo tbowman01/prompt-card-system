@@ -1,6 +1,6 @@
 import express from 'express';
 import { llmService } from '../services/llmService';
-import { assertionEngine } from '../services/assertions/AssertionEngine';
+import { assertionEngine } from '../services/assertions';
 import { EnhancedAssertionType } from '../services/assertions/AssertionEngine';
 
 export const assertionRoutes = express.Router();
@@ -375,7 +375,7 @@ assertionRoutes.post('/register', async (req, res) => {
       })();
     `);
 
-    await assertionEngine.registerAssertionType(name, validator);
+    await assertionEngine.registerAssertionType(name, validator as any);
     
     res.json({
       success: true,
