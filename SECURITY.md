@@ -20,7 +20,7 @@ We provide security updates for the following versions:
 If you discover a security vulnerability, please report it responsibly:
 
 1. **Do NOT** create a public GitHub issue
-2. **Email** security reports to: [security@promptcard.io](mailto:security@promptcard.io)
+2. **Email** security reports to: [security@github.com](mailto:security@github.com)
 3. **Include** detailed information about the vulnerability
 4. **Provide** steps to reproduce the issue
 5. **Wait** for our response before public disclosure
@@ -202,7 +202,7 @@ We appreciate security researchers who help improve our security:
 
 ### Security Team
 
-- **Email**: security@promptcard.io
+- **Email**: security@github.com
 - **PGP Key**: [Available on request]
 - **Response Time**: 24 hours for acknowledgment
 
@@ -210,7 +210,7 @@ We appreciate security researchers who help improve our security:
 
 For critical security issues requiring immediate attention:
 
-- **Priority Email**: critical-security@promptcard.io
+- **Priority Email**: critical-security@github.com
 - **Response Time**: 4 hours for critical issues
 - **Escalation**: Automatic escalation for urgent matters
 
@@ -235,7 +235,7 @@ We track the following security metrics:
 
 ---
 
-**Last Updated**: 2024-01-18  
-**Next Review**: 2024-04-18
+**Last Updated**: 2025-07-18  
+**Next Review**: 2025-10-18
 
 This security policy is reviewed quarterly and updated as needed to reflect current security practices and threat landscape.

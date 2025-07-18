@@ -344,5 +344,5 @@ Track improvements with:
 
 **Scorecard Badge**: [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/tbowman01/prompt-card-system/badge)](https://api.securityscorecards.dev/projects/github.com/tbowman01/prompt-card-system)
 
-**Last Updated**: 2024-01-18  
-**Next Review**: 2024-02-18
+**Last Updated**: 2025-07-18  
+**Next Review**: 2025-08-18
