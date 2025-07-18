@@ -6,6 +6,7 @@ import { PerformanceCharts } from '@/components/Analytics/PerformanceCharts';
 import { CostTracker } from '@/components/Analytics/CostTracker';
 import { RealTimeMonitor } from '@/components/Analytics/RealTimeMonitor';
 import { Button } from '@/components/ui/Button';
+import { formatDateTime } from '@/lib/dateUtils';
 
 type TabType = 'overview' | 'performance' | 'costs' | 'realtime';
 
@@ -188,7 +189,7 @@ export default function AnalyticsPage() {
           <div className="flex items-center space-x-4">
             <span>Analytics Engine: Active</span>
             <span>•</span>
-            <span>Last Updated: {new Date().toLocaleString()}</span>
+            <span>Last Updated: {formatDateTime(new Date())}</span>
           </div>
           <div className="flex items-center space-x-4">
             <span>Data Retention: 90 days</span>

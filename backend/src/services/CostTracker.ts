@@ -31,85 +31,8 @@ export class CostTracker {
     };
     
     this.initializePricing();
-    this.initializeDatabase();
   }
 
-  /**
-   * Initialize database tables for cost tracking
-   */
-  private initializeDatabase(): void {
-    console.log('Initializing cost tracking database...');
-    
-    // Cost tracking data table
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS cost_tracking (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        execution_id TEXT NOT NULL,
-        model TEXT NOT NULL,
-        prompt_tokens INTEGER NOT NULL DEFAULT 0,
-        completion_tokens INTEGER NOT NULL DEFAULT 0,
-        total_tokens INTEGER NOT NULL DEFAULT 0,
-        cost_usd REAL NOT NULL DEFAULT 0,
-        execution_time_ms INTEGER NOT NULL DEFAULT 0,
-        test_case_id INTEGER,
-        prompt_card_id INTEGER,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (test_case_id) REFERENCES test_cases(id) ON DELETE CASCADE,
-        FOREIGN KEY (prompt_card_id) REFERENCES prompt_cards(id) ON DELETE CASCADE
-      )
-    `);
-
-    // Model pricing table
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS model_pricing (
-        model TEXT PRIMARY KEY,
-        prompt_token_cost REAL NOT NULL,
-        completion_token_cost REAL NOT NULL,
-        context_window INTEGER NOT NULL,
-        last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
-    // Budget alerts table
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS budget_alerts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        type TEXT NOT NULL CHECK (type IN ('daily', 'weekly', 'monthly', 'total')),
-        threshold REAL NOT NULL,
-        current_amount REAL DEFAULT 0,
-        percentage_used REAL DEFAULT 0,
-        status TEXT DEFAULT 'active' CHECK (status IN ('active', 'triggered', 'exceeded')),
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        triggered_at DATETIME
-      )
-    `);
-
-    // Cost optimization settings table
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS cost_optimization_settings (
-        id INTEGER PRIMARY KEY CHECK (id = 1),
-        enable_auto_optimization BOOLEAN DEFAULT 1,
-        cost_threshold REAL DEFAULT 10.0,
-        token_threshold INTEGER DEFAULT 100000,
-        model_preferences TEXT DEFAULT '[]',
-        prompt_optimization BOOLEAN DEFAULT 1,
-        batching_enabled BOOLEAN DEFAULT 1,
-        caching_enabled BOOLEAN DEFAULT 1,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
-    // Create indexes for better performance
-    db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_cost_tracking_execution_id ON cost_tracking(execution_id);
-      CREATE INDEX IF NOT EXISTS idx_cost_tracking_model ON cost_tracking(model);
-      CREATE INDEX IF NOT EXISTS idx_cost_tracking_created_at ON cost_tracking(created_at);
-      CREATE INDEX IF NOT EXISTS idx_cost_tracking_prompt_card_id ON cost_tracking(prompt_card_id);
-    `);
-
-    console.log('Cost tracking database initialized successfully');
-  }
 
   /**
    * Initialize model pricing data
