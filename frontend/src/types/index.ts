@@ -108,3 +108,56 @@ export interface RunTestsResponse {
   status: 'started' | 'completed'
   execution?: TestExecution
 }
+
+// Analytics Types
+export interface AnalyticsInsight {
+  id: string
+  type: 'trend' | 'anomaly' | 'comparison' | 'prediction'
+  title: string
+  description: string
+  severity: 'low' | 'medium' | 'high' | 'critical'
+  data: any
+  timestamp: Date
+  recommendations?: string[]
+}
+
+export interface DashboardMetrics {
+  realtime: {
+    activeTests: number
+    testsPerSecond: number
+    successRate: number
+    averageResponseTime: number
+    errorRate: number
+  }
+  historical: {
+    totalTests: number
+    totalExecutions: number
+    overallSuccessRate: number
+    averageExecutionTime: number
+    mostUsedModels: Array<{ model: string; count: number }>
+  }
+  trends: {
+    testsOverTime: Array<{ timestamp: Date; count: number }>
+    successRateOverTime: Array<{ timestamp: Date; rate: number }>
+    performanceOverTime: Array<{ timestamp: Date; avgTime: number }>
+  }
+  insights: AnalyticsInsight[]
+}
+
+export interface MetricValue {
+  name: string
+  value: number
+  timestamp: Date
+  labels?: Record<string, string>
+}
+
+export interface CostData {
+  totalCost: number
+  costByModel: Record<string, number>
+  costOverTime: Array<{ timestamp: Date; cost: number }>
+  tokenUsage: {
+    totalTokens: number
+    promptTokens: number
+    completionTokens: number
+  }
+}

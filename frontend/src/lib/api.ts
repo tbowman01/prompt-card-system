@@ -142,4 +142,45 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data || {}),
     }),
+
+  // Analytics
+  getDashboardMetrics: () => apiRequest('/analytics/dashboard'),
+  
+  getRealtimeMetrics: () => apiRequest('/analytics/realtime'),
+  
+  getHistoricalMetrics: () => apiRequest('/analytics/historical'),
+  
+  getTrends: (period?: 'hour' | 'day' | 'week' | 'month', limit?: number) => {
+    const params = new URLSearchParams();
+    if (period) params.set('period', period);
+    if (limit) params.set('limit', limit.toString());
+    const query = params.toString();
+    return apiRequest(`/analytics/trends${query ? `?${query}` : ''}`);
+  },
+  
+  getInsights: () => apiRequest('/analytics/insights'),
+  
+  recordTestExecution: (data: any) =>
+    apiRequest('/analytics/events/test-execution', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  
+  recordBatchExecution: (data: any) =>
+    apiRequest('/analytics/events/batch-execution', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  
+  recordModelUsage: (model: string, usage: any) =>
+    apiRequest('/analytics/events/model-usage', {
+      method: 'POST',
+      body: JSON.stringify({ model, usage }),
+    }),
+  
+  recordSystemMetrics: (metrics: any) =>
+    apiRequest('/analytics/events/system-metrics', {
+      method: 'POST',
+      body: JSON.stringify({ metrics }),
+    }),
 };

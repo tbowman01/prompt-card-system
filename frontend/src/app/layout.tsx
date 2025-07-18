@@ -32,6 +32,9 @@ export default function RootLayout({
                   <a href="/prompt-cards" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium">
                     Prompt Cards
                   </a>
+                  <a href="/analytics" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium">
+                    Analytics
+                  </a>
                   <a href="/yaml" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium">
                     YAML Import/Export
                   </a>
