@@ -3,6 +3,7 @@ const conventionalCommitsConfig = require('conventional-changelog-conventionalco
 const conventionalCommitTypes = require('conventional-commit-types');
 const parser = require('conventional-commits-parser').sync;
 const formatMessage = require('./formatMessage');
+const _ = require('lodash');
 
 const defaultTypes = Object.keys(conventionalCommitTypes.types);
 
@@ -48,13 +49,13 @@ module.exports = async function validatePrTitle(
   }
 
   function isUnknownScope(s) {
-    return scopes && !scopes.some((scope) => new RegExp(`^${scope}$`).test(s));
+    return scopes && !scopes.some((scope) => new RegExp(`^${_.escapeRegExp(scope)}$`).test(s));
   }
 
   function isDisallowedScope(s) {
     return (
       disallowScopes &&
-      disallowScopes.some((scope) => new RegExp(`^${scope}$`).test(s))
+      disallowScopes.some((scope) => new RegExp(`^${_.escapeRegExp(scope)}$`).test(s))
     );
   }
 
