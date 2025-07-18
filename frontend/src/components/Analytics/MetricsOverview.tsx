@@ -70,7 +70,7 @@ export const MetricsOverview: React.FC = () => {
         setLoading(true);
         setError(null);
         const data = await api.getDashboardMetrics();
-        setMetrics(data);
+        setMetrics(data as DashboardMetrics);
       } catch (err) {
         console.error('Error fetching metrics:', err);
         setError('Failed to load metrics');
