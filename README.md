@@ -6,7 +6,7 @@
 [![Security Scan](https://github.com/tbowman01/prompt-card-system/workflows/Security%20Scan/badge.svg)](https://github.com/tbowman01/prompt-card-system/actions/workflows/security-scan.yml)
 [![Code Quality](https://github.com/tbowman01/prompt-card-system/workflows/CodeQL/badge.svg)](https://github.com/tbowman01/prompt-card-system/actions/workflows/codeql.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Node.js](https://img.shields.io/badge/node.js-18%2B-green.svg)](https://nodejs.org)
+[![Node.js](https://img.shields.io/badge/node.js-20%2B-green.svg)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/typescript-5.0+-blue.svg)](https://www.typescriptlang.org)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://www.docker.com)
 [![Vulnerabilities](https://img.shields.io/badge/vulnerabilities-0-brightgreen.svg)](https://github.com/tbowman01/prompt-card-system/security/advisories)
@@ -124,7 +124,7 @@ A comprehensive prompt testing and evaluation system with advanced analytics, AI
 ## 🔧 Installation & Setup
 
 ### Prerequisites
-- Node.js 18+ 
+- Node.js 20+ 
 - npm or yarn
 - SQLite3
 - Redis (optional, for advanced features)

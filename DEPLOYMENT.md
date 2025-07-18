@@ -3,7 +3,7 @@
 ## 🚀 Production Deployment Checklist
 
 ### ✅ Prerequisites Complete
-- [x] Node.js 18+ installed
+- [x] Node.js 20+ installed
 - [x] Database initialized
 - [x] Environment variables configured
 - [x] Frontend built successfully

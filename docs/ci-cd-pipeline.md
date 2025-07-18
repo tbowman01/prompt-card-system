@@ -43,7 +43,7 @@ The Prompt Card System includes a comprehensive CI/CD pipeline built with GitHub
 - Daily scheduled runs
 
 **Features**:
-- Multi-node matrix testing (Node.js 18, 20)
+- Multi-node matrix testing (Node.js 20, 22)
 - Parallel backend and frontend testing
 - TypeScript compilation validation
 - Integration testing with PostgreSQL
@@ -309,6 +309,10 @@ The Prompt Card System includes a comprehensive CI/CD pipeline built with GitHub
 
 ### Environment Variables
 ```yaml
+# Global Environment
+NODE_VERSION: '20'  # Consistent Node.js version across all workflows
+POSTGRES_VERSION: '15'
+
 # Required Secrets
 DOCKER_USERNAME: Docker registry username
 DOCKER_PASSWORD: Docker registry password

@@ -26,6 +26,7 @@ Managed services deployment:
 
 ### Prerequisites
 - **Server**: 4+ CPU cores, 8GB+ RAM, 50GB+ storage
+- **Node.js**: Version 20+ (required for compatibility)
 - **Domain**: Configured domain name with SSL certificate
 - **Database**: PostgreSQL for production workloads
 - **Load Balancer**: For high availability (optional)
