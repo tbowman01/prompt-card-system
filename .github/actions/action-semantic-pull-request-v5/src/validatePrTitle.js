@@ -3,8 +3,7 @@ const conventionalCommitsConfig = require('conventional-changelog-conventionalco
 const conventionalCommitTypes = require('conventional-commit-types');
 const parser = require('conventional-commits-parser').sync;
 const formatMessage = require('./formatMessage');
-const _ = require('lodash');
-
+const _ = require('lodash'); // Added lodash for regex escaping
 const defaultTypes = Object.keys(conventionalCommitTypes.types);
 
 module.exports = async function validatePrTitle(
