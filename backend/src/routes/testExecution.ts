@@ -209,6 +209,8 @@ router.post('/prompt-cards/:id/execute-all', async (req, res) => {
         const llmResponse = await llmService.generate(prompt, model);
         const llmOutput = llmResponse.response;
 
+        const testExecutionTime = Date.now() - testStartTime;
+
         // Validate assertions
         const assertionResults = await llmService.validateAssertions(llmOutput, assertions, {
           prompt: prompt,
@@ -217,8 +219,6 @@ router.post('/prompt-cards/:id/execute-all', async (req, res) => {
           executionTime: testExecutionTime
         });
         const allAssertionsPassed = assertionResults.every(result => result.passed);
-
-        const testExecutionTime = Date.now() - testStartTime;
 
         // Store individual result
         db.prepare(`

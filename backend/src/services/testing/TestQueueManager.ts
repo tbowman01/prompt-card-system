@@ -5,6 +5,11 @@ import { llmService } from '../llmService';
 import { db } from '../../database/connection';
 import { Semaphore } from './Semaphore';
 import { ResourceManager, ResourceRequirement } from './ResourceManager';
+import { performance } from 'perf_hooks';
+import { Worker } from 'worker_threads';
+import LRU from 'lru-cache';
+import { promisify } from 'util';
+import { setTimeout } from 'timers/promises';
 
 export interface TestJob {
   test_execution_id: string;
@@ -74,12 +79,18 @@ export class TestQueueManager extends EventEmitter {
   private resourceManager: ResourceManager;
   private defaultConfiguration: TestConfiguration;
   private activeJobs: Map<string, ExecutionProgress> = new Map();
+  private testCaseCache: LRU<string, TestCase[]>;
+  private performanceMetrics: Map<string, number[]>;
+  private connectionPool: any[];
+  private maxConnections: number;
+  private batchProcessor: any;
+  private workerPool: Worker[];
 
   constructor(redisConfig?: Bull.QueueOptions['redis']) {
     super();
     
     this.defaultConfiguration = {
-      max_concurrent_tests: 3,
+      max_concurrent_tests: Math.min(8, require('os').cpus().length * 2), // Dynamic based on CPU cores
       timeout_per_test: 30000, // 30 seconds
       retry_failed_tests: true,
       max_retries: 2,
@@ -92,11 +103,26 @@ export class TestQueueManager extends EventEmitter {
       progress_updates: true
     };
 
-    // Initialize Redis queue
+    // Initialize caching
+    this.testCaseCache = new LRU({
+      max: 1000,
+      ttl: 1000 * 60 * 10 // 10 minutes
+    });
+    
+    this.performanceMetrics = new Map();
+    this.maxConnections = Math.min(10, require('os').cpus().length * 2);
+    this.connectionPool = [];
+    this.workerPool = [];
+
+    // Initialize Redis queue with optimized settings
     this.testQueue = new Bull('test-execution', {
       redis: redisConfig || {
         host: process.env.REDIS_HOST || 'localhost',
-        port: parseInt(process.env.REDIS_PORT || '6379')
+        port: parseInt(process.env.REDIS_PORT || '6379'),
+        maxRetriesPerRequest: 3,
+        retryDelayOnFailover: 100,
+        enableReadyCheck: false,
+        maxLoadingTimeout: 1000
       },
       defaultJobOptions: {
         removeOnComplete: 100,
@@ -106,18 +132,23 @@ export class TestQueueManager extends EventEmitter {
           type: 'exponential',
           delay: 2000
         }
+      },
+      settings: {
+        stalledInterval: 30000,
+        maxStalledCount: 1
       }
     });
 
-    // Initialize resource manager
+    // Initialize resource manager with better defaults
     this.resourceManager = new ResourceManager({
-      max_concurrent_tests: parseInt(process.env.MAX_CONCURRENT_TESTS || '10'),
+      max_concurrent_tests: parseInt(process.env.MAX_CONCURRENT_TESTS || '20'),
       max_cpu_percent: parseInt(process.env.MAX_CPU_PERCENT || '80'),
       max_memory_mb: parseInt(process.env.MAX_MEMORY_MB || '4096')
     });
 
     this.setupJobProcessors();
     this.setupEventHandlers();
+    this.initializeOptimizations();
   }
 
   /**
@@ -225,15 +256,18 @@ export class TestQueueManager extends EventEmitter {
   }
 
   /**
-   * Setup job processors
+   * Setup job processors with optimized concurrency
    */
   private setupJobProcessors(): void {
-    // Main test execution processor
-    this.testQueue.process('execute-tests', 3, async (job: Bull.Job<TestJob>) => {
+    // Main test execution processor with dynamic concurrency
+    const concurrency = Math.min(5, require('os').cpus().length);
+    
+    this.testQueue.process('execute-tests', concurrency, async (job: Bull.Job<TestJob>) => {
       const { data } = job;
+      const startTime = performance.now();
       
       try {
-        // Reserve resources
+        // Reserve resources with priority handling
         await this.resourceManager.reserveResources(data.test_execution_id, {
           cpu_percent: data.configuration.resource_limits.cpu_percent,
           memory_mb: data.configuration.resource_limits.memory_mb,
@@ -244,8 +278,8 @@ export class TestQueueManager extends EventEmitter {
         // Initialize progress tracking
         this.updateProgress(data.test_execution_id, 0, 'Starting test execution...', 0, data.test_case_ids.length);
 
-        // Execute tests
-        const results = await this.executeTestsParallel(data, (progress) => {
+        // Execute tests with optimized parallel processing
+        const results = await this.executeTestsParallelOptimized(data, (progress) => {
           this.updateProgress(
             data.test_execution_id,
             progress.percent,
@@ -259,6 +293,10 @@ export class TestQueueManager extends EventEmitter {
 
         // Update final progress
         this.updateProgress(data.test_execution_id, 100, 'Test execution completed', data.test_case_ids.length, data.test_case_ids.length);
+
+        // Track performance
+        const executionTime = performance.now() - startTime;
+        this.trackPerformance('executeTests', executionTime);
 
         this.emit('jobCompleted', { executionId: data.test_execution_id, results });
         return results;
@@ -436,9 +474,16 @@ export class TestQueueManager extends EventEmitter {
   }
 
   /**
-   * Load test cases from database
+   * Load test cases from database with caching
    */
   private async loadTestCases(testCaseIds: number[]): Promise<TestCase[]> {
+    const cacheKey = testCaseIds.sort().join(',');
+    const cached = this.testCaseCache.get(cacheKey);
+    
+    if (cached) {
+      return cached;
+    }
+    
     const placeholders = testCaseIds.map(() => '?').join(',');
     const query = `
       SELECT 
@@ -457,6 +502,9 @@ export class TestQueueManager extends EventEmitter {
       throw new Error(`Some test cases not found. Expected ${testCaseIds.length}, got ${testCases.length}`);
     }
 
+    // Cache the result
+    this.testCaseCache.set(cacheKey, testCases);
+    
     return testCases;
   }
 
@@ -548,6 +596,318 @@ export class TestQueueManager extends EventEmitter {
     });
   }
 
+  /**
+   * Optimized parallel test execution
+   */
+  private async executeTestsParallelOptimized(
+    job: TestJob,
+    progressCallback: (progress: {
+      percent: number;
+      message: string;
+      current_test: number;
+      total_tests: number;
+      completed_tests?: number;
+      failed_tests?: number;
+    }) => void
+  ): Promise<TestExecutionResult[]> {
+    const { test_case_ids, model, configuration } = job;
+    
+    // Load test cases with caching
+    const testCases = await this.loadTestCases(test_case_ids);
+    progressCallback({ percent: 10, message: 'Test cases loaded', current_test: 0, total_tests: testCases.length });
+
+    const results: TestExecutionResult[] = new Array(testCases.length);
+    const semaphore = new Semaphore(configuration.max_concurrent_tests);
+    let completedTests = 0;
+    let failedTests = 0;
+
+    // Process tests in batches for better memory management
+    const batchSize = Math.min(configuration.max_concurrent_tests * 2, 20);
+    const batches = [];
+    
+    for (let i = 0; i < testCases.length; i += batchSize) {
+      batches.push(testCases.slice(i, i + batchSize));
+    }
+
+    for (const batch of batches) {
+      const batchPromises = batch.map(async (testCase, batchIndex) => {
+        const release = await semaphore.acquire();
+        const globalIndex = batches.indexOf(batch) * batchSize + batchIndex;
+        
+        try {
+          const result = await this.executeSingleTestOptimized(testCase, model, configuration, job.test_execution_id);
+          results[globalIndex] = result;
+          completedTests++;
+          
+          if (!result.passed) {
+            failedTests++;
+            
+            // Stop on first failure if configured
+            if (configuration.stop_on_first_failure) {
+              throw new Error(`Test failed: ${testCase.name}`);
+            }
+          }
+
+          const progress = ((completedTests) / testCases.length) * 80 + 10;
+          progressCallback({
+            percent: progress,
+            message: `Completed test ${completedTests}/${testCases.length}`,
+            current_test: globalIndex + 1,
+            total_tests: testCases.length,
+            completed_tests: completedTests,
+            failed_tests: failedTests
+          });
+
+        } catch (error) {
+          failedTests++;
+          const errorResult: TestExecutionResult = {
+            execution_id: `${job.test_execution_id}-${testCase.id}`,
+            test_case_id: testCase.id,
+            passed: false,
+            llm_output: `ERROR: ${error.message}`,
+            assertion_results: [],
+            execution_time_ms: 0,
+            model,
+            prompt_used: 'Error occurred before prompt execution',
+            created_at: new Date(),
+            metadata: { error: error.message }
+          };
+          results[globalIndex] = errorResult;
+          
+          if (configuration.stop_on_first_failure) {
+            throw error;
+          }
+        } finally {
+          release();
+        }
+      });
+
+      await Promise.all(batchPromises);
+      
+      // Small delay between batches to prevent overwhelming the system
+      if (batches.indexOf(batch) < batches.length - 1) {
+        await setTimeout(100);
+      }
+    }
+
+    progressCallback({ percent: 95, message: 'Storing results...', current_test: testCases.length, total_tests: testCases.length });
+
+    // Store results in database using batch insertion
+    await this.storeResultsOptimized(job.test_execution_id, results);
+
+    return results;
+  }
+  
+  /**
+   * Execute a single test case with optimizations
+   */
+  private async executeSingleTestOptimized(
+    testCase: TestCase,
+    model: string,
+    configuration: TestConfiguration,
+    executionId: string
+  ): Promise<TestExecutionResult> {
+    const startTime = performance.now();
+    const testExecutionId = `${executionId}-${testCase.id}`;
+
+    try {
+      // Parse JSON fields with error handling
+      let inputVariables, assertions;
+      try {
+        inputVariables = JSON.parse(testCase.input_variables);
+        assertions = JSON.parse(testCase.assertions || '[]');
+      } catch (parseError) {
+        throw new Error(`Invalid JSON in test case ${testCase.id}: ${parseError.message}`);
+      }
+
+      // Substitute variables in prompt template
+      const prompt = llmService.substituteVariables(testCase.prompt_template, inputVariables);
+
+      // Execute with timeout using Promise.race
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Test execution timeout')), configuration.timeout_per_test);
+      });
+
+      const executionPromise = llmService.generate(prompt, model);
+      const llmResponse = await Promise.race([executionPromise, timeoutPromise]);
+      const llmOutput = llmResponse.response;
+
+      // Validate assertions
+      const assertionResults = llmService.validateAssertions(llmOutput, assertions);
+      const allAssertionsPassed = assertionResults.every(result => result.passed);
+
+      const executionTime = performance.now() - startTime;
+
+      const result: TestExecutionResult = {
+        execution_id: testExecutionId,
+        test_case_id: testCase.id,
+        passed: allAssertionsPassed,
+        llm_output: llmOutput,
+        assertion_results: assertionResults,
+        execution_time_ms: Math.round(executionTime),
+        model: llmResponse.model,
+        prompt_used: prompt,
+        created_at: new Date(),
+        metadata: {
+          total_tokens: llmResponse.eval_count || 0,
+          prompt_tokens: llmResponse.prompt_eval_count || 0,
+          completion_tokens: (llmResponse.eval_count || 0) - (llmResponse.prompt_eval_count || 0),
+          cache_hit: false // Could be enhanced with actual cache hit detection
+        }
+      };
+
+      return result;
+
+    } catch (error) {
+      const executionTime = performance.now() - startTime;
+      return {
+        execution_id: testExecutionId,
+        test_case_id: testCase.id,
+        passed: false,
+        llm_output: `ERROR: ${error.message}`,
+        assertion_results: [],
+        execution_time_ms: Math.round(executionTime),
+        model,
+        prompt_used: 'Error occurred before prompt execution',
+        created_at: new Date(),
+        metadata: { error: error.message }
+      };
+    }
+  }
+  
+  /**
+   * Store test results with optimized batch insertion
+   */
+  private async storeResultsOptimized(executionId: string, results: TestExecutionResult[]): Promise<void> {
+    const transaction = db.transaction((results: TestExecutionResult[]) => {
+      const insertStmt = db.prepare(`
+        INSERT INTO test_results (
+          test_case_id, 
+          execution_id, 
+          llm_output, 
+          passed, 
+          assertion_results, 
+          execution_time_ms,
+          model,
+          created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      for (const result of results) {
+        insertStmt.run(
+          result.test_case_id,
+          result.execution_id,
+          result.llm_output,
+          result.passed ? 1 : 0,
+          JSON.stringify(result.assertion_results),
+          result.execution_time_ms,
+          result.model,
+          result.created_at.toISOString()
+        );
+      }
+    });
+
+    transaction(results);
+  }
+  
+  /**
+   * Initialize performance optimizations
+   */
+  private initializeOptimizations(): void {
+    // Pre-warm database connections
+    this.preWarmConnections();
+    
+    // Set up periodic cache cleanup
+    setInterval(() => {
+      this.cleanupCaches();
+    }, 1000 * 60 * 5); // Every 5 minutes
+    
+    console.log('Test queue optimizations initialized');
+  }
+  
+  /**
+   * Pre-warm database connections
+   */
+  private async preWarmConnections(): Promise<void> {
+    try {
+      // Execute a simple query to warm up the connection
+      db.prepare('SELECT 1').get();
+      console.log('Database connections pre-warmed');
+    } catch (error) {
+      console.warn('Failed to pre-warm database connections:', error.message);
+    }
+  }
+  
+  /**
+   * Clean up caches periodically
+   */
+  private cleanupCaches(): void {
+    // Clean up old performance metrics
+    for (const [key, metrics] of this.performanceMetrics) {
+      if (metrics.length > 1000) {
+        this.performanceMetrics.set(key, metrics.slice(-500));
+      }
+    }
+    
+    // Log cache statistics
+    console.log(`Cache stats - Test cases: ${this.testCaseCache.size}/${this.testCaseCache.max}`);
+  }
+  
+  /**
+   * Track performance metrics
+   */
+  private trackPerformance(operation: string, duration: number): void {
+    if (!this.performanceMetrics.has(operation)) {
+      this.performanceMetrics.set(operation, []);
+    }
+    
+    const metrics = this.performanceMetrics.get(operation)!;
+    metrics.push(duration);
+    
+    // Keep only last 100 measurements
+    if (metrics.length > 100) {
+      metrics.shift();
+    }
+    
+    // Log slow operations
+    if (duration > 60000) { // 1 minute
+      console.warn(`Slow test execution: ${operation} took ${duration.toFixed(2)}ms`);
+    }
+  }
+  
+  /**
+   * Get performance statistics
+   */
+  public getPerformanceStats(): Record<string, { avg: number; max: number; min: number; count: number }> {
+    const stats: Record<string, { avg: number; max: number; min: number; count: number }> = {};
+    
+    for (const [operation, metrics] of this.performanceMetrics) {
+      if (metrics.length > 0) {
+        const avg = metrics.reduce((sum, time) => sum + time, 0) / metrics.length;
+        const max = Math.max(...metrics);
+        const min = Math.min(...metrics);
+        
+        stats[operation] = {
+          avg: Math.round(avg),
+          max: Math.round(max),
+          min: Math.round(min),
+          count: metrics.length
+        };
+      }
+    }
+    
+    return stats;
+  }
+  
+  /**
+   * Clear caches and metrics
+   */
+  public clearCaches(): void {
+    this.testCaseCache.clear();
+    this.performanceMetrics.clear();
+    console.log('Test queue caches cleared');
+  }
+  
   /**
    * Graceful shutdown
    */

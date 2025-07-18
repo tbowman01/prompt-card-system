@@ -1,6 +1,8 @@
 import { EventStore, AnalyticsEvent } from './EventStore';
 import { initializeDatabase } from '../../database/connection';
 import { Database } from 'better-sqlite3';
+import { LRUCache } from 'lru-cache';
+import { performance } from 'perf_hooks';
 
 export interface MetricDefinition {
   name: string;
@@ -55,10 +57,28 @@ export class AnalyticsEngine {
   private eventStore: EventStore;
   private db: Database;
   private static instance: AnalyticsEngine;
+  private queryCache: LRUCache<string, any>;
+  private preparedStatements: Map<string, any>;
+  private performanceMetrics: Map<string, number[]>;
 
   private constructor() {
     this.eventStore = EventStore.getInstance();
     this.db = initializeDatabase();
+    
+    // Initialize performance optimizations
+    this.queryCache = new LRUCache({
+      max: 1000,
+      ttl: 1000 * 60 * 5 // 5 minutes cache
+    });
+    
+    this.preparedStatements = new Map();
+    this.performanceMetrics = new Map();
+    
+    // Pre-compile frequently used queries
+    this.prepareOptimizedQueries();
+    
+    // Set up database optimizations
+    this.optimizeDatabase();
   }
 
   public static getInstance(): AnalyticsEngine {
@@ -159,6 +179,13 @@ export class AnalyticsEngine {
 
   // Metrics calculation methods
   public async calculateRealtimeMetrics(): Promise<DashboardMetrics['realtime']> {
+    const cacheKey = 'realtime_metrics';
+    const cached = this.queryCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    
+    const startTime = performance.now();
     const now = new Date();
     const oneMinuteAgo = new Date(now.getTime() - 60 * 1000);
 
@@ -192,16 +219,32 @@ export class AnalyticsEngine {
       : 0;
     const errorRate = 1 - successRate;
 
-    return {
+    const result = {
       activeTests,
       testsPerSecond,
       successRate,
       averageResponseTime,
       errorRate
     };
+    
+    // Cache result with shorter TTL for real-time data
+    this.queryCache.set(cacheKey, result, { ttl: 1000 * 30 }); // 30 seconds
+    
+    // Track performance
+    const executionTime = performance.now() - startTime;
+    this.trackQueryPerformance('calculateRealtimeMetrics', executionTime);
+    
+    return result;
   }
 
   public async calculateHistoricalMetrics(): Promise<DashboardMetrics['historical']> {
+    const cacheKey = 'historical_metrics';
+    const cached = this.queryCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    
+    const startTime = performance.now();
     // Get total tests from database
     const totalTestsQuery = this.db.prepare(`SELECT COUNT(*) as count FROM test_results`);
     const totalTests = totalTestsQuery.get()?.count || 0;
@@ -247,19 +290,35 @@ export class AnalyticsEngine {
       .slice(0, 10)
       .map(([model, count]) => ({ model, count }));
 
-    return {
+    const result = {
       totalTests,
       totalExecutions,
       overallSuccessRate,
       averageExecutionTime: avgTime,
       mostUsedModels
     };
+    
+    // Cache result with longer TTL for historical data
+    this.queryCache.set(cacheKey, result, { ttl: 1000 * 60 * 10 }); // 10 minutes
+    
+    // Track performance
+    const executionTime = performance.now() - startTime;
+    this.trackQueryPerformance('calculateHistoricalMetrics', executionTime);
+    
+    return result;
   }
 
   public async calculateTrends(
     period: 'hour' | 'day' | 'week' | 'month' = 'day',
     limit: number = 30
   ): Promise<DashboardMetrics['trends']> {
+    const cacheKey = `trends_${period}_${limit}`;
+    const cached = this.queryCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    
+    const startTime = performance.now();
     const now = new Date();
     const startTime = new Date();
     
@@ -307,11 +366,21 @@ export class AnalyticsEngine {
         : 0
     }));
 
-    return {
+    const result = {
       testsOverTime,
       successRateOverTime,
       performanceOverTime
     };
+    
+    // Cache result with appropriate TTL based on period
+    const ttl = period === 'hour' ? 1000 * 60 * 5 : 1000 * 60 * 30; // 5 or 30 minutes
+    this.queryCache.set(cacheKey, result, { ttl });
+    
+    // Track performance
+    const executionTime = performance.now() - startTime;
+    this.trackQueryPerformance('calculateTrends', executionTime);
+    
+    return result;
   }
 
   public async generateInsights(): Promise<AnalyticsInsight[]> {
@@ -460,5 +529,174 @@ export class AnalyticsEngine {
         return { timestamp, events };
       })
       .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  }
+  
+  /**
+   * Prepare optimized SQL queries for better performance
+   */
+  private prepareOptimizedQueries(): void {
+    // Optimized query for active tests with indexes
+    this.preparedStatements.set('activeTests', this.db.prepare(`
+      SELECT COUNT(*) as count
+      FROM test_results
+      WHERE created_at >= datetime('now', '-5 minutes')
+      AND execution_id NOT IN (
+        SELECT DISTINCT execution_id 
+        FROM test_results 
+        WHERE created_at >= datetime('now', '-5 minutes')
+        GROUP BY execution_id
+        HAVING COUNT(*) > 1
+      )
+    `));
+    
+    // Optimized query for total tests with covering index
+    this.preparedStatements.set('totalTests', this.db.prepare(`
+      SELECT COUNT(*) as count FROM test_results
+    `));
+    
+    // Optimized query for total executions using distinct
+    this.preparedStatements.set('totalExecutions', this.db.prepare(`
+      SELECT COUNT(DISTINCT execution_id) as count FROM test_results
+    `));
+    
+    // Optimized query for success rate with index hint
+    this.preparedStatements.set('successRate', this.db.prepare(`
+      SELECT 
+        COUNT(*) as total,
+        SUM(CASE WHEN passed = 1 THEN 1 ELSE 0 END) as passed
+      FROM test_results
+      WHERE created_at >= ?
+    `));
+    
+    // Optimized query for average execution time
+    this.preparedStatements.set('avgExecutionTime', this.db.prepare(`
+      SELECT AVG(execution_time_ms) as avg_time 
+      FROM test_results
+      WHERE execution_time_ms > 0
+    `));
+  }
+  
+  /**
+   * Optimize database settings for performance
+   */
+  private optimizeDatabase(): void {
+    // Set WAL mode for better concurrent performance
+    this.db.pragma('journal_mode = WAL');
+    
+    // Optimize memory usage
+    this.db.pragma('cache_size = 10000');
+    this.db.pragma('temp_store = memory');
+    
+    // Optimize synchronous mode for better performance
+    this.db.pragma('synchronous = NORMAL');
+    
+    // Enable query planner optimization
+    this.db.pragma('optimize');
+    
+    // Create additional performance indexes
+    this.createPerformanceIndexes();
+  }
+  
+  /**
+   * Create additional indexes for better query performance
+   */
+  private createPerformanceIndexes(): void {
+    try {
+      // Composite index for time-based queries
+      this.db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_test_results_created_at_passed 
+        ON test_results(created_at, passed);
+      `);
+      
+      // Composite index for execution time analysis
+      this.db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_test_results_execution_time 
+        ON test_results(execution_time_ms, created_at) 
+        WHERE execution_time_ms > 0;
+      `);
+      
+      // Index for model performance analysis
+      this.db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_test_results_model_performance 
+        ON test_results(model, passed, execution_time_ms);
+      `);
+      
+      // Covering index for execution ID queries
+      this.db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_test_results_execution_id_covering 
+        ON test_results(execution_id, created_at, passed);
+      `);
+      
+      console.log('Performance indexes created successfully');
+    } catch (error) {
+      console.warn('Some performance indexes already exist:', error.message);
+    }
+  }
+  
+  /**
+   * Track query performance for optimization
+   */
+  private trackQueryPerformance(queryName: string, executionTime: number): void {
+    if (!this.performanceMetrics.has(queryName)) {
+      this.performanceMetrics.set(queryName, []);
+    }
+    
+    const metrics = this.performanceMetrics.get(queryName)!;
+    metrics.push(executionTime);
+    
+    // Keep only last 100 measurements
+    if (metrics.length > 100) {
+      metrics.shift();
+    }
+    
+    // Log slow queries
+    if (executionTime > 100) {
+      console.warn(`Slow query detected: ${queryName} took ${executionTime.toFixed(2)}ms`);
+    }
+  }
+  
+  /**
+   * Get query performance statistics
+   */
+  public getQueryPerformanceStats(): Record<string, { avg: number; max: number; min: number; count: number }> {
+    const stats: Record<string, { avg: number; max: number; min: number; count: number }> = {};
+    
+    for (const [queryName, metrics] of this.performanceMetrics) {
+      if (metrics.length > 0) {
+        const avg = metrics.reduce((sum, time) => sum + time, 0) / metrics.length;
+        const max = Math.max(...metrics);
+        const min = Math.min(...metrics);
+        
+        stats[queryName] = {
+          avg: Math.round(avg * 100) / 100,
+          max: Math.round(max * 100) / 100,
+          min: Math.round(min * 100) / 100,
+          count: metrics.length
+        };
+      }
+    }
+    
+    return stats;
+  }
+  
+  /**
+   * Clear cache and performance metrics
+   */
+  public clearCache(): void {
+    this.queryCache.clear();
+    this.performanceMetrics.clear();
+    console.log('Analytics cache and performance metrics cleared');
+  }
+  
+  /**
+   * Get cache statistics
+   */
+  public getCacheStats(): { size: number; max: number; hitRate: number } {
+    return {
+      size: this.queryCache.size,
+      max: this.queryCache.max,
+      hitRate: this.queryCache.calculatedSize > 0 ? 
+        (this.queryCache.calculatedSize - this.queryCache.size) / this.queryCache.calculatedSize : 0
+    };
   }
 }

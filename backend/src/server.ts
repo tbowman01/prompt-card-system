@@ -14,6 +14,13 @@ import { testExecutionRoutes } from './routes/testExecution';
 import { parallelTestExecutionRoutes } from './routes/parallelTestExecution';
 import { yamlRoutes } from './routes/yaml';
 import { assertionRoutes } from './routes/assertions';
+import { analyticsRoutes } from './routes/analytics';
+import optimizationRoutes from './routes/optimization';
+import { reportRoutes } from './routes/reports';
+import performanceRoutes from './routes/performance';
+import { initializeOptimizationServices } from './services/optimization';
+import { performanceMonitor } from './services/performance/PerformanceMonitor';
+import { ProgressService } from './services/websocket/ProgressService';
 import { errorHandler } from './middleware/errorHandler';
 
 dotenv.config();
@@ -41,6 +48,12 @@ llmService.initialize().catch(error => {
   // Continue without enhanced assertions if initialization fails
 });
 
+// Initialize AI-powered optimization services
+initializeOptimizationServices().catch(error => {
+  console.error('Failed to initialize optimization services:', error);
+  // Continue without optimization services if initialization fails
+});
+
 // Setup WebSocket server
 const io = new SocketIOServer(server, {
   cors: {
@@ -50,6 +63,10 @@ const io = new SocketIOServer(server, {
   }
 });
 
+// Initialize performance monitoring
+const progressService = new ProgressService(io);
+performanceMonitor.startMonitoring(5000); // Monitor every 5 seconds
+
 // Routes
 app.use('/api/health', healthRoutes);
 app.use('/api/prompt-cards', promptCardRoutes);
@@ -58,6 +75,10 @@ app.use('/api/test-cases', testExecutionRoutes); // Test execution routes
 app.use('/api/parallel-test-execution', parallelTestExecutionRoutes); // Parallel test execution routes
 app.use('/api/yaml', yamlRoutes);
 app.use('/api/assertions', assertionRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/optimization', optimizationRoutes);
+app.use('/api/reports', reportRoutes);
+app.use('/api/performance', performanceRoutes);
 
 // Error handling middleware
 app.use(errorHandler);
@@ -70,6 +91,9 @@ server.listen(PORT, () => {
   console.log(`Ollama URL: ${process.env.OLLAMA_BASE_URL}`);
   console.log(`WebSocket server initialized`);
   console.log(`Parallel test execution system ready`);
+  console.log(`AI-powered prompt optimization services active`);
+  console.log(`Performance monitoring active`);
+  console.log(`Performance API available at /api/performance`);
 });
 
 export default app;
