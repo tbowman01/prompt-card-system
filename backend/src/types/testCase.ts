@@ -17,7 +17,10 @@ export interface CreateTestCaseRequest {
 }
 
 export interface AssertionType {
-  type: 'contains' | 'not-contains' | 'equals' | 'not-equals' | 'regex' | 'length';
-  value: string | number;
+  type: 'contains' | 'not-contains' | 'equals' | 'not-equals' | 'regex' | 'length' | 
+        'semantic-similarity' | 'custom' | 'json-schema' | 'sentiment' | 'language' | 'toxicity';
+  value: string | number | object;
   description?: string;
+  threshold?: number; // For semantic similarity, sentiment, etc.
+  config?: Record<string, any>; // Additional configuration
 }

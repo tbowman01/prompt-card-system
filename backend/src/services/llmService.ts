@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { assertionEngine, AssertionContext, EnhancedAssertionType, EnhancedAssertionResult } from './assertions/AssertionEngine';
 
 export interface LLMResponse {
   model: string;
@@ -29,7 +30,7 @@ export interface LLMRequest {
 
 class LLMService {
   private baseUrl: string;
-  private defaultModel: string;
+  public defaultModel: string;
 
   constructor() {
     this.baseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
@@ -111,17 +112,55 @@ class LLMService {
   }
 
   /**
-   * Validate assertions against LLM output
+   * Initialize the LLM service with enhanced assertion engine
    */
-  validateAssertions(output: string, assertions: Array<{
-    type: 'contains' | 'not-contains' | 'equals' | 'not-equals' | 'regex' | 'length';
-    value: string | number;
-    description?: string;
-  }>): Array<{
-    assertion: any;
-    passed: boolean;
-    error?: string;
-  }> {
+  async initialize(): Promise<void> {
+    try {
+      console.log('Initializing LLM Service with Enhanced Assertion Engine...');
+      await assertionEngine.initialize();
+      console.log('✅ LLM Service initialized successfully');
+    } catch (error) {
+      console.error('❌ Failed to initialize LLM Service:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Validate assertions against LLM output using enhanced assertion engine
+   */
+  async validateAssertions(
+    output: string, 
+    assertions: EnhancedAssertionType[],
+    context?: {
+      prompt?: string;
+      variables?: Record<string, any>;
+      model?: string;
+      executionTime?: number;
+    }
+  ): Promise<EnhancedAssertionResult[]> {
+    try {
+      const assertionContext: AssertionContext = {
+        prompt: context?.prompt || '',
+        variables: context?.variables || {},
+        model: context?.model || this.defaultModel,
+        executionTime: context?.executionTime || 0
+      };
+
+      return await assertionEngine.validateAssertions(output, assertions, assertionContext);
+    } catch (error) {
+      console.error('Error validating assertions:', error);
+      // Fallback to basic validation for compatibility
+      return this.validateAssertionsBasic(output, assertions);
+    }
+  }
+
+  /**
+   * Fallback basic assertion validation for compatibility
+   */
+  private async validateAssertionsBasic(
+    output: string, 
+    assertions: EnhancedAssertionType[]
+  ): Promise<EnhancedAssertionResult[]> {
     return assertions.map(assertion => {
       try {
         let passed = false;
@@ -173,7 +212,7 @@ class LLMService {
             return {
               assertion,
               passed: false,
-              error: `Unknown assertion type: ${assertion.type}`
+              error: `Unsupported assertion type in basic validation: ${assertion.type}`
             };
         }
 
@@ -185,10 +224,29 @@ class LLMService {
         return {
           assertion,
           passed: false,
-          error: error instanceof Error ? error.message : 'Assertion validation failed'
+          error: error instanceof Error ? error.message : 'Basic assertion validation failed'
         };
       }
     });
+  }
+
+  /**
+   * Get available assertion types from the engine
+   */
+  getAvailableAssertionTypes(): string[] {
+    return assertionEngine.getRegisteredTypes();
+  }
+
+  /**
+   * Get assertion execution statistics
+   */
+  getAssertionStatistics(): {
+    totalAssertions: number;
+    successfulAssertions: number;
+    failedAssertions: number;
+    averageExecutionTime: number;
+  } {
+    return assertionEngine.getStatistics();
   }
 }
 
