@@ -21,7 +21,7 @@ export class ProgressService extends EventEmitter {
   private io: SocketIOServer;
   private connectedClients: Map<string, Set<string>> = new Map(); // socketId -> subscribed executionIds
   private messageQueue: Map<string, any[]> = new Map(); // Room -> queued messages
-  private progressCache: LRU<string, ExecutionProgress>;
+  private progressCache: LRUCache<string, ExecutionProgress>;
   private performanceMetrics: Map<string, number[]>;
   private batchTimer: NodeJS.Timeout | null = null;
   private compressionEnabled: boolean;
@@ -33,7 +33,7 @@ export class ProgressService extends EventEmitter {
     this.io = io;
     
     // Initialize performance optimizations
-    this.progressCache = new LRU({
+    this.progressCache = new LRUCache({
       max: 1000,
       ttl: 1000 * 60 * 5 // 5 minutes
     });

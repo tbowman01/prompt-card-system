@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { assertionEngine, AssertionContext, EnhancedAssertionType, EnhancedAssertionResult } from './assertions/AssertionEngine';
+import { assertionEngine, AssertionContext, EnhancedAssertionType, EnhancedAssertionResult } from './assertions';
 
 export interface LLMResponse {
   model: string;

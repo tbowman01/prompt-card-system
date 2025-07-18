@@ -330,7 +330,7 @@ export class ReportService extends EventEmitter {
     
     // Get total count
     const countQuery = query.replace(/SELECT \* FROM/, 'SELECT COUNT(*) as count FROM').replace(/ORDER BY.*$/, '');
-    const totalResult = this.db.prepare(countQuery).get(...params.slice(0, -2));
+    const totalResult = this.db.prepare(countQuery).get(...params.slice(0, -2)) as any;
     const total = totalResult?.count || 0;
 
     return { reports, total };

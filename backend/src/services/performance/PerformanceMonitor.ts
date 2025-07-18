@@ -2,7 +2,7 @@ import { performance, PerformanceObserver } from 'perf_hooks';
 import { EventEmitter } from 'events';
 import { promisify } from 'util';
 import * as os from 'os';
-import LRU from 'lru-cache';
+import { LRUCache } from 'lru-cache';
 
 export interface PerformanceMetric {
   name: string;
@@ -65,7 +65,7 @@ export class PerformanceMonitor extends EventEmitter {
   private metrics: Map<string, PerformanceMetric[]>;
   private alerts: Map<string, PerformanceAlert>;
   private thresholds: Map<string, { warning: number; critical: number }>;
-  private cache: LRU<string, any>;
+  private cache: LRUCache<string, any>;
   private observer: PerformanceObserver | null = null;
   private intervalId: NodeJS.Timeout | null = null;
   private isMonitoring: boolean = false;
@@ -80,7 +80,7 @@ export class PerformanceMonitor extends EventEmitter {
     this.startTime = Date.now();
     
     // Initialize cache for storing computed metrics
-    this.cache = new LRU({
+    this.cache = new LRUCache({
       max: 1000,
       ttl: 1000 * 60 * 5 // 5 minutes
     });
@@ -111,7 +111,7 @@ export class PerformanceMonitor extends EventEmitter {
 
     // Start Node.js performance monitoring
     if (this.observer) {
-      this.observer.observe({ entryTypes: ['measure', 'mark', 'navigation', 'resource'] });
+      this.observer.observe({ entryTypes: ['measure', 'mark', 'resource'] });
     }
 
     console.log(`Performance monitoring started with ${intervalMs}ms interval`);
