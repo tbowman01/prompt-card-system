@@ -7,6 +7,7 @@ import { SearchInput } from '@/components/ui/SearchInput';
 import { Button } from '@/components/ui/Button';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { Badge } from '@/components/ui/Badge';
+import { formatDate } from '@/lib/dateUtils';
 
 interface PaginationInfo {
   page: number;
@@ -216,7 +217,7 @@ export default function PromptCardList() {
                     )}
                   </div>
                   <span className="text-xs">
-                    {new Date(card.updated_at).toLocaleDateString()}
+                    {formatDate(card.updated_at)}
                   </span>
                 </div>
               </div>
