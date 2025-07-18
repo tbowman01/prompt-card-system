@@ -1,4 +1,4 @@
-import Database, { type Database as DatabaseType } from 'better-sqlite3';
+import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 
@@ -10,7 +10,7 @@ if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }
 
-export const db: DatabaseType = new Database(DATABASE_PATH, {
+export const db: any = new Database(DATABASE_PATH, {
   verbose: process.env.NODE_ENV === 'development' ? console.log : undefined
 });
 
@@ -18,7 +18,7 @@ export const db: DatabaseType = new Database(DATABASE_PATH, {
 db.pragma('foreign_keys = ON');
 
 // Initialize database tables
-export function initializeDatabase() {
+export function initializeDatabase(): any {
   console.log('Initializing database...');
   
   // Create prompt_cards table
@@ -48,18 +48,39 @@ export function initializeDatabase() {
     )
   `);
 
-  // Create test_results table (optional for MVP)
+  // Create enhanced test_results table for Phase 4
   db.exec(`
     CREATE TABLE IF NOT EXISTS test_results (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       test_case_id INTEGER NOT NULL,
       execution_id TEXT NOT NULL,
-      llm_output TEXT NOT NULL,
+      model TEXT NOT NULL,
+      response TEXT NOT NULL,
       passed BOOLEAN NOT NULL,
-      assertion_results TEXT DEFAULT '[]', -- JSON array
+      assertions TEXT DEFAULT '[]', -- JSON array of assertion results
       execution_time_ms INTEGER,
+      error TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (test_case_id) REFERENCES test_cases(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Create test execution queue table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS test_execution_queue (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      execution_id TEXT UNIQUE NOT NULL,
+      prompt_card_id INTEGER NOT NULL,
+      test_case_ids TEXT NOT NULL, -- JSON array
+      model TEXT NOT NULL,
+      status TEXT DEFAULT 'pending', -- pending, running, completed, failed, cancelled
+      priority INTEGER DEFAULT 0,
+      configuration TEXT, -- JSON
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      started_at DATETIME,
+      completed_at DATETIME,
+      error_message TEXT,
+      FOREIGN KEY (prompt_card_id) REFERENCES prompt_cards(id)
     )
   `);
 
@@ -69,9 +90,12 @@ export function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS idx_test_cases_prompt_card_id ON test_cases(prompt_card_id);
     CREATE INDEX IF NOT EXISTS idx_test_results_test_case_id ON test_results(test_case_id);
     CREATE INDEX IF NOT EXISTS idx_test_results_execution_id ON test_results(execution_id);
+    CREATE INDEX IF NOT EXISTS idx_test_queue_status ON test_execution_queue(status);
+    CREATE INDEX IF NOT EXISTS idx_test_queue_priority ON test_execution_queue(priority DESC);
   `);
 
   console.log('Database initialized successfully');
+  return db;
 }
 
 // Graceful shutdown

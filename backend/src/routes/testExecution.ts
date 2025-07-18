@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { db } from '../database/connection';
 import { llmService } from '../services/llmService';
 import { v4 as uuidv4 } from 'uuid';
+import { EnhancedAssertionType, EnhancedAssertionResult } from '../services/assertions/AssertionEngine';
 
 const router = Router();
 
@@ -10,11 +11,7 @@ export interface TestExecutionResult {
   test_case_id: number;
   passed: boolean;
   llm_output: string;
-  assertion_results: Array<{
-    assertion: any;
-    passed: boolean;
-    error?: string;
-  }>;
+  assertion_results: EnhancedAssertionResult[];
   execution_time_ms: number;
   model: string;
   prompt_used: string;
@@ -75,7 +72,12 @@ router.post('/:id/execute', async (req, res) => {
     const llmOutput = llmResponse.response;
 
     // Validate assertions
-    const assertionResults = llmService.validateAssertions(llmOutput, assertions);
+    const assertionResults = await llmService.validateAssertions(llmOutput, assertions, {
+      prompt: prompt,
+      variables: inputVariables,
+      model: model || llmService.defaultModel,
+      executionTime: Date.now() - startTime
+    });
     const allAssertionsPassed = assertionResults.every(result => result.passed);
 
     const executionTime = Date.now() - startTime;
@@ -208,7 +210,12 @@ router.post('/prompt-cards/:id/execute-all', async (req, res) => {
         const llmOutput = llmResponse.response;
 
         // Validate assertions
-        const assertionResults = llmService.validateAssertions(llmOutput, assertions);
+        const assertionResults = await llmService.validateAssertions(llmOutput, assertions, {
+          prompt: prompt,
+          variables: inputVariables,
+          model: model || llmService.defaultModel,
+          executionTime: testExecutionTime
+        });
         const allAssertionsPassed = assertionResults.every(result => result.passed);
 
         const testExecutionTime = Date.now() - testStartTime;
@@ -425,6 +432,190 @@ router.get('/executions/:executionId', (req, res) => {
     return res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to fetch execution result'
+    });
+  }
+});
+
+/**
+ * Execute tests in parallel with queue management
+ * POST /api/test-cases/execute-parallel
+ */
+router.post('/execute-parallel', async (req, res) => {
+  try {
+    const { 
+      prompt_card_id, 
+      test_case_ids, 
+      model, 
+      configuration = {
+        max_concurrent_tests: 3,
+        timeout_per_test: 30000,
+        retry_failed_tests: false,
+        max_retries: 1,
+        resource_limits: {
+          memory_mb: 1024,
+          cpu_percent: 50
+        }
+      },
+      priority = 0
+    } = req.body;
+
+    // Validate required fields
+    if (!prompt_card_id || !test_case_ids || !Array.isArray(test_case_ids) || test_case_ids.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'prompt_card_id and test_case_ids are required'
+      });
+    }
+
+    // Verify prompt card exists
+    const promptCard = db.prepare('SELECT id FROM prompt_cards WHERE id = ?').get(prompt_card_id);
+    if (!promptCard) {
+      return res.status(404).json({
+        success: false,
+        error: 'Prompt card not found'
+      });
+    }
+
+    // Verify test cases exist
+    const placeholders = test_case_ids.map(() => '?').join(',');
+    const testCases = db.prepare(`
+      SELECT id FROM test_cases WHERE id IN (${placeholders}) AND prompt_card_id = ?
+    `).all(...test_case_ids, prompt_card_id);
+
+    if (testCases.length !== test_case_ids.length) {
+      return res.status(400).json({
+        success: false,
+        error: 'Some test cases not found or do not belong to the specified prompt card'
+      });
+    }
+
+    // Queue the execution
+    const queueManager = req.app.locals.queueManager;
+    const executionId = await queueManager.queueTestExecution({
+      prompt_card_id,
+      test_case_ids,
+      model: model || 'llama3.1',
+      configuration,
+      priority
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        execution_id: executionId,
+        status: 'queued',
+        message: 'Test execution queued successfully'
+      }
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to queue test execution'
+    });
+  }
+});
+
+/**
+ * Get progress for a test execution
+ * GET /api/test-cases/executions/:executionId/progress
+ */
+router.get('/executions/:executionId/progress', async (req, res) => {
+  try {
+    const { executionId } = req.params;
+    const progressService = req.app.locals.progressService;
+    
+    const progress = await progressService.getProgress(executionId);
+    
+    if (!progress) {
+      return res.status(404).json({
+        success: false,
+        error: 'Execution progress not found'
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: progress
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to fetch execution progress'
+    });
+  }
+});
+
+/**
+ * Cancel a test execution
+ * POST /api/test-cases/executions/:executionId/cancel
+ */
+router.post('/executions/:executionId/cancel', async (req, res) => {
+  try {
+    const { executionId } = req.params;
+    const { reason = 'User requested cancellation' } = req.body;
+    
+    const queueManager = req.app.locals.queueManager;
+    await queueManager.cancelTestExecution(executionId, reason);
+
+    return res.json({
+      success: true,
+      data: {
+        execution_id: executionId,
+        status: 'cancelled',
+        message: 'Test execution cancelled successfully'
+      }
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to cancel test execution'
+    });
+  }
+});
+
+/**
+ * Get queue statistics
+ * GET /api/test-cases/queue/stats
+ */
+router.get('/queue/stats', async (req, res) => {
+  try {
+    const queueManager = req.app.locals.queueManager;
+    const stats = await queueManager.getQueueStats();
+
+    return res.json({
+      success: true,
+      data: stats
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to fetch queue statistics'
+    });
+  }
+});
+
+/**
+ * Get active test executions
+ * GET /api/test-cases/executions/active
+ */
+router.get('/executions/active', async (req, res) => {
+  try {
+    const progressService = req.app.locals.progressService;
+    const activeExecutions = await progressService.getActiveExecutions();
+
+    return res.json({
+      success: true,
+      data: activeExecutions
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to fetch active executions'
     });
   }
 });

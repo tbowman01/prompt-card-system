@@ -24,6 +24,7 @@ export default function TestRunner({
   const [selectedTests, setSelectedTests] = useState<number[]>([]);
   const [selectedModel, setSelectedModel] = useState('llama3.2');
   const [allSelected, setAllSelected] = useState(false);
+  const [executionMode, setExecutionMode] = useState<'sequential' | 'parallel'>('sequential');
 
   const handleSelectAll = () => {
     if (allSelected) {
@@ -52,26 +53,69 @@ export default function TestRunner({
 
     setIsRunning(true);
     try {
-      const request: RunTestsRequest = {
-        prompt_card_id: promptCardId,
-        model: selectedModel,
-        test_case_ids: allSelected ? undefined : selectedTests
-      };
+      const testCaseIds = allSelected ? testCases.map(tc => tc.id) : selectedTests;
 
-      const response = await api.runTests(request);
-      
-      if (response.execution) {
-        onTestComplete?.(response.execution);
+      if (executionMode === 'parallel') {
+        // Use parallel execution endpoint
+        const response = await fetch('/api/test-cases/execute-parallel', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            prompt_card_id: promptCardId,
+            test_case_ids: testCaseIds,
+            model: selectedModel,
+            configuration: {
+              max_concurrent_tests: 3,
+              timeout_per_test: 30000,
+              retry_failed_tests: false,
+              max_retries: 1,
+              resource_limits: {
+                memory_mb: 1024,
+                cpu_percent: 50
+              }
+            },
+            priority: 0
+          })
+        });
+
+        const data = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(data.error || 'Failed to start parallel execution');
+        }
+
+        // For parallel execution, we'll need to handle the progress tracking differently
+        // This would typically redirect to a progress page or show a modal
+        onTestComplete?.({
+          execution_id: data.data.execution_id,
+          status: 'running',
+          mode: 'parallel'
+        } as any);
       } else {
-        // Handle async execution - you might want to poll for results
-        setTimeout(async () => {
-          try {
-            const execution = await api.getTestExecution(response.execution_id);
-            onTestComplete?.(execution);
-          } catch (error) {
-            onError?.(error instanceof Error ? error.message : 'Failed to get test results');
-          }
-        }, 1000);
+        // Use sequential execution (existing API)
+        const request: RunTestsRequest = {
+          prompt_card_id: promptCardId,
+          model: selectedModel,
+          test_case_ids: allSelected ? undefined : selectedTests
+        };
+
+        const response = await api.runTests(request);
+        
+        if (response.execution) {
+          onTestComplete?.(response.execution);
+        } else {
+          // Handle async execution - you might want to poll for results
+          setTimeout(async () => {
+            try {
+              const execution = await api.getTestExecution(response.execution_id);
+              onTestComplete?.(execution);
+            } catch (error) {
+              onError?.(error instanceof Error ? error.message : 'Failed to get test results');
+            }
+          }, 1000);
+        }
       }
     } catch (error) {
       onError?.(error instanceof Error ? error.message : 'Failed to run tests');
@@ -127,6 +171,46 @@ export default function TestRunner({
           <option value="mistral">Mistral</option>
           <option value="codellama">CodeLlama</option>
         </select>
+      </div>
+
+      {/* Execution Mode Selection */}
+      <div className="mb-4">
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          Execution Mode
+        </label>
+        <div className="flex space-x-4">
+          <label className="flex items-center">
+            <input
+              type="radio"
+              name="executionMode"
+              value="sequential"
+              checked={executionMode === 'sequential'}
+              onChange={(e) => setExecutionMode(e.target.value as 'sequential' | 'parallel')}
+              disabled={isRunning}
+              className="mr-2"
+            />
+            <span className="text-sm">Sequential</span>
+          </label>
+          <label className="flex items-center">
+            <input
+              type="radio"
+              name="executionMode"
+              value="parallel"
+              checked={executionMode === 'parallel'}
+              onChange={(e) => setExecutionMode(e.target.value as 'sequential' | 'parallel')}
+              disabled={isRunning}
+              className="mr-2"
+            />
+            <span className="text-sm">Parallel</span>
+            <span className="ml-1 text-xs text-blue-600">⚡ Faster</span>
+          </label>
+        </div>
+        <p className="text-xs text-gray-500 mt-1">
+          {executionMode === 'sequential' 
+            ? 'Run tests one at a time (traditional mode)'
+            : 'Run multiple tests simultaneously with real-time progress tracking'
+          }
+        </p>
       </div>
 
       {/* Test Selection */}
@@ -186,11 +270,13 @@ export default function TestRunner({
           {isRunning ? (
             <>
               <LoadingSpinner size="sm" className="mr-2" />
-              Running Tests...
+              {executionMode === 'parallel' ? 'Starting Parallel Tests...' : 'Running Tests...'}
             </>
           ) : (
             <>
+              {executionMode === 'parallel' ? '⚡ ' : ''}
               Run {allSelected ? 'All' : selectedTests.length} Test{(allSelected ? testCases.length : selectedTests.length) !== 1 ? 's' : ''}
+              {executionMode === 'parallel' ? ' (Parallel)' : ''}
             </>
           )}
         </Button>
