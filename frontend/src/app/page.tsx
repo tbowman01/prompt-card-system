@@ -1,159 +1,124 @@
-'use client'
+'use client';
 
-import Link from 'next/link'
-import { useEffect, useState } from 'react'
-import { apiClient } from '@/lib/api'
+import Link from 'next/link';
+import { Button } from '@/components/ui/Button';
 
-interface HealthStatus {
-  status: string
-  services: {
-    database: string
-    ollama: {
-      url: string
-      status: string
-    }
-  }
-}
-
-export default function HomePage() {
-  const [healthStatus, setHealthStatus] = useState<HealthStatus | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    const fetchHealthStatus = async () => {
-      try {
-        const response = await apiClient.get('/health')
-        setHealthStatus(response.data)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch health status')
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    fetchHealthStatus()
-  }, [])
-
+export default function Home() {
   return (
-    <div className="space-y-6">
-      <div className="text-center">
-        <h1 className="text-3xl font-bold text-gray-900">
-          Welcome to Prompt Card System
-        </h1>
-        <p className="mt-2 text-lg text-gray-600">
-          Test-driven prompt development with local LLM integration
-        </p>
-      </div>
-
-      {/* System Status */}
-      <div className="card">
-        <h2 className="text-xl font-semibold text-gray-900 mb-4">System Status</h2>
-        {loading && (
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
-            <p className="mt-2 text-sm text-gray-600">Checking system health...</p>
-          </div>
-        )}
-        {error && (
-          <div className="text-center text-red-600">
-            <p>Error: {error}</p>
-          </div>
-        )}
-        {healthStatus && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="flex items-center space-x-2">
-              <div className={`w-3 h-3 rounded-full ${
-                healthStatus.status === 'healthy' ? 'bg-green-500' : 'bg-red-500'
-              }`}></div>
-              <span className="text-sm font-medium">
-                API Status: {healthStatus.status}
-              </span>
-            </div>
-            <div className="flex items-center space-x-2">
-              <div className={`w-3 h-3 rounded-full ${
-                healthStatus.services.database === 'connected' ? 'bg-green-500' : 'bg-red-500'
-              }`}></div>
-              <span className="text-sm font-medium">
-                Database: {healthStatus.services.database}
-              </span>
-            </div>
-            <div className="flex items-center space-x-2">
-              <div className={`w-3 h-3 rounded-full ${
-                healthStatus.services.ollama.status === 'configured' ? 'bg-yellow-500' : 'bg-red-500'
-              }`}></div>
-              <span className="text-sm font-medium">
-                Ollama: {healthStatus.services.ollama.status}
-              </span>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Link href="/prompt-cards" className="card hover:shadow-md transition-shadow">
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">
-            Manage Prompt Cards
-          </h3>
-          <p className="text-gray-600">
-            Create, edit, and organize your prompt cards for testing
+    <main className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+      <div className="container mx-auto px-4 py-16">
+        {/* Hero Section */}
+        <div className="text-center mb-16">
+          <h1 className="text-5xl font-bold text-gray-900 mb-6">
+            Prompt Card System
+          </h1>
+          <p className="text-xl text-gray-600 mb-8 max-w-3xl mx-auto">
+            A self-hosted MVP for test-driven prompt development with local LLM integration. 
+            Create, test, and validate your AI prompts with powerful evaluation tools.
           </p>
-        </Link>
-        
-        <Link href="/prompt-cards/new" className="card hover:shadow-md transition-shadow">
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">
-            Create New Card
-          </h3>
-          <p className="text-gray-600">
-            Start building a new prompt card with test cases
-          </p>
-        </Link>
-        
-        <Link href="/yaml" className="card hover:shadow-md transition-shadow">
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">
-            Import/Export YAML
-          </h3>
-          <p className="text-gray-600">
-            Import existing Promptfoo configurations or export your cards
-          </p>
-        </Link>
-      </div>
+          <div className="space-x-4">
+            <Link href="/prompt-cards">
+              <Button size="lg" className="px-8 py-3">
+                Get Started
+              </Button>
+            </Link>
+            <Link href="/prompt-cards/new">
+              <Button variant="outline" size="lg" className="px-8 py-3">
+                Create Prompt Card
+              </Button>
+            </Link>
+          </div>
+        </div>
 
-      {/* Features Overview */}
-      <div className="card">
-        <h2 className="text-xl font-semibold text-gray-900 mb-4">Features</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="flex items-start space-x-3">
-            <div className="w-2 h-2 bg-primary-500 rounded-full mt-2"></div>
-            <div>
-              <h3 className="font-medium text-gray-900">Prompt Card Management</h3>
-              <p className="text-sm text-gray-600">Create and organize prompt templates with variables</p>
+        {/* Features Grid */}
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8 mb-16">
+          <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
+            <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
+              <svg className="w-6 h-6 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
             </div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Prompt Management</h3>
+            <p className="text-gray-600 text-sm">
+              Create and organize prompt templates with variables for systematic testing
+            </p>
           </div>
-          <div className="flex items-start space-x-3">
-            <div className="w-2 h-2 bg-primary-500 rounded-full mt-2"></div>
-            <div>
-              <h3 className="font-medium text-gray-900">Test Case Creation</h3>
-              <p className="text-sm text-gray-600">Define test cases with input variables and assertions</p>
+
+          <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
+            <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mb-4">
+              <svg className="w-6 h-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+              </svg>
             </div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Test Cases</h3>
+            <p className="text-gray-600 text-sm">
+              Define test cases with input variables and assertions for automated validation
+            </p>
           </div>
-          <div className="flex items-start space-x-3">
-            <div className="w-2 h-2 bg-primary-500 rounded-full mt-2"></div>
-            <div>
-              <h3 className="font-medium text-gray-900">Local LLM Integration</h3>
-              <p className="text-sm text-gray-600">Test prompts with local Ollama models</p>
+
+          <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
+            <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center mb-4">
+              <svg className="w-6 h-6 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
             </div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Local LLM Integration</h3>
+            <p className="text-gray-600 text-sm">
+              Test prompts against local models via Ollama for privacy and control
+            </p>
           </div>
-          <div className="flex items-start space-x-3">
-            <div className="w-2 h-2 bg-primary-500 rounded-full mt-2"></div>
+
+          <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
+            <div className="w-12 h-12 bg-yellow-100 rounded-lg flex items-center justify-center mb-4">
+              <svg className="w-6 h-6 text-yellow-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">YAML Integration</h3>
+            <p className="text-gray-600 text-sm">
+              Import/export configurations compatible with Promptfoo evaluation framework
+            </p>
+          </div>
+        </div>
+
+        {/* Quick Stats */}
+        <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
+          <h2 className="text-2xl font-bold text-gray-900 mb-6">Built for Developers</h2>
+          <div className="grid md:grid-cols-3 gap-8">
             <div>
-              <h3 className="font-medium text-gray-900">YAML Import/Export</h3>
-              <p className="text-sm text-gray-600">Compatible with Promptfoo configuration format</p>
+              <div className="text-3xl font-bold text-blue-600 mb-2">🐳</div>
+              <h3 className="font-semibold text-gray-900">Docker Ready</h3>
+              <p className="text-gray-600 text-sm">Complete stack runs with docker-compose up</p>
+            </div>
+            <div>
+              <div className="text-3xl font-bold text-green-600 mb-2">🔒</div>
+              <h3 className="font-semibold text-gray-900">Self-Hosted</h3>
+              <p className="text-gray-600 text-sm">Keep your prompts and data completely private</p>
+            </div>
+            <div>
+              <div className="text-3xl font-bold text-purple-600 mb-2">⚡</div>
+              <h3 className="font-semibold text-gray-900">Fast Setup</h3>
+              <p className="text-gray-600 text-sm">From clone to running in under 10 minutes</p>
             </div>
           </div>
         </div>
+
+        {/* CTA Section */}
+        <div className="text-center mt-16">
+          <h2 className="text-3xl font-bold text-gray-900 mb-4">
+            Ready to get started?
+          </h2>
+          <p className="text-gray-600 mb-8 max-w-2xl mx-auto">
+            Create your first prompt card and start building reliable AI applications with systematic testing.
+          </p>
+          <Link href="/prompt-cards">
+            <Button size="lg" className="px-8 py-3">
+              View Prompt Cards →
+            </Button>
+          </Link>
+        </div>
       </div>
-    </div>
-  )
+    </main>
+  );
 }

@@ -7,6 +7,7 @@ import { initializeDatabase } from './database/connection';
 import { healthRoutes } from './routes/health';
 import { promptCardRoutes } from './routes/promptCards';
 import { testCaseRoutes } from './routes/testCases';
+import { testExecutionRoutes } from './routes/testExecution';
 import { yamlRoutes } from './routes/yaml';
 import { errorHandler } from './middleware/errorHandler';
 
@@ -32,6 +33,7 @@ initializeDatabase();
 app.use('/api/health', healthRoutes);
 app.use('/api/prompt-cards', promptCardRoutes);
 app.use('/api/test-cases', testCaseRoutes);
+app.use('/api/test-cases', testExecutionRoutes); // Test execution routes
 app.use('/api/yaml', yamlRoutes);
 
 // Error handling middleware

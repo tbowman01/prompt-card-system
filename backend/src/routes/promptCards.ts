@@ -2,32 +2,70 @@ import { Router } from 'express';
 import { db } from '../database/connection';
 import { validatePromptCard } from '../middleware/validation';
 import { PromptCard, CreatePromptCardRequest } from '../types/promptCard';
+import { TestCase } from '../types/testCase';
 
 const router = Router();
 
-// Get all prompt cards
+// Get all prompt cards with pagination
 router.get('/', (req, res) => {
   try {
-    const cards = db.prepare(`
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 10;
+    const offset = (page - 1) * limit;
+    const search = req.query.search as string;
+
+    // Build base query
+    let whereClause = '';
+    let params: any[] = [];
+
+    if (search) {
+      whereClause = 'WHERE pc.title LIKE ? OR pc.description LIKE ?';
+      params = [`%${search}%`, `%${search}%`];
+    }
+
+    // Get total count
+    const totalQuery = `
+      SELECT COUNT(*) as total 
+      FROM prompt_cards pc 
+      ${whereClause}
+    `;
+    const totalResult = db.prepare(totalQuery).get(...params) as { total: number };
+    const total = totalResult.total;
+
+    // Get paginated results
+    const dataQuery = `
       SELECT 
         pc.*,
         COUNT(tc.id) as test_case_count
       FROM prompt_cards pc
       LEFT JOIN test_cases tc ON pc.id = tc.prompt_card_id
+      ${whereClause}
       GROUP BY pc.id
       ORDER BY pc.updated_at DESC
-    `).all() as PromptCard[];
+      LIMIT ? OFFSET ?
+    `;
+    const cards = db.prepare(dataQuery).all(...params, limit, offset) as PromptCard[];
 
-    res.json({
+    const totalPages = Math.ceil(total / limit);
+
+    return res.json({
       success: true,
       data: cards.map(card => ({
         ...card,
         variables: JSON.parse(card.variables || '[]'),
         test_case_count: Number(card.test_case_count)
-      }))
+      })),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasNext: page < totalPages,
+        hasPrev: page > 1
+      }
     });
   } catch (error) {
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to fetch prompt cards'
     });
@@ -54,14 +92,14 @@ router.get('/:id', (req, res) => {
     // Get test cases
     const testCases = db.prepare(`
       SELECT * FROM test_cases WHERE prompt_card_id = ? ORDER BY created_at DESC
-    `).all(id);
+    `).all(id) as TestCase[];
 
-    res.json({
+    return res.json({
       success: true,
       data: {
         ...card,
         variables: JSON.parse(card.variables || '[]'),
-        test_cases: testCases.map(tc => ({
+        test_cases: testCases.map((tc: TestCase) => ({
           ...tc,
           input_variables: JSON.parse(tc.input_variables),
           assertions: JSON.parse(tc.assertions || '[]')
@@ -69,7 +107,7 @@ router.get('/:id', (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to fetch prompt card'
     });
@@ -90,7 +128,7 @@ router.post('/', validatePromptCard, (req, res) => {
       SELECT * FROM prompt_cards WHERE id = ?
     `).get(result.lastInsertRowid) as PromptCard;
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       data: {
         ...newCard,
@@ -98,7 +136,7 @@ router.post('/', validatePromptCard, (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to create prompt card'
     });
@@ -128,7 +166,7 @@ router.put('/:id', validatePromptCard, (req, res) => {
       SELECT * FROM prompt_cards WHERE id = ?
     `).get(id) as PromptCard;
 
-    res.json({
+    return res.json({
       success: true,
       data: {
         ...updatedCard,
@@ -136,7 +174,7 @@ router.put('/:id', validatePromptCard, (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to update prompt card'
     });
@@ -159,12 +197,12 @@ router.delete('/:id', (req, res) => {
       });
     }
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Prompt card deleted successfully'
     });
   } catch (error) {
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to delete prompt card'
     });

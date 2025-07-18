@@ -19,11 +19,11 @@ const testCaseSchema = Joi.object({
 });
 
 // Middleware to validate prompt card requests
-export function validatePromptCard(req: Request, res: Response, next: NextFunction) {
+export function validatePromptCard(req: Request, res: Response, next: NextFunction): void {
   const { error, value } = promptCardSchema.validate(req.body);
   
   if (error) {
-    return res.status(400).json({
+    res.status(400).json({
       success: false,
       error: 'Validation error',
       details: error.details.map(detail => ({
@@ -31,6 +31,7 @@ export function validatePromptCard(req: Request, res: Response, next: NextFuncti
         message: detail.message
       }))
     });
+    return;
   }
   
   req.body = value;
@@ -38,11 +39,11 @@ export function validatePromptCard(req: Request, res: Response, next: NextFuncti
 }
 
 // Middleware to validate test case requests
-export function validateTestCase(req: Request, res: Response, next: NextFunction) {
+export function validateTestCase(req: Request, res: Response, next: NextFunction): void {
   const { error, value } = testCaseSchema.validate(req.body);
   
   if (error) {
-    return res.status(400).json({
+    res.status(400).json({
       success: false,
       error: 'Validation error',
       details: error.details.map(detail => ({
@@ -50,6 +51,7 @@ export function validateTestCase(req: Request, res: Response, next: NextFunction
         message: detail.message
       }))
     });
+    return;
   }
   
   req.body = value;
