@@ -1,0 +1,551 @@
+name: Release Management
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v1.0.0)'
+        required: true
+        type: string
+      release_type:
+        description: 'Type of release'
+        required: true
+        default: 'release'
+        type: choice
+        options:
+          - release
+          - prerelease
+          - draft
+
+env:
+  NODE_VERSION: '18'
+  DOCKER_REGISTRY: ghcr.io
+
+jobs:
+  validate-release:
+    name: Validate Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      is_prerelease: ${{ steps.version.outputs.is_prerelease }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "push" ]; then
+            VERSION=${GITHUB_REF#refs/tags/}
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+          
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          
+          # Check if this is a prerelease
+          if [[ "$VERSION" =~ -[a-zA-Z] ]]; then
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "Release version: $VERSION"
+          echo "Is prerelease: ${{ steps.version.outputs.is_prerelease }}"
+
+      - name: Validate version format
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?$ ]]; then
+            echo "❌ Invalid version format: $VERSION"
+            echo "Expected format: v1.0.0 or v1.0.0-alpha"
+            exit 1
+          fi
+          echo "✅ Version format is valid"
+
+      - name: Check if tag exists
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if git rev-parse "$VERSION" >/dev/null 2>&1; then
+            echo "✅ Tag $VERSION exists"
+          else
+            echo "⚠️ Tag $VERSION does not exist - will be created"
+          fi
+
+      - name: Validate changelog
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if [ -f "CHANGELOG.md" ]; then
+            if grep -q "$VERSION" CHANGELOG.md; then
+              echo "✅ Changelog entry found for $VERSION"
+            else
+              echo "⚠️ No changelog entry found for $VERSION"
+              echo "::warning::Consider adding changelog entry for $VERSION"
+            fi
+          else
+            echo "⚠️ No CHANGELOG.md file found"
+            echo "::warning::Consider adding a CHANGELOG.md file"
+          fi
+
+  build-release:
+    name: Build Release Artifacts
+    runs-on: ubuntu-latest
+    needs: [validate-release]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          cd backend && npm ci
+          cd ../frontend && npm ci
+
+      - name: Update version in package.json
+        run: |
+          VERSION="${{ needs.validate-release.outputs.version }}"
+          VERSION_NUMBER=${VERSION#v}
+          
+          # Update backend version
+          cd backend
+          npm version $VERSION_NUMBER --no-git-tag-version
+          
+          # Update frontend version
+          cd ../frontend
+          npm version $VERSION_NUMBER --no-git-tag-version
+
+      - name: Build applications
+        run: |
+          # Build backend
+          cd backend
+          npm run build
+          
+          # Build frontend
+          cd ../frontend
+          npm run build
+        env:
+          NODE_ENV: production
+          NEXT_PUBLIC_API_URL: https://api.promptcard.io
+
+      - name: Run tests
+        run: |
+          cd backend && npm test
+          cd ../frontend && npm test
+
+      - name: Create release archives
+        run: |
+          # Create backend archive
+          cd backend
+          tar -czf ../backend-${{ needs.validate-release.outputs.version }}.tar.gz \
+            dist/ package.json package-lock.json README.md
+          
+          # Create frontend archive
+          cd ../frontend
+          tar -czf ../frontend-${{ needs.validate-release.outputs.version }}.tar.gz \
+            .next/ package.json package-lock.json README.md public/
+          
+          # Create full release archive
+          cd ..
+          tar -czf prompt-card-system-${{ needs.validate-release.outputs.version }}.tar.gz \
+            backend/ frontend/ docker-compose.yml docker-compose.production.yml \
+            README.md LICENSE docs/
+
+      - name: Generate checksums
+        run: |
+          sha256sum *.tar.gz > checksums.txt
+          echo "📋 Release Checksums:"
+          cat checksums.txt
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: release-artifacts
+          path: |
+            *.tar.gz
+            checksums.txt
+
+  docker-release:
+    name: Build and Push Docker Images
+    runs-on: ubuntu-latest
+    needs: [validate-release, build-release]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.DOCKER_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.DOCKER_REGISTRY }}/${{ github.repository }}/backend
+            ${{ env.DOCKER_REGISTRY }}/${{ github.repository }}/frontend
+          tags: |
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ env.DOCKER_REGISTRY }}/${{ github.repository }}/backend:${{ needs.validate-release.outputs.version }}
+            ${{ env.DOCKER_REGISTRY }}/${{ github.repository }}/backend:latest
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ${{ env.DOCKER_REGISTRY }}/${{ github.repository }}/frontend:${{ needs.validate-release.outputs.version }}
+            ${{ env.DOCKER_REGISTRY }}/${{ github.repository }}/frontend:latest
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Generate Docker Compose for release
+        run: |
+          cat > docker-compose.release.yml << EOF
+          version: '3.8'
+          
+          services:
+            backend:
+              image: ${{ env.DOCKER_REGISTRY }}/${{ github.repository }}/backend:${{ needs.validate-release.outputs.version }}
+              ports:
+                - "3001:3001"
+              environment:
+                - NODE_ENV=production
+                - DATABASE_URL=\${DATABASE_URL}
+                - JWT_SECRET=\${JWT_SECRET}
+              depends_on:
+                - postgres
+                - redis
+          
+            frontend:
+              image: ${{ env.DOCKER_REGISTRY }}/${{ github.repository }}/frontend:${{ needs.validate-release.outputs.version }}
+              ports:
+                - "3000:3000"
+              environment:
+                - NEXT_PUBLIC_API_URL=\${NEXT_PUBLIC_API_URL}
+              depends_on:
+                - backend
+          
+            postgres:
+              image: postgres:15
+              environment:
+                - POSTGRES_DB=promptcard
+                - POSTGRES_USER=\${POSTGRES_USER}
+                - POSTGRES_PASSWORD=\${POSTGRES_PASSWORD}
+              volumes:
+                - postgres_data:/var/lib/postgresql/data
+          
+            redis:
+              image: redis:7-alpine
+              ports:
+                - "6379:6379"
+              volumes:
+                - redis_data:/data
+          
+          volumes:
+            postgres_data:
+            redis_data:
+          EOF
+
+      - name: Upload Docker Compose
+        uses: actions/upload-artifact@v3
+        with:
+          name: release-artifacts
+          path: docker-compose.release.yml
+
+  create-github-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [validate-release, build-release, docker-release]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: release-artifacts
+          path: ./release-artifacts
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          VERSION="${{ needs.validate-release.outputs.version }}"
+          
+          # Get previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
+          
+          # Create release notes
+          cat > release_notes.md << EOF
+          # Release $VERSION
+          
+          ## 🚀 What's New
+          
+          EOF
+          
+          # Add changelog section if available
+          if [ -f "CHANGELOG.md" ] && grep -q "$VERSION" CHANGELOG.md; then
+            echo "## 📋 Changelog" >> release_notes.md
+            echo "" >> release_notes.md
+            sed -n "/## $VERSION/,/## /p" CHANGELOG.md | head -n -1 >> release_notes.md
+            echo "" >> release_notes.md
+          fi
+          
+          # Add commit history
+          if [ -n "$PREV_TAG" ]; then
+            echo "## 🔄 Changes Since $PREV_TAG" >> release_notes.md
+            echo "" >> release_notes.md
+            git log --oneline $PREV_TAG..HEAD --format="- %s" >> release_notes.md
+            echo "" >> release_notes.md
+          fi
+          
+          # Add Docker images info
+          cat >> release_notes.md << EOF
+          
+          ## 🐳 Docker Images
+          
+          - Backend: \`${{ env.DOCKER_REGISTRY }}/${{ github.repository }}/backend:$VERSION\`
+          - Frontend: \`${{ env.DOCKER_REGISTRY }}/${{ github.repository }}/frontend:$VERSION\`
+          
+          ## 📦 Installation
+          
+          ### Using Docker Compose
+          \`\`\`bash
+          wget https://github.com/${{ github.repository }}/releases/download/$VERSION/docker-compose.release.yml
+          docker-compose -f docker-compose.release.yml up -d
+          \`\`\`
+          
+          ### Using Pre-built Archives
+          \`\`\`bash
+          wget https://github.com/${{ github.repository }}/releases/download/$VERSION/prompt-card-system-$VERSION.tar.gz
+          tar -xzf prompt-card-system-$VERSION.tar.gz
+          cd prompt-card-system-$VERSION
+          docker-compose up -d
+          \`\`\`
+          
+          ## 🔐 Verification
+          
+          You can verify the integrity of the downloads using the checksums:
+          \`\`\`bash
+          wget https://github.com/${{ github.repository }}/releases/download/$VERSION/checksums.txt
+          sha256sum -c checksums.txt
+          \`\`\`
+          
+          ## 🐛 Bug Reports
+          
+          If you encounter any issues, please report them on our [GitHub Issues](https://github.com/${{ github.repository }}/issues) page.
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.validate-release.outputs.version }}
+          name: ${{ needs.validate-release.outputs.version }}
+          body_path: release_notes.md
+          draft: ${{ github.event.inputs.release_type == 'draft' }}
+          prerelease: ${{ needs.validate-release.outputs.is_prerelease == 'true' || github.event.inputs.release_type == 'prerelease' }}
+          files: |
+            release-artifacts/*.tar.gz
+            release-artifacts/checksums.txt
+            release-artifacts/docker-compose.release.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy-release:
+    name: Deploy Release to Production
+    runs-on: ubuntu-latest
+    needs: [validate-release, create-github-release]
+    if: needs.validate-release.outputs.is_prerelease == 'false' && github.event.inputs.release_type != 'draft'
+    environment:
+      name: production
+      url: https://promptcard.io
+    steps:
+      - name: Deploy to production
+        run: |
+          echo "🚀 Deploying ${{ needs.validate-release.outputs.version }} to production..."
+          
+          # Create deployment script
+          cat > deploy-release.sh << 'EOF'
+          #!/bin/bash
+          set -e
+          
+          VERSION="${{ needs.validate-release.outputs.version }}"
+          
+          # Pull release images
+          docker pull ${{ env.DOCKER_REGISTRY }}/${{ github.repository }}/backend:$VERSION
+          docker pull ${{ env.DOCKER_REGISTRY }}/${{ github.repository }}/frontend:$VERSION
+          
+          # Update production deployment
+          docker-compose -f docker-compose.production.yml down
+          docker-compose -f docker-compose.production.yml up -d
+          
+          # Health check
+          sleep 30
+          curl -f https://api.promptcard.io/api/health || exit 1
+          curl -f https://promptcard.io || exit 1
+          
+          echo "✅ Release $VERSION deployed successfully!"
+          EOF
+          
+          chmod +x deploy-release.sh
+          echo "✅ Production deployment script created"
+
+      - name: Notify deployment success
+        uses: ./.github/actions/action-slack-v3
+        if: success()
+        with:
+          status: success
+          channel: '#releases'
+          message: |
+            🎉 Release ${{ needs.validate-release.outputs.version }} deployed to production!
+            
+            🔗 **Links:**
+            - Production: https://promptcard.io
+            - Release Notes: https://github.com/${{ github.repository }}/releases/tag/${{ needs.validate-release.outputs.version }}
+            - Docker Images: ${{ env.DOCKER_REGISTRY }}/${{ github.repository }}
+            
+            Author: ${{ github.actor }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  post-release:
+    name: Post-Release Tasks
+    runs-on: ubuntu-latest
+    needs: [validate-release, create-github-release, deploy-release]
+    if: always() && needs.create-github-release.result == 'success'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Update version badges
+        run: |
+          VERSION="${{ needs.validate-release.outputs.version }}"
+          VERSION_NUMBER=${VERSION#v}
+          
+          # Update README.md with new version badge
+          if [ -f "README.md" ]; then
+            sed -i "s/version-[0-9]\+\.[0-9]\+\.[0-9]\+/version-$VERSION_NUMBER/g" README.md
+            echo "✅ Version badge updated in README.md"
+          fi
+
+      - name: Create development branch
+        if: needs.validate-release.outputs.is_prerelease == 'false'
+        run: |
+          VERSION="${{ needs.validate-release.outputs.version }}"
+          VERSION_NUMBER=${VERSION#v}
+          
+          # Create next development version
+          IFS='.' read -r -a version_parts <<< "$VERSION_NUMBER"
+          NEXT_MINOR=$((version_parts[1] + 1))
+          NEXT_VERSION="${version_parts[0]}.${NEXT_MINOR}.0"
+          
+          # Update package.json for next development version
+          cd backend
+          npm version $NEXT_VERSION-dev --no-git-tag-version
+          
+          cd ../frontend
+          npm version $NEXT_VERSION-dev --no-git-tag-version
+          
+          echo "✅ Prepared for next development version: $NEXT_VERSION-dev"
+
+      - name: Update documentation
+        run: |
+          VERSION="${{ needs.validate-release.outputs.version }}"
+          
+          # Update documentation with new version
+          if [ -d "docs" ]; then
+            find docs -name "*.md" -type f -exec sed -i "s/v[0-9]\+\.[0-9]\+\.[0-9]\+/$VERSION/g" {} \;
+            echo "✅ Documentation updated with new version"
+          fi
+
+      - name: Generate release metrics
+        run: |
+          VERSION="${{ needs.validate-release.outputs.version }}"
+          
+          # Generate release metrics
+          cat > release-metrics.json << EOF
+          {
+            "version": "$VERSION",
+            "release_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "is_prerelease": ${{ needs.validate-release.outputs.is_prerelease }},
+            "author": "${{ github.actor }}",
+            "commit": "${{ github.sha }}",
+            "artifacts": [
+              "backend-$VERSION.tar.gz",
+              "frontend-$VERSION.tar.gz",
+              "prompt-card-system-$VERSION.tar.gz",
+              "docker-compose.release.yml"
+            ],
+            "docker_images": [
+              "${{ env.DOCKER_REGISTRY }}/${{ github.repository }}/backend:$VERSION",
+              "${{ env.DOCKER_REGISTRY }}/${{ github.repository }}/frontend:$VERSION"
+            ]
+          }
+          EOF
+          
+          echo "📊 Release metrics generated"
+          cat release-metrics.json
+
+      - name: Commit post-release changes
+        if: needs.validate-release.outputs.is_prerelease == 'false'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          git add .
+          git commit -m "chore: post-release updates for ${{ needs.validate-release.outputs.version }}" || echo "No changes to commit"
+          git push origin main || echo "No changes to push"
+
+      - name: Release summary
+        run: |
+          echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Release ${{ needs.validate-release.outputs.version }} completed successfully!**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Validation | ${{ needs.validate-release.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build | ${{ needs.build-release.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Docker Images | ${{ needs.docker-release.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| GitHub Release | ${{ needs.create-github-release.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Production Deploy | ${{ needs.deploy-release.result == 'success' && '✅ Pass' || needs.deploy-release.result == 'skipped' && '⏭️ Skip' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🔗 **Links:**" >> $GITHUB_STEP_SUMMARY
+          echo "- [Release Page](https://github.com/${{ github.repository }}/releases/tag/${{ needs.validate-release.outputs.version }})" >> $GITHUB_STEP_SUMMARY
+          echo "- [Production Site](https://promptcard.io)" >> $GITHUB_STEP_SUMMARY
+          echo "- [Docker Images](${{ env.DOCKER_REGISTRY }}/${{ github.repository }})" >> $GITHUB_STEP_SUMMARY
