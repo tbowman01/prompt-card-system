@@ -11,7 +11,6 @@ import {
   webhookUrl,
 } from './helper';
 import { Client, Success } from '../src/client';
-import github from '@actions/github';
 
 beforeAll(() => {
   nock.disableNetConnect();
