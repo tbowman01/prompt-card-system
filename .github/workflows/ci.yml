@@ -1,0 +1,377 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ main, develop, phase-4-advanced-features ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    - cron: '0 6 * * *' # Daily at 6 AM UTC
+
+env:
+  NODE_VERSION: '18'
+  PNPM_VERSION: '8'
+
+jobs:
+  setup:
+    name: Setup Dependencies
+    runs-on: ubuntu-latest
+    outputs:
+      cache-key: ${{ steps.cache-key.outputs.key }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Generate cache key
+        id: cache-key
+        run: echo "key=${{ runner.os }}-node-${{ env.NODE_VERSION }}-${{ hashFiles('**/package-lock.json') }}" >> $GITHUB_OUTPUT
+
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.npm
+            node_modules
+            backend/node_modules
+            frontend/node_modules
+          key: ${{ steps.cache-key.outputs.key }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ env.NODE_VERSION }}-
+
+      - name: Install backend dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Install frontend dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+  lint-and-format:
+    name: Lint and Format Check
+    runs-on: ubuntu-latest
+    needs: setup
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Restore dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.npm
+            node_modules
+            backend/node_modules
+            frontend/node_modules
+          key: ${{ needs.setup.outputs.cache-key }}
+
+      - name: Lint backend
+        working-directory: ./backend
+        run: npm run lint
+
+      - name: Lint frontend
+        working-directory: ./frontend
+        run: npm run lint
+
+      - name: Check TypeScript backend
+        working-directory: ./backend
+        run: npm run type-check
+
+      - name: Check TypeScript frontend
+        working-directory: ./frontend
+        run: npm run type-check
+
+  test-backend:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    needs: setup
+    strategy:
+      matrix:
+        node-version: [18, 20]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Restore dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.npm
+            node_modules
+            backend/node_modules
+            frontend/node_modules
+          key: ${{ needs.setup.outputs.cache-key }}
+
+      - name: Run backend unit tests
+        working-directory: ./backend
+        run: npm test -- --coverage --ci --watchAll=false
+        env:
+          NODE_ENV: test
+          DATABASE_PATH: ":memory:"
+
+      - name: Upload backend coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./backend/coverage/lcov.info
+          flags: backend
+          name: backend-coverage
+
+  test-frontend:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+    needs: setup
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Restore dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.npm
+            node_modules
+            backend/node_modules
+            frontend/node_modules
+          key: ${{ needs.setup.outputs.cache-key }}
+
+      - name: Run frontend tests
+        working-directory: ./frontend
+        run: npm test -- --coverage --ci --watchAll=false
+        env:
+          NODE_ENV: test
+
+      - name: Upload frontend coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./frontend/coverage/lcov.info
+          flags: frontend
+          name: frontend-coverage
+
+  test-integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: setup
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: promptcard_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Restore dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.npm
+            node_modules
+            backend/node_modules
+            frontend/node_modules
+          key: ${{ needs.setup.outputs.cache-key }}
+
+      - name: Run integration tests
+        working-directory: ./backend
+        run: npm run test:integration
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://test:test@localhost:5432/promptcard_test
+
+      - name: Upload integration test results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: integration-test-results
+          path: ./backend/test-results/
+
+  build:
+    name: Build Applications
+    runs-on: ubuntu-latest
+    needs: [setup, lint-and-format]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Restore dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.npm
+            node_modules
+            backend/node_modules
+            frontend/node_modules
+          key: ${{ needs.setup.outputs.cache-key }}
+
+      - name: Build backend
+        working-directory: ./backend
+        run: npm run build
+
+      - name: Build frontend
+        working-directory: ./frontend
+        run: npm run build
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:3001
+
+      - name: Upload backend build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: backend-build
+          path: ./backend/dist/
+
+      - name: Upload frontend build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: frontend-build
+          path: ./frontend/.next/
+
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    needs: [build, test-backend, test-frontend]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ secrets.DOCKER_USERNAME }}/prompt-card-backend
+            ${{ secrets.DOCKER_USERNAME }}/prompt-card-frontend
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: ${{ secrets.DOCKER_USERNAME }}/prompt-card-backend:${{ github.sha }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: ${{ secrets.DOCKER_USERNAME }}/prompt-card-frontend:${{ github.sha }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  quality-gate:
+    name: Quality Gate
+    runs-on: ubuntu-latest
+    needs: [lint-and-format, test-backend, test-frontend, test-integration, build]
+    if: always()
+    steps:
+      - name: Check job results
+        run: |
+          echo "Lint and format: ${{ needs.lint-and-format.result }}"
+          echo "Backend tests: ${{ needs.test-backend.result }}"
+          echo "Frontend tests: ${{ needs.test-frontend.result }}"
+          echo "Integration tests: ${{ needs.test-integration.result }}"
+          echo "Build: ${{ needs.build.result }}"
+          
+          if [[ "${{ needs.lint-and-format.result }}" != "success" || 
+                "${{ needs.test-backend.result }}" != "success" || 
+                "${{ needs.test-frontend.result }}" != "success" || 
+                "${{ needs.test-integration.result }}" != "success" || 
+                "${{ needs.build.result }}" != "success" ]]; then
+            echo "Quality gate failed!"
+            exit 1
+          fi
+          
+          echo "Quality gate passed!"
+
+  notify:
+    name: Notify Results
+    runs-on: ubuntu-latest
+    needs: [quality-gate, docker-build]
+    if: always()
+    steps:
+      - name: Notify Slack on success
+        if: success()
+        uses: ./.github/actions/action-slack-v3
+        with:
+          status: success
+          channel: '#ci-cd'
+          message: |
+            ✅ CI Pipeline passed for ${{ github.ref }}
+            Commit: ${{ github.sha }}
+            Author: ${{ github.actor }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Notify Slack on failure
+        if: failure()
+        uses: ./.github/actions/action-slack-v3
+        with:
+          status: failure
+          channel: '#ci-cd'
+          message: |
+            ❌ CI Pipeline failed for ${{ github.ref }}
+            Commit: ${{ github.sha }}
+            Author: ${{ github.actor }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

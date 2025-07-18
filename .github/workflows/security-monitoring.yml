@@ -1,0 +1,340 @@
+name: Security Monitoring
+
+on:
+  schedule:
+    - cron: '0 8 * * *' # Daily security check at 8 AM UTC
+  workflow_dispatch:
+    inputs:
+      scan_type:
+        description: 'Type of security scan'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - dependencies
+          - secrets
+          - quick
+
+env:
+  NODE_VERSION: '18'
+
+jobs:
+  daily-security-scan:
+    name: Daily Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          cd backend && npm ci
+          cd ../frontend && npm ci
+
+      - name: Install security tools
+        run: |
+          npm install -g npm-audit-fix better-npm-audit retire
+          
+          # Install OSV Scanner
+          curl -L https://github.com/google/osv-scanner/releases/latest/download/osv-scanner_linux_amd64 -o osv-scanner
+          chmod +x osv-scanner
+
+      - name: Run comprehensive security scan
+        run: |
+          echo "🔍 Starting comprehensive security scan..."
+          
+          # Create results directory
+          mkdir -p security-results
+          
+          # Backend security scan
+          echo "📊 Scanning backend dependencies..."
+          cd backend
+          npm audit --audit-level=moderate --json > ../security-results/npm-audit-backend.json || true
+          better-npm-audit audit --level moderate > ../security-results/better-audit-backend.txt || true
+          retire --path . --outputformat json --outputpath ../security-results/retire-backend.json || true
+          
+          # Frontend security scan
+          echo "📊 Scanning frontend dependencies..."
+          cd ../frontend
+          npm audit --audit-level=moderate --json > ../security-results/npm-audit-frontend.json || true
+          better-npm-audit audit --level moderate > ../security-results/better-audit-frontend.txt || true
+          retire --path . --outputformat json --outputpath ../security-results/retire-frontend.json || true
+          
+          # OSV Scanner
+          echo "📊 Running OSV Scanner..."
+          cd ..
+          ./osv-scanner --lockfile backend/package-lock.json --format json --output security-results/osv-backend.json || true
+          ./osv-scanner --lockfile frontend/package-lock.json --format json --output security-results/osv-frontend.json || true
+
+      - name: Check for high-severity vulnerabilities
+        run: |
+          echo "🚨 Checking for high-severity vulnerabilities..."
+          
+          # Check npm audit results
+          high_vulns_backend=$(cd backend && npm audit --audit-level=high --json | jq -r '.metadata.vulnerabilities.high // 0')
+          high_vulns_frontend=$(cd frontend && npm audit --audit-level=high --json | jq -r '.metadata.vulnerabilities.high // 0')
+          
+          total_high_vulns=$((high_vulns_backend + high_vulns_frontend))
+          
+          echo "High-severity vulnerabilities found: $total_high_vulns"
+          echo "  - Backend: $high_vulns_backend"
+          echo "  - Frontend: $high_vulns_frontend"
+          
+          if [ $total_high_vulns -gt 0 ]; then
+            echo "::warning::$total_high_vulns high-severity vulnerabilities detected"
+            echo "SECURITY_ALERT=true" >> $GITHUB_ENV
+          else
+            echo "✅ No high-severity vulnerabilities found"
+            echo "SECURITY_ALERT=false" >> $GITHUB_ENV
+          fi
+
+      - name: Generate security report
+        run: |
+          echo "📋 Generating security report..."
+          
+          cat > security-results/daily-security-report.md << EOF
+          # Daily Security Report
+          
+          **Date**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          **Scan Type**: Comprehensive Security Scan
+          **Repository**: ${{ github.repository }}
+          
+          ## Summary
+          
+          | Component | npm audit | Retire.js | OSV Scanner |
+          |-----------|-----------|-----------|-------------|
+          | Backend   | $(cd backend && npm audit --audit-level=high > /dev/null 2>&1 && echo "✅ Clean" || echo "⚠️ Issues") | $(cd backend && retire --path . > /dev/null 2>&1 && echo "✅ Clean" || echo "⚠️ Issues") | $(./osv-scanner --lockfile backend/package-lock.json > /dev/null 2>&1 && echo "✅ Clean" || echo "⚠️ Issues") |
+          | Frontend  | $(cd frontend && npm audit --audit-level=high > /dev/null 2>&1 && echo "✅ Clean" || echo "⚠️ Issues") | $(cd frontend && retire --path . > /dev/null 2>&1 && echo "✅ Clean" || echo "⚠️ Issues") | $(./osv-scanner --lockfile frontend/package-lock.json > /dev/null 2>&1 && echo "✅ Clean" || echo "⚠️ Issues") |
+          
+          ## Vulnerability Details
+          
+          ### Backend Dependencies
+          \`\`\`
+          $(cd backend && npm audit --audit-level=moderate 2>/dev/null | head -20)
+          \`\`\`
+          
+          ### Frontend Dependencies
+          \`\`\`
+          $(cd frontend && npm audit --audit-level=moderate 2>/dev/null | head -20)
+          \`\`\`
+          
+          ## Recommendations
+          
+          1. **Immediate Actions**: 
+             - Review and fix high-severity vulnerabilities
+             - Update dependencies with security patches
+             - Run \`npm audit fix\` for automatic fixes
+          
+          2. **Regular Maintenance**:
+             - Enable Dependabot for automatic dependency updates
+             - Monitor GitHub Security Advisories
+             - Schedule weekly security reviews
+          
+          3. **Tools Used**:
+             - **npm audit**: Built-in Node.js vulnerability scanner
+             - **better-npm-audit**: Enhanced npm audit reporting
+             - **Retire.js**: JavaScript library vulnerability scanner
+             - **OSV Scanner**: Google's open source vulnerability scanner
+          
+          ## Next Steps
+          
+          - [ ] Review vulnerability details
+          - [ ] Update vulnerable dependencies
+          - [ ] Test applications after updates
+          - [ ] Monitor for new vulnerabilities
+          
+          ---
+          
+          *This report was generated automatically by GitHub Actions*
+          EOF
+          
+          echo "Security report generated successfully"
+
+      - name: Upload security reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: daily-security-report-$(date +%Y%m%d)
+          path: security-results/
+          retention-days: 30
+
+      - name: Create security issue on high vulnerabilities
+        if: env.SECURITY_ALERT == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('security-results/daily-security-report.md', 'utf8');
+            
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🚨 Security Alert: High-severity vulnerabilities detected (${new Date().toISOString().split('T')[0]})`,
+              body: `${report}
+              
+              ## Automated Security Alert
+              
+              This issue was automatically created because high-severity vulnerabilities were detected in the daily security scan.
+              
+              **Priority**: High
+              **Action Required**: Review and fix vulnerabilities immediately
+              
+              ### Quick Fix Commands
+              \`\`\`bash
+              # Backend fixes
+              cd backend && npm audit fix --force
+              
+              # Frontend fixes  
+              cd frontend && npm audit fix --force
+              
+              # Test after fixes
+              npm test
+              \`\`\`
+              
+              Please review the vulnerability details above and take appropriate action.`,
+              labels: ['security', 'high-priority', 'automated']
+            });
+            
+            console.log(`Security issue created: #${issue.data.number}`);
+
+      - name: Send Slack notification on security issues
+        if: env.SECURITY_ALERT == 'true'
+        uses: ./.github/actions/action-slack-v3
+        with:
+          status: failure
+          channel: '#security-alerts'
+          message: |
+            🚨 **Security Alert Detected**
+            
+            High-severity vulnerabilities found in daily security scan:
+            - Repository: ${{ github.repository }}
+            - Date: $(date -u +"%Y-%m-%d")
+            - Action: Security issue created automatically
+            
+            Please review and fix immediately: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SECURITY_SLACK_WEBHOOK_URL }}
+
+      - name: Generate summary
+        run: |
+          echo "## Daily Security Scan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Date**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+          echo "**Repository**: ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ env.SECURITY_ALERT }}" == "true" ]; then
+            echo "🚨 **Security Alert**: High-severity vulnerabilities detected" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Actions Taken**:" >> $GITHUB_STEP_SUMMARY
+            echo "- Security issue created automatically" >> $GITHUB_STEP_SUMMARY
+            echo "- Slack notification sent" >> $GITHUB_STEP_SUMMARY
+            echo "- Security report uploaded" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ **All Clear**: No high-severity vulnerabilities detected" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Tools Used" >> $GITHUB_STEP_SUMMARY
+          echo "- npm audit (Node.js built-in)" >> $GITHUB_STEP_SUMMARY
+          echo "- better-npm-audit (Enhanced reporting)" >> $GITHUB_STEP_SUMMARY
+          echo "- Retire.js (JavaScript library scanner)" >> $GITHUB_STEP_SUMMARY
+          echo "- OSV Scanner (Google's vulnerability scanner)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Coverage" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Node.js dependencies" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ JavaScript libraries" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Transitive dependencies" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Multi-ecosystem vulnerabilities" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Next Scan**: Tomorrow at 8 AM UTC" >> $GITHUB_STEP_SUMMARY
+
+  weekly-security-review:
+    name: Weekly Security Review
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 8 * * 1' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Generate weekly security summary
+        run: |
+          echo "📊 Generating weekly security summary..."
+          
+          cat > weekly-security-summary.md << 'EOF'
+          # Weekly Security Summary
+          
+          **Week of**: $(date -u +"%Y-%m-%d")
+          **Repository**: ${{ github.repository }}
+          
+          ## Security Posture Review
+          
+          ### 1. Dependency Management
+          - [ ] All dependencies up to date
+          - [ ] No high-severity vulnerabilities
+          - [ ] Dependabot PRs reviewed and merged
+          - [ ] Lock files updated
+          
+          ### 2. Security Scanning
+          - [ ] Daily security scans completed
+          - [ ] No security issues created
+          - [ ] All security tools operational
+          - [ ] No false positives identified
+          
+          ### 3. Code Security
+          - [ ] CodeQL scans passing
+          - [ ] No secret leaks detected
+          - [ ] Security policies followed
+          - [ ] Code reviews completed
+          
+          ### 4. Infrastructure Security
+          - [ ] GitHub Actions secure
+          - [ ] Secrets properly managed
+          - [ ] Branch protection enabled
+          - [ ] Access controls reviewed
+          
+          ## Recommendations for Next Week
+          
+          1. **Proactive Measures**:
+             - Enable GitHub Security Advisories
+             - Review and update security policies
+             - Conduct security training for team
+             - Update incident response procedures
+          
+          2. **Tool Improvements**:
+             - Consider additional security tools
+             - Enhance automation workflows
+             - Improve alert mechanisms
+             - Update documentation
+          
+          3. **Compliance**:
+             - Review compliance requirements
+             - Update security documentation
+             - Conduct security audit
+             - Validate controls effectiveness
+          
+          ## Security Metrics
+          
+          - **Vulnerability Detection Time**: < 24 hours
+          - **Mean Time to Remediation**: < 72 hours
+          - **False Positive Rate**: < 5%
+          - **Security Scan Coverage**: 100%
+          
+          EOF
+          
+          echo "Weekly security summary generated"
+
+      - name: Upload weekly summary
+        uses: actions/upload-artifact@v3
+        with:
+          name: weekly-security-summary-$(date +%Y%m%d)
+          path: weekly-security-summary.md
+          retention-days: 90

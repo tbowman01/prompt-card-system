@@ -1,0 +1,481 @@
+name: Comprehensive Test Suite
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    - cron: '0 4 * * *' # Daily at 4 AM UTC
+
+env:
+  NODE_VERSION: '18'
+  POSTGRES_VERSION: '15'
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18, 20]
+        component: [backend, frontend]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        working-directory: ./${{ matrix.component }}
+        run: npm ci
+
+      - name: Run unit tests
+        working-directory: ./${{ matrix.component }}
+        run: npm test -- --coverage --ci --watchAll=false --testPathPattern=".*\.test\.(ts|js)$"
+        env:
+          NODE_ENV: test
+          CI: true
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./${{ matrix.component }}/coverage/lcov.info
+          flags: ${{ matrix.component }}-${{ matrix.node-version }}
+          name: ${{ matrix.component }}-coverage-${{ matrix.node-version }}
+          fail_ci_if_error: true
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:${{ env.POSTGRES_VERSION }}
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: promptcard_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          cd backend && npm ci
+          cd ../frontend && npm ci
+
+      - name: Wait for services
+        run: |
+          # Wait for PostgreSQL
+          until pg_isready -h localhost -p 5432 -U test; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+          
+          # Wait for Redis
+          until redis-cli -h localhost -p 6379 ping; do
+            echo "Waiting for Redis..."
+            sleep 2
+          done
+
+      - name: Run database migrations
+        working-directory: ./backend
+        run: npm run migrate
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/promptcard_test
+          NODE_ENV: test
+
+      - name: Run integration tests
+        working-directory: ./backend
+        run: npm run test:integration
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/promptcard_test
+          REDIS_URL: redis://localhost:6379
+          NODE_ENV: test
+
+      - name: Upload integration test results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: integration-test-results
+          path: |
+            ./backend/test-results/
+            ./backend/coverage/
+
+  e2e-tests:
+    name: End-to-End Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          cd backend && npm ci
+          cd ../frontend && npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+
+      - name: Start application
+        run: |
+          # Start backend
+          cd backend
+          npm run build
+          npm start &
+          BACKEND_PID=$!
+          echo "BACKEND_PID=$BACKEND_PID" >> $GITHUB_ENV
+          
+          # Start frontend
+          cd ../frontend
+          npm run build
+          npm start &
+          FRONTEND_PID=$!
+          echo "FRONTEND_PID=$FRONTEND_PID" >> $GITHUB_ENV
+          
+          # Wait for services to be ready
+          timeout 60 bash -c 'until curl -f http://localhost:3001/api/health; do sleep 2; done'
+          timeout 60 bash -c 'until curl -f http://localhost:3000; do sleep 2; done'
+        env:
+          NODE_ENV: test
+          DATABASE_PATH: ":memory:"
+          NEXT_PUBLIC_API_URL: http://localhost:3001
+
+      - name: Run E2E tests
+        run: npx playwright test
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost:3000
+
+      - name: Upload E2E test results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: e2e-test-results
+          path: |
+            test-results/
+            playwright-report/
+
+      - name: Cleanup
+        if: always()
+        run: |
+          kill $BACKEND_PID || true
+          kill $FRONTEND_PID || true
+
+  performance-tests:
+    name: Performance Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'schedule'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          cd backend && npm ci
+          cd ../frontend && npm ci
+
+      - name: Install performance testing tools
+        run: |
+          npm install -g artillery
+          npm install -g lighthouse
+
+      - name: Start application
+        run: |
+          # Start backend
+          cd backend
+          npm run build
+          npm start &
+          BACKEND_PID=$!
+          echo "BACKEND_PID=$BACKEND_PID" >> $GITHUB_ENV
+          
+          # Start frontend
+          cd ../frontend
+          npm run build
+          npm start &
+          FRONTEND_PID=$!
+          echo "FRONTEND_PID=$FRONTEND_PID" >> $GITHUB_ENV
+          
+          # Wait for services
+          timeout 60 bash -c 'until curl -f http://localhost:3001/api/health; do sleep 2; done'
+          timeout 60 bash -c 'until curl -f http://localhost:3000; do sleep 2; done'
+        env:
+          NODE_ENV: production
+          DATABASE_PATH: ":memory:"
+          NEXT_PUBLIC_API_URL: http://localhost:3001
+
+      - name: Run load tests
+        run: |
+          cat > load-test-config.yml << EOF
+          config:
+            target: 'http://localhost:3001'
+            phases:
+              - duration: 60
+                arrivalRate: 10
+              - duration: 120
+                arrivalRate: 20
+            defaults:
+              headers:
+                content-type: 'application/json'
+          scenarios:
+            - name: 'Health Check'
+              weight: 30
+              flow:
+                - get:
+                    url: '/api/health'
+            - name: 'Get Prompt Cards'
+              weight: 40
+              flow:
+                - get:
+                    url: '/api/prompt-cards'
+            - name: 'Create Prompt Card'
+              weight: 30
+              flow:
+                - post:
+                    url: '/api/prompt-cards'
+                    json:
+                      title: 'Test Prompt'
+                      description: 'Test Description'
+                      prompt_template: 'Test template'
+          EOF
+          
+          artillery run load-test-config.yml --output load-test-results.json
+
+      - name: Generate load test report
+        run: |
+          artillery report load-test-results.json --output load-test-report.html
+
+      - name: Run Lighthouse audit
+        run: |
+          lighthouse http://localhost:3000 --output html --output-path lighthouse-report.html --chrome-flags="--headless"
+
+      - name: Upload performance test results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: performance-test-results
+          path: |
+            load-test-results.json
+            load-test-report.html
+            lighthouse-report.html
+
+      - name: Cleanup
+        if: always()
+        run: |
+          kill $BACKEND_PID || true
+          kill $FRONTEND_PID || true
+
+  accessibility-tests:
+    name: Accessibility Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          cd backend && npm ci
+          cd ../frontend && npm ci
+
+      - name: Install accessibility testing tools
+        run: |
+          npm install -g @axe-core/cli
+          npm install -g pa11y
+
+      - name: Start application
+        run: |
+          # Start backend
+          cd backend
+          npm run build
+          npm start &
+          BACKEND_PID=$!
+          echo "BACKEND_PID=$BACKEND_PID" >> $GITHUB_ENV
+          
+          # Start frontend
+          cd ../frontend
+          npm run build
+          npm start &
+          FRONTEND_PID=$!
+          echo "FRONTEND_PID=$FRONTEND_PID" >> $GITHUB_ENV
+          
+          # Wait for services
+          timeout 60 bash -c 'until curl -f http://localhost:3000; do sleep 2; done'
+        env:
+          NODE_ENV: production
+          DATABASE_PATH: ":memory:"
+          NEXT_PUBLIC_API_URL: http://localhost:3001
+
+      - name: Run accessibility tests
+        run: |
+          # Test main pages
+          pa11y http://localhost:3000 --reporter json > accessibility-home.json || true
+          pa11y http://localhost:3000/prompt-cards --reporter json > accessibility-prompt-cards.json || true
+          
+          # Check for critical accessibility issues
+          if grep -q '"level": "error"' accessibility-*.json; then
+            echo "❌ Critical accessibility issues found"
+            cat accessibility-*.json
+            exit 1
+          else
+            echo "✅ No critical accessibility issues found"
+          fi
+
+      - name: Upload accessibility test results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: accessibility-test-results
+          path: accessibility-*.json
+
+      - name: Cleanup
+        if: always()
+        run: |
+          kill $BACKEND_PID || true
+          kill $FRONTEND_PID || true
+
+  test-coverage:
+    name: Test Coverage Analysis
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download coverage reports
+        uses: actions/download-artifact@v3
+        with:
+          path: coverage-reports
+
+      - name: Merge coverage reports
+        run: |
+          npm install -g nyc
+          
+          # Merge backend coverage
+          find coverage-reports -name "lcov.info" -path "*/backend/*" -exec cp {} backend-coverage.info \;
+          
+          # Merge frontend coverage
+          find coverage-reports -name "lcov.info" -path "*/frontend/*" -exec cp {} frontend-coverage.info \;
+          
+          # Generate combined report
+          echo "## Test Coverage Report" > coverage-report.md
+          echo "" >> coverage-report.md
+          
+          if [ -f "backend-coverage.info" ]; then
+            backend_lines=$(grep -c "^SF:" backend-coverage.info || echo "0")
+            echo "- Backend: $backend_lines files covered" >> coverage-report.md
+          fi
+          
+          if [ -f "frontend-coverage.info" ]; then
+            frontend_lines=$(grep -c "^SF:" frontend-coverage.info || echo "0")
+            echo "- Frontend: $frontend_lines files covered" >> coverage-report.md
+          fi
+
+      - name: Comment coverage on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const coverageReport = fs.readFileSync('coverage-report.md', 'utf8');
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: coverageReport
+            });
+
+  test-summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests, e2e-tests, performance-tests, accessibility-tests, test-coverage]
+    if: always()
+    steps:
+      - name: Generate test summary
+        run: |
+          echo "## Test Suite Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Test Type | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Unit Tests | ${{ needs.unit-tests.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Integration Tests | ${{ needs.integration-tests.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| E2E Tests | ${{ needs.e2e-tests.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Performance Tests | ${{ needs.performance-tests.result == 'success' && '✅ Pass' || needs.performance-tests.result == 'skipped' && '⏭️ Skip' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Accessibility Tests | ${{ needs.accessibility-tests.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Coverage Analysis | ${{ needs.test-coverage.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Calculate test score
+          total_tests=6
+          passed_tests=0
+          
+          [[ "${{ needs.unit-tests.result }}" == "success" ]] && ((passed_tests++))
+          [[ "${{ needs.integration-tests.result }}" == "success" ]] && ((passed_tests++))
+          [[ "${{ needs.e2e-tests.result }}" == "success" ]] && ((passed_tests++))
+          [[ "${{ needs.performance-tests.result }}" == "success" || "${{ needs.performance-tests.result }}" == "skipped" ]] && ((passed_tests++))
+          [[ "${{ needs.accessibility-tests.result }}" == "success" ]] && ((passed_tests++))
+          [[ "${{ needs.test-coverage.result }}" == "success" ]] && ((passed_tests++))
+          
+          score=$((passed_tests * 100 / total_tests))
+          
+          echo "**Test Score: $score%** ($passed_tests/$total_tests test suites passed)" >> $GITHUB_STEP_SUMMARY
+          
+          if [ $score -eq 100 ]; then
+            echo "🎉 **All tests passed!**" >> $GITHUB_STEP_SUMMARY
+          elif [ $score -ge 80 ]; then
+            echo "✅ **Test suite is healthy**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Test suite needs attention**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Fail if critical tests failed
+        if: needs.unit-tests.result == 'failure' || needs.integration-tests.result == 'failure'
+        run: |
+          echo "❌ Critical tests failed"
+          exit 1

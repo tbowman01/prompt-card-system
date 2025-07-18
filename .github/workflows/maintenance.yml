@@ -1,0 +1,603 @@
+name: Maintenance & Monitoring
+
+on:
+  schedule:
+    - cron: '0 2 * * 1' # Weekly on Monday at 2 AM UTC
+    - cron: '0 0 1 * *' # Monthly on 1st at midnight UTC
+  workflow_dispatch:
+    inputs:
+      maintenance_type:
+        description: 'Type of maintenance to perform'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - dependencies
+          - cleanup
+          - security
+          - performance
+          - health-check
+
+env:
+  NODE_VERSION: '18'
+
+jobs:
+  dependency-update:
+    name: Dependency Updates
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 2 * * 1' || github.event.inputs.maintenance_type == 'full' || github.event.inputs.maintenance_type == 'dependencies'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install npm-check-updates
+        run: npm install -g npm-check-updates
+
+      - name: Check for dependency updates
+        run: |
+          echo "🔍 Checking for dependency updates..."
+          
+          # Check backend dependencies
+          cd backend
+          echo "Backend dependencies:"
+          ncu --format group
+          
+          # Check frontend dependencies
+          cd ../frontend
+          echo "Frontend dependencies:"
+          ncu --format group
+          
+          cd ..
+
+      - name: Update patch and minor versions
+        run: |
+          echo "📦 Updating patch and minor versions..."
+          
+          # Update backend dependencies
+          cd backend
+          ncu -u --target minor
+          npm install
+          
+          # Update frontend dependencies
+          cd ../frontend
+          ncu -u --target minor
+          npm install
+          
+          cd ..
+
+      - name: Run tests after updates
+        run: |
+          echo "🧪 Running tests after dependency updates..."
+          
+          # Test backend
+          cd backend
+          npm test
+          
+          # Test frontend
+          cd ../frontend
+          npm test
+          
+          cd ..
+
+      - name: Check for security vulnerabilities
+        run: |
+          echo "🔒 Checking for security vulnerabilities..."
+          
+          # Audit backend
+          cd backend
+          npm audit --audit-level=moderate
+          
+          # Audit frontend
+          cd ../frontend
+          npm audit --audit-level=moderate
+          
+          cd ..
+
+      - name: Create dependency update PR
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: 'chore: update dependencies'
+          title: 'chore: automated dependency updates'
+          body: |
+            ## 📦 Automated Dependency Updates
+            
+            This PR contains automated dependency updates:
+            
+            - Updated patch and minor versions
+            - All tests passing
+            - No security vulnerabilities detected
+            
+            ### Changes:
+            - Backend: Updated NPM packages to latest compatible versions
+            - Frontend: Updated NPM packages to latest compatible versions
+            
+            ### Testing:
+            - ✅ Backend tests passing
+            - ✅ Frontend tests passing
+            - ✅ Security audit passing
+            
+            **Note:** This PR was automatically created by the maintenance workflow.
+          branch: maintenance/dependency-updates
+          delete-branch: true
+
+  cleanup-tasks:
+    name: Cleanup Tasks
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 0 1 * *' || github.event.inputs.maintenance_type == 'full' || github.event.inputs.maintenance_type == 'cleanup'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Clean up old workflow runs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: runs } = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'ci.yml',
+              per_page: 100
+            });
+            
+            // Keep last 50 runs, delete older ones
+            const runsToDelete = runs.workflow_runs.slice(50);
+            
+            for (const run of runsToDelete) {
+              if (run.status === 'completed') {
+                console.log(`Deleting workflow run ${run.id}`);
+                await github.rest.actions.deleteWorkflowRun({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  run_id: run.id
+                });
+              }
+            }
+            
+            console.log(`Cleaned up ${runsToDelete.length} old workflow runs`);
+
+      - name: Clean up old artifacts
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: artifacts } = await github.rest.actions.listArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100
+            });
+            
+            // Delete artifacts older than 30 days
+            const thirtyDaysAgo = new Date();
+            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+            
+            for (const artifact of artifacts.artifacts) {
+              const artifactDate = new Date(artifact.created_at);
+              if (artifactDate < thirtyDaysAgo) {
+                console.log(`Deleting artifact ${artifact.name} (${artifact.id})`);
+                await github.rest.actions.deleteArtifact({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  artifact_id: artifact.id
+                });
+              }
+            }
+            
+            console.log('Cleaned up old artifacts');
+
+      - name: Clean up old branches
+        run: |
+          echo "🧹 Cleaning up old branches..."
+          
+          # List merged branches
+          git branch -r --merged | grep -v 'main\|develop' | grep -v '\->' | while read branch; do
+            branch_name=$(echo $branch | sed 's/origin\///')
+            echo "Found merged branch: $branch_name"
+            
+            # Check if branch is older than 30 days
+            last_commit=$(git log -1 --format="%ci" $branch)
+            if [ -n "$last_commit" ]; then
+              echo "Last commit: $last_commit"
+              # Note: In a real implementation, you would check the date and delete old branches
+            fi
+          done
+
+      - name: Clean up Docker images
+        run: |
+          echo "🐳 Cleaning up Docker images..."
+          
+          # This would typically be done on the deployment server
+          # For now, we'll just log what would be cleaned up
+          echo "Would clean up unused Docker images on deployment servers"
+          echo "Would clean up old Docker build cache"
+          echo "Would clean up dangling Docker volumes"
+
+  security-maintenance:
+    name: Security Maintenance
+    runs-on: ubuntu-latest
+    if: github.event.inputs.maintenance_type == 'full' || github.event.inputs.maintenance_type == 'security'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          cd backend && npm ci
+          cd ../frontend && npm ci
+
+      - name: Security audit
+        run: |
+          echo "🔒 Running security audit..."
+          
+          # Backend security audit
+          cd backend
+          npm audit --audit-level=moderate --json > ../backend-audit.json || true
+          
+          # Frontend security audit
+          cd ../frontend
+          npm audit --audit-level=moderate --json > ../frontend-audit.json || true
+          
+          cd ..
+
+      - name: Check for secrets in code
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: main
+          head: HEAD
+          extra_args: --debug --only-verified
+
+      - name: Scan for hardcoded credentials
+        run: |
+          echo "🔍 Scanning for hardcoded credentials..."
+          
+          # Look for common credential patterns
+          echo "Checking for API keys..."
+          grep -r -i "api[_-]key\|apikey" --include="*.js" --include="*.ts" --include="*.json" . || echo "No API keys found"
+          
+          echo "Checking for passwords..."
+          grep -r -i "password\s*=" --include="*.js" --include="*.ts" . || echo "No hardcoded passwords found"
+          
+          echo "Checking for tokens..."
+          grep -r -i "token\s*=" --include="*.js" --include="*.ts" . || echo "No hardcoded tokens found"
+
+      - name: Check security headers
+        run: |
+          echo "🛡️ Checking security headers implementation..."
+          
+          # Check for security middleware in backend
+          if grep -r "helmet" backend/src/; then
+            echo "✅ Helmet security middleware found"
+          else
+            echo "⚠️ Helmet security middleware not found"
+          fi
+          
+          # Check for CORS configuration
+          if grep -r "cors" backend/src/; then
+            echo "✅ CORS configuration found"
+          else
+            echo "⚠️ CORS configuration not found"
+          fi
+
+      - name: Generate security report
+        run: |
+          echo "📊 Generating security report..."
+          
+          cat > security-report.md << EOF
+          # Security Maintenance Report
+          
+          **Date:** $(date -u +%Y-%m-%d)
+          **Type:** Security Maintenance
+          
+          ## Security Audit Results
+          
+          ### Backend Dependencies
+          $(cd backend && npm audit --audit-level=moderate || echo "No vulnerabilities found")
+          
+          ### Frontend Dependencies
+          $(cd frontend && npm audit --audit-level=moderate || echo "No vulnerabilities found")
+          
+          ## Security Checks
+          
+          - [x] Dependency vulnerabilities checked
+          - [x] Secret scanning completed
+          - [x] Security headers verified
+          - [x] Hardcoded credentials scan completed
+          
+          ## Recommendations
+          
+          - Keep dependencies updated
+          - Regular security audits
+          - Implement automated secret scanning
+          - Monitor for security advisories
+          
+          EOF
+          
+          echo "Security report generated"
+
+      - name: Upload security report
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-report
+          path: |
+            security-report.md
+            backend-audit.json
+            frontend-audit.json
+
+  performance-maintenance:
+    name: Performance Maintenance
+    runs-on: ubuntu-latest
+    if: github.event.inputs.maintenance_type == 'full' || github.event.inputs.maintenance_type == 'performance'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          cd backend && npm ci
+          cd ../frontend && npm ci
+
+      - name: Analyze bundle sizes
+        run: |
+          echo "📊 Analyzing bundle sizes..."
+          
+          # Build frontend
+          cd frontend
+          npm run build
+          
+          # Analyze bundle size
+          if [ -d ".next" ]; then
+            echo "Frontend bundle analysis:"
+            du -sh .next/static/chunks/* | sort -hr | head -10
+            
+            # Check for large bundles
+            find .next/static/chunks -name "*.js" -size +1M -exec ls -lh {} \; | while read file; do
+              echo "⚠️ Large bundle detected: $file"
+            done
+          fi
+
+      - name: Check for performance issues
+        run: |
+          echo "🔍 Checking for performance issues..."
+          
+          # Check for console.log in production code
+          echo "Checking for console.log statements..."
+          if grep -r "console\.log" frontend/src/ backend/src/ --include="*.js" --include="*.ts"; then
+            echo "⚠️ Console.log statements found in production code"
+          else
+            echo "✅ No console.log statements found"
+          fi
+          
+          # Check for large images
+          echo "Checking for large images..."
+          find . -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -size +500k | while read file; do
+            echo "⚠️ Large image detected: $file ($(du -h "$file" | cut -f1))"
+          done
+
+      - name: Database maintenance recommendations
+        run: |
+          echo "🗄️ Database maintenance recommendations..."
+          
+          cat > db-maintenance.md << EOF
+          # Database Maintenance Checklist
+          
+          ## Regular Tasks
+          - [ ] Run VACUUM on PostgreSQL database
+          - [ ] Update table statistics
+          - [ ] Check for unused indexes
+          - [ ] Monitor query performance
+          - [ ] Review slow query logs
+          
+          ## Weekly Tasks
+          - [ ] Backup database
+          - [ ] Test backup restoration
+          - [ ] Check disk space usage
+          - [ ] Monitor connection pools
+          
+          ## Monthly Tasks
+          - [ ] Review and optimize queries
+          - [ ] Update database version if needed
+          - [ ] Check for database fragmentation
+          - [ ] Review security configurations
+          
+          EOF
+          
+          echo "Database maintenance checklist generated"
+
+      - name: Generate performance report
+        run: |
+          echo "📈 Generating performance report..."
+          
+          cat > performance-report.md << EOF
+          # Performance Maintenance Report
+          
+          **Date:** $(date -u +%Y-%m-%d)
+          **Type:** Performance Maintenance
+          
+          ## Bundle Analysis
+          - Frontend bundle size checked
+          - Large assets identified
+          - Performance anti-patterns checked
+          
+          ## Recommendations
+          - Optimize large JavaScript bundles
+          - Compress images over 500KB
+          - Remove console.log statements
+          - Implement lazy loading for large components
+          
+          ## Database Performance
+          - Regular maintenance tasks documented
+          - Query optimization recommendations provided
+          - Monitoring guidelines established
+          
+          EOF
+
+      - name: Upload performance report
+        uses: actions/upload-artifact@v3
+        with:
+          name: performance-report
+          path: |
+            performance-report.md
+            db-maintenance.md
+
+  health-check:
+    name: System Health Check
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check GitHub API rate limits
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: rateLimit } = await github.rest.rateLimit.get();
+            console.log('GitHub API Rate Limit Status:');
+            console.log(`Core: ${rateLimit.resources.core.remaining}/${rateLimit.resources.core.limit}`);
+            console.log(`Search: ${rateLimit.resources.search.remaining}/${rateLimit.resources.search.limit}`);
+            console.log(`GraphQL: ${rateLimit.resources.graphql.remaining}/${rateLimit.resources.graphql.limit}`);
+            
+            if (rateLimit.resources.core.remaining < 1000) {
+              console.log('::warning::GitHub API rate limit is running low');
+            }
+
+      - name: Check GitHub Actions usage
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              const { data: billing } = await github.rest.billing.getGithubActionsBillingOrg({
+                org: context.repo.owner
+              });
+              console.log('GitHub Actions Usage:');
+              console.log(`Total minutes used: ${billing.total_minutes_used}`);
+              console.log(`Included minutes: ${billing.included_minutes}`);
+              console.log(`Minutes used percentage: ${(billing.total_minutes_used / billing.included_minutes * 100).toFixed(1)}%`);
+            } catch (error) {
+              console.log('Could not retrieve billing information (likely personal account)');
+            }
+
+      - name: Check repository health
+        run: |
+          echo "🏥 Repository health check..."
+          
+          # Check for required files
+          echo "Checking for required files..."
+          required_files=("README.md" "LICENSE" ".gitignore" "package.json")
+          
+          for file in "${required_files[@]}"; do
+            if [ -f "$file" ]; then
+              echo "✅ $file exists"
+            else
+              echo "⚠️ $file missing"
+            fi
+          done
+          
+          # Check for security files
+          echo "Checking for security files..."
+          security_files=("SECURITY.md" ".github/SECURITY.md")
+          
+          for file in "${security_files[@]}"; do
+            if [ -f "$file" ]; then
+              echo "✅ $file exists"
+              break
+            fi
+          done
+
+      - name: Monitor workflow performance
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: runs } = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'ci.yml',
+              per_page: 10
+            });
+            
+            console.log('Recent CI Workflow Performance:');
+            for (const run of runs.workflow_runs) {
+              const duration = new Date(run.updated_at) - new Date(run.created_at);
+              const minutes = Math.floor(duration / 60000);
+              console.log(`Run ${run.id}: ${minutes} minutes (${run.conclusion})`);
+            }
+
+  maintenance-summary:
+    name: Maintenance Summary
+    runs-on: ubuntu-latest
+    needs: [dependency-update, cleanup-tasks, security-maintenance, performance-maintenance, health-check]
+    if: always()
+    steps:
+      - name: Generate maintenance summary
+        run: |
+          echo "## Maintenance Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Date:** $(date -u +%Y-%m-%d)" >> $GITHUB_STEP_SUMMARY
+          echo "**Type:** ${{ github.event.inputs.maintenance_type || 'Scheduled' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Task | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Dependency Updates | ${{ needs.dependency-update.result == 'success' && '✅ Pass' || needs.dependency-update.result == 'skipped' && '⏭️ Skip' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Cleanup Tasks | ${{ needs.cleanup-tasks.result == 'success' && '✅ Pass' || needs.cleanup-tasks.result == 'skipped' && '⏭️ Skip' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Security Maintenance | ${{ needs.security-maintenance.result == 'success' && '✅ Pass' || needs.security-maintenance.result == 'skipped' && '⏭️ Skip' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Performance Maintenance | ${{ needs.performance-maintenance.result == 'success' && '✅ Pass' || needs.performance-maintenance.result == 'skipped' && '⏭️ Skip' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Health Check | ${{ needs.health-check.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Calculate overall success rate
+          total_jobs=5
+          successful_jobs=0
+          
+          [[ "${{ needs.dependency-update.result }}" == "success" || "${{ needs.dependency-update.result }}" == "skipped" ]] && ((successful_jobs++))
+          [[ "${{ needs.cleanup-tasks.result }}" == "success" || "${{ needs.cleanup-tasks.result }}" == "skipped" ]] && ((successful_jobs++))
+          [[ "${{ needs.security-maintenance.result }}" == "success" || "${{ needs.security-maintenance.result }}" == "skipped" ]] && ((successful_jobs++))
+          [[ "${{ needs.performance-maintenance.result }}" == "success" || "${{ needs.performance-maintenance.result }}" == "skipped" ]] && ((successful_jobs++))
+          [[ "${{ needs.health-check.result }}" == "success" ]] && ((successful_jobs++))
+          
+          success_rate=$((successful_jobs * 100 / total_jobs))
+          
+          echo "**Success Rate: $success_rate%** ($successful_jobs/$total_jobs tasks completed)" >> $GITHUB_STEP_SUMMARY
+          
+          if [ $success_rate -eq 100 ]; then
+            echo "✅ **All maintenance tasks completed successfully!**" >> $GITHUB_STEP_SUMMARY
+          elif [ $success_rate -ge 80 ]; then
+            echo "⚠️ **Most maintenance tasks completed successfully**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Several maintenance tasks failed - please review**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Notify maintenance completion
+        uses: ./.github/actions/action-slack-v3
+        if: always()
+        with:
+          status: ${{ job.status }}
+          channel: '#maintenance'
+          message: |
+            🔧 Maintenance workflow completed
+            
+            **Type:** ${{ github.event.inputs.maintenance_type || 'Scheduled' }}
+            **Status:** ${{ job.status }}
+            **Repository:** ${{ github.repository }}
+            
+            Check the workflow summary for details.
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

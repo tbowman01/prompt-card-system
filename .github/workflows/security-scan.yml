@@ -1,0 +1,517 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    - cron: '0 2 * * 1' # Weekly on Monday at 2 AM UTC
+
+jobs:
+  dependency-scan:
+    name: Dependency Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          cd backend && npm ci
+          cd ../frontend && npm ci
+
+      - name: Run npm audit (Backend)
+        run: |
+          cd backend
+          npm audit --audit-level=moderate --json > npm-audit-backend.json || true
+          
+          # Check for high/critical vulnerabilities
+          if npm audit --audit-level=high; then
+            echo "✅ No high/critical vulnerabilities found in backend"
+          else
+            echo "❌ High/critical vulnerabilities found in backend"
+            npm audit --audit-level=high
+            exit 1
+          fi
+
+      - name: Run npm audit (Frontend)
+        run: |
+          cd frontend
+          npm audit --audit-level=moderate --json > npm-audit-frontend.json || true
+          
+          # Check for high/critical vulnerabilities
+          if npm audit --audit-level=high; then
+            echo "✅ No high/critical vulnerabilities found in frontend"
+          else
+            echo "❌ High/critical vulnerabilities found in frontend"
+            npm audit --audit-level=high
+            exit 1
+          fi
+
+      - name: Upload audit reports
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: npm-audit-reports
+          path: |
+            backend/npm-audit-backend.json
+            frontend/npm-audit-frontend.json
+
+  advanced-security-scan:
+    name: Advanced Security Scan
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'schedule'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          cd backend && npm ci
+          cd ../frontend && npm ci
+
+      - name: Install security scanning tools
+        run: |
+          # Install npm audit (built-in)
+          npm install -g npm-audit-fix
+          
+          # Install better-npm-audit for enhanced reporting
+          npm install -g better-npm-audit
+          
+          # Install retire.js for JavaScript library vulnerability scanning
+          npm install -g retire
+
+      - name: Run enhanced npm audit (Backend)
+        run: |
+          cd backend
+          echo "🔍 Running enhanced npm audit for backend..."
+          
+          # Run npm audit with detailed output
+          npm audit --audit-level=moderate --json > npm-audit-backend.json || true
+          
+          # Run better-npm-audit for enhanced reporting
+          better-npm-audit audit --level moderate || true
+          
+          # Check for high/critical vulnerabilities
+          if npm audit --audit-level=high; then
+            echo "✅ No high/critical vulnerabilities found in backend"
+          else
+            echo "❌ High/critical vulnerabilities found in backend"
+            npm audit --audit-level=high
+            exit 1
+          fi
+
+      - name: Run enhanced npm audit (Frontend)
+        run: |
+          cd frontend
+          echo "🔍 Running enhanced npm audit for frontend..."
+          
+          # Run npm audit with detailed output
+          npm audit --audit-level=moderate --json > npm-audit-frontend.json || true
+          
+          # Run better-npm-audit for enhanced reporting
+          better-npm-audit audit --level moderate || true
+          
+          # Check for high/critical vulnerabilities
+          if npm audit --audit-level=high; then
+            echo "✅ No high/critical vulnerabilities found in frontend"
+          else
+            echo "❌ High/critical vulnerabilities found in frontend"
+            npm audit --audit-level=high
+            exit 1
+          fi
+
+      - name: Run Retire.js scan
+        run: |
+          echo "🔍 Running Retire.js vulnerability scan..."
+          
+          # Scan backend JavaScript files
+          cd backend
+          retire --path . --outputformat json --outputpath retire-backend.json || true
+          
+          # Scan frontend JavaScript files
+          cd ../frontend
+          retire --path . --outputformat json --outputpath retire-frontend.json || true
+          
+          echo "✅ Retire.js scan completed"
+
+      - name: Run OSV Scanner (Google's Open Source Vulnerability Scanner)
+        run: |
+          echo "🔍 Running OSV Scanner..."
+          
+          # Install OSV Scanner
+          curl -L https://github.com/google/osv-scanner/releases/latest/download/osv-scanner_linux_amd64 -o osv-scanner
+          chmod +x osv-scanner
+          
+          # Scan the project
+          ./osv-scanner --lockfile backend/package-lock.json --format json --output osv-backend.json || true
+          ./osv-scanner --lockfile frontend/package-lock.json --format json --output osv-frontend.json || true
+          
+          echo "✅ OSV Scanner completed"
+
+      - name: Generate security report
+        run: |
+          echo "📊 Generating comprehensive security report..."
+          
+          cat > security-report.md << 'EOF'
+          # Security Scan Report
+          
+          **Date:** $(date -u +%Y-%m-%d)
+          **Scan Type:** Comprehensive Security Analysis
+          
+          ## Tools Used
+          - **npm audit**: Built-in Node.js vulnerability scanner
+          - **better-npm-audit**: Enhanced npm audit reporting
+          - **Retire.js**: JavaScript library vulnerability detection
+          - **OSV Scanner**: Google's open source vulnerability scanner
+          
+          ## Backend Security Status
+          - npm audit: $(cd backend && npm audit --audit-level=high > /dev/null 2>&1 && echo "✅ No high/critical issues" || echo "❌ Issues found")
+          - Retire.js: $(cd backend && retire --path . > /dev/null 2>&1 && echo "✅ No known vulnerabilities" || echo "⚠️ Potential issues")
+          
+          ## Frontend Security Status
+          - npm audit: $(cd frontend && npm audit --audit-level=high > /dev/null 2>&1 && echo "✅ No high/critical issues" || echo "❌ Issues found")
+          - Retire.js: $(cd frontend && retire --path . > /dev/null 2>&1 && echo "✅ No known vulnerabilities" || echo "⚠️ Potential issues")
+          
+          ## Recommendations
+          1. Regularly update dependencies
+          2. Monitor security advisories
+          3. Use npm audit to check for vulnerabilities
+          4. Consider using Dependabot for automated updates
+          5. Set up GitHub Security Advisories
+          
+          ## Alternative Premium Tools
+          - **Snyk** (Premium): Advanced vulnerability management
+          - **WhiteSource/Mend** (Premium): Comprehensive security scanning
+          - **Sonatype Nexus** (Premium): Repository security analysis
+          - **Veracode** (Premium): Static application security testing
+          
+          ## Free GitHub Security Features
+          - **Dependabot**: Automatic dependency updates
+          - **Security Advisories**: GitHub's vulnerability database
+          - **Code Scanning**: GitHub's CodeQL analysis
+          - **Secret Scanning**: Detect secrets in code
+          
+          EOF
+          
+          echo "Security report generated"
+
+      - name: Upload security reports
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: security-reports
+          path: |
+            backend/npm-audit-backend.json
+            frontend/npm-audit-frontend.json
+            backend/retire-backend.json
+            frontend/retire-frontend.json
+            osv-backend.json
+            osv-frontend.json
+            security-report.md
+
+  codeql-analysis:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [ 'javascript' ]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended,security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{matrix.language}}"
+
+  secret-scan:
+    name: Secret Scanning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: TruffleHog OSS
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: main
+          head: HEAD
+          extra_args: --debug --only-verified
+
+      - name: GitLeaks
+        uses: ./.github/actions/gitleaks-action-v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+  docker-security-scan:
+    name: Docker Security Scan
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image for scanning
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: false
+          tags: prompt-card-backend:scan
+          load: true
+
+      - name: Build frontend image for scanning
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: false
+          tags: prompt-card-frontend:scan
+          load: true
+
+      - name: Run Trivy vulnerability scanner (Backend)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'prompt-card-backend:scan'
+          format: 'sarif'
+          output: 'trivy-backend-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Run Trivy vulnerability scanner (Frontend)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'prompt-card-frontend:scan'
+          format: 'sarif'
+          output: 'trivy-frontend-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: |
+            trivy-backend-results.sarif
+            trivy-frontend-results.sarif
+
+  license-check:
+    name: License Compliance Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install license checker
+        run: npm install -g license-checker
+
+      - name: Install dependencies
+        run: |
+          cd backend && npm ci
+          cd ../frontend && npm ci
+
+      - name: Check backend licenses
+        run: |
+          cd backend
+          license-checker --onlyAllow 'MIT;Apache-2.0;BSD-2-Clause;BSD-3-Clause;ISC;CC0-1.0;Unlicense' --json > licenses-backend.json
+          
+          # Check for restricted licenses
+          if license-checker --excludePackages 'fsevents' --restrictedLicenses 'GPL;LGPL;AGPL;CPAL;OSL;QPL;SSPL;EUPL;OFL' --json > restricted-licenses-backend.json; then
+            echo "✅ No restricted licenses found in backend"
+          else
+            echo "❌ Restricted licenses found in backend"
+            cat restricted-licenses-backend.json
+            exit 1
+          fi
+
+      - name: Check frontend licenses
+        run: |
+          cd frontend
+          license-checker --onlyAllow 'MIT;Apache-2.0;BSD-2-Clause;BSD-3-Clause;ISC;CC0-1.0;Unlicense' --json > licenses-frontend.json
+          
+          # Check for restricted licenses
+          if license-checker --excludePackages 'fsevents' --restrictedLicenses 'GPL;LGPL;AGPL;CPAL;OSL;QPL;SSPL;EUPL;OFL' --json > restricted-licenses-frontend.json; then
+            echo "✅ No restricted licenses found in frontend"
+          else
+            echo "❌ Restricted licenses found in frontend"
+            cat restricted-licenses-frontend.json
+            exit 1
+          fi
+
+      - name: Upload license reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: license-reports
+          path: |
+            backend/licenses-backend.json
+            frontend/licenses-frontend.json
+
+  security-policy-check:
+    name: Security Policy Compliance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for security policy
+        run: |
+          if [ -f "SECURITY.md" ]; then
+            echo "✅ Security policy found"
+          else
+            echo "⚠️ No security policy found - consider adding SECURITY.md"
+            echo "::notice::Consider adding a SECURITY.md file"
+          fi
+
+      - name: Check for security configurations
+        run: |
+          # Check for common security configurations
+          echo "Checking security configurations..."
+          
+          # Check for helmet configuration in backend
+          if grep -r "helmet" backend/src/ --include="*.ts" --include="*.js"; then
+            echo "✅ Helmet security middleware found"
+          else
+            echo "⚠️ Helmet security middleware not found"
+          fi
+          
+          # Check for CORS configuration
+          if grep -r "cors" backend/src/ --include="*.ts" --include="*.js"; then
+            echo "✅ CORS configuration found"
+          else
+            echo "⚠️ CORS configuration not found"
+          fi
+          
+          # Check for rate limiting
+          if grep -r "rate.*limit" backend/src/ --include="*.ts" --include="*.js"; then
+            echo "✅ Rate limiting found"
+          else
+            echo "⚠️ Rate limiting not found"
+          fi
+
+  compliance-check:
+    name: Compliance Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check GDPR compliance indicators
+        run: |
+          echo "Checking GDPR compliance indicators..."
+          
+          # Check for privacy policy
+          if find . -name "*privacy*" -o -name "*gdpr*" | grep -q .; then
+            echo "✅ Privacy/GDPR documentation found"
+          else
+            echo "⚠️ No privacy/GDPR documentation found"
+          fi
+          
+          # Check for data handling code
+          if grep -r "personal.*data\|PII\|GDPR" . --include="*.ts" --include="*.js" --include="*.md"; then
+            echo "✅ Data handling/GDPR references found"
+          else
+            echo "⚠️ No data handling/GDPR references found"
+          fi
+
+      - name: Check for compliance frameworks
+        run: |
+          # Check for SOC 2 compliance
+          if find . -name "*soc2*" -o -name "*compliance*" | grep -q .; then
+            echo "✅ Compliance documentation found"
+          else
+            echo "⚠️ No compliance documentation found"
+          fi
+
+  security-summary:
+    name: Security Summary
+    runs-on: ubuntu-latest
+    needs: [dependency-scan, advanced-security-scan, codeql-analysis, secret-scan, license-check, security-policy-check, compliance-check]
+    if: always()
+    steps:
+      - name: Generate security summary
+        run: |
+          echo "## Security Scan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Scan Type | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Dependency Scan | ${{ needs.dependency-scan.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| CodeQL Analysis | ${{ needs.codeql-analysis.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Secret Scan | ${{ needs.secret-scan.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| License Check | ${{ needs.license-check.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Security Policy | ${{ needs.security-policy-check.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Compliance Check | ${{ needs.compliance-check.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Calculate overall security score
+          total_checks=6
+          passed_checks=0
+          
+          [[ "${{ needs.dependency-scan.result }}" == "success" ]] && ((passed_checks++))
+          [[ "${{ needs.codeql-analysis.result }}" == "success" ]] && ((passed_checks++))
+          [[ "${{ needs.secret-scan.result }}" == "success" ]] && ((passed_checks++))
+          [[ "${{ needs.license-check.result }}" == "success" ]] && ((passed_checks++))
+          [[ "${{ needs.security-policy-check.result }}" == "success" ]] && ((passed_checks++))
+          [[ "${{ needs.compliance-check.result }}" == "success" ]] && ((passed_checks++))
+          
+          score=$((passed_checks * 100 / total_checks))
+          
+          echo "**Security Score: $score%** ($passed_checks/$total_checks checks passed)" >> $GITHUB_STEP_SUMMARY
+          
+          if [ $score -ge 80 ]; then
+            echo "✅ **Security posture is good**" >> $GITHUB_STEP_SUMMARY
+          elif [ $score -ge 60 ]; then
+            echo "⚠️ **Security posture needs improvement**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Security posture requires immediate attention**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Notify security team
+        if: failure()
+        uses: ./.github/actions/action-slack-v3
+        with:
+          status: failure
+          channel: '#security'
+          message: |
+            🚨 Security scan failed for ${{ github.ref }}
+            Commit: ${{ github.sha }}
+            Author: ${{ github.actor }}
+            Please review security findings immediately.
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SECURITY_SLACK_WEBHOOK_URL }}

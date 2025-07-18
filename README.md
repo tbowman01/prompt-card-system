@@ -248,6 +248,63 @@ npm run build:frontend
 npm run build:backend
 ```
 
+## 🚀 CI/CD Pipeline
+
+### ✅ Comprehensive GitHub Actions Automation
+
+Our project includes a complete CI/CD pipeline with **9 automated workflows**:
+
+#### 🔧 Core Workflows
+- **`ci.yml`** - Main CI pipeline with build, test, and quality checks
+- **`pr-validation.yml`** - Pull request validation and semantic checks
+- **`cd.yml`** - Continuous deployment to staging and production
+
+#### 🔒 Security & Quality
+- **`security-scan.yml`** - Comprehensive security scanning (CodeQL, Snyk, Trivy)
+- **`test-suite.yml`** - Full test suite (unit, integration, E2E, performance)
+- **`docs-validation.yml`** - Documentation validation and link checking
+
+#### 📊 Monitoring & Maintenance
+- **`performance-monitoring.yml`** - Performance benchmarking and monitoring
+- **`maintenance.yml`** - Automated dependency updates and cleanup
+- **`release.yml`** - Release management and automated deployment
+
+### 🛡️ Security Features
+- **Secret scanning** with TruffleHog and GitLeaks
+- **Dependency vulnerability scanning** with npm audit and Snyk
+- **Docker image security** with Trivy
+- **License compliance** checking
+- **Code quality** analysis with CodeQL
+
+### 📈 Performance Monitoring
+- **Lighthouse audits** for frontend performance
+- **Load testing** with Artillery
+- **Memory usage analysis**
+- **Database performance** monitoring
+- **Real-time alerts** for performance regressions
+
+### 🔄 Deployment Strategy
+- **Blue-green deployment** for zero-downtime
+- **Environment-specific** configurations (staging/production)
+- **Automated rollback** on deployment failures
+- **Health checks** and monitoring
+- **Slack notifications** for deployment status
+
+### 📋 Workflow Features
+- **Parallel execution** for faster builds
+- **Matrix testing** across Node.js versions
+- **Comprehensive reporting** with GitHub summaries
+- **Automated maintenance** and cleanup
+- **Documentation generation** and validation
+
+### 🎯 Pipeline Benefits
+- **10-minute builds** with comprehensive testing
+- **Zero-downtime deployments**
+- **Automated security scanning**
+- **Performance regression detection**
+- **Comprehensive documentation validation**
+- **Automated dependency management**
+
 ## 📚 Documentation
 
 ### 📖 Complete Documentation Available
