@@ -7,7 +7,7 @@ const { Octokit } = require("@octokit/rest");
 const { readFileSync } = require("fs");
 const core = require("@actions/core");
 const summary = require("./summary.js");
-const keygen = require("./keygen.js");
+
 const gitleaks = require("./gitleaks.js");
 
 let gitleaksEnableSummary = true;
@@ -165,7 +165,7 @@ async function start() {
     // Override scanInfo.baseRef if `BASE_REF` is set.
     if (process.env.BASE_REF) {
       scanInfo.baseRef = process.env.BASE_REF;
-      core.info(`Overriding baseRef for scan with ${process.env.BASE_REF}.`)
+      core.info(`Overriding baseRef for scan with ${process.env.BASE_REF}.`);
     }
 
     exitCode = await gitleaks.Scan(

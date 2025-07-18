@@ -587,12 +587,7 @@ describe('8398a7/action-slack', () => {
         fields:
           'repo,message,commit,author,job,action,eventName,ref,workflow,took,pullRequest',
       };
-      const client = new Client(
-        withParams,
-        gitHubToken,
-        'https://your.ghe.com.',
-        webhookUrl,
-      );
+      // Unused variable `client` removed as it was not utilized in this test case
       const payload = getTemplate(withParams.fields, successMsg);
       payload.attachments[0].color = 'good';
     });

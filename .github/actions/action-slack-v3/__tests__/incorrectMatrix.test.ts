@@ -12,7 +12,7 @@ import {
   successMsg,
   webhookUrl,
 } from './helper';
-import { Client, With, Success } from '../src/client';
+import { Client, Success } from '../src/client';
 
 beforeAll(() => {
   nock.disableNetConnect();

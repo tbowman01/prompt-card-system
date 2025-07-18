@@ -3,7 +3,7 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { Field, With } from '../src/client';
 import { FieldFactory } from '../src/fields';
-import github, { context, getOctokit } from '@actions/github';
+import { context, getOctokit } from '@actions/github';
 
 export const gitHubToken = 'github-token';
 export const gitHubBaseUrl = '';
