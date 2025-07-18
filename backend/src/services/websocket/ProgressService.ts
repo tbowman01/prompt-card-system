@@ -2,7 +2,7 @@ import { Server as SocketIOServer } from 'socket.io';
 import { ExecutionProgress } from '../testing/TestQueueManager';
 import { performance } from 'perf_hooks';
 import { EventEmitter } from 'events';
-import LRU from 'lru-cache';
+import { LRUCache } from 'lru-cache';
 import { promisify } from 'util';
 import { setTimeout } from 'timers/promises';
 
