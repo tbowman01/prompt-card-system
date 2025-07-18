@@ -1,0 +1,134 @@
+name: OpenSSF Scorecard
+
+on:
+  # For Branch-Protection check. Only the default branch is supported.
+  branch_protection_rule:
+  # To guarantee Maintained check is occasionally updated
+  schedule:
+    - cron: '30 2 * * 1' # Weekly on Monday at 2:30 AM UTC
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+# Declare default permissions as read only
+permissions: read-all
+
+jobs:
+  analysis:
+    name: OpenSSF Scorecard Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      # Needed to upload the results to code-scanning dashboard
+      security-events: write
+      # Needed to publish results and get a badge (see publish_results below)
+      id-token: write
+      # Needed to detect the repository's default branch
+      contents: read
+      # Needed to query for repository information
+      actions: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          persist-credentials: false
+
+      - name: Run OpenSSF Scorecard Analysis
+        uses: ossf/scorecard-action@v2.3.1
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          # Publish results to OpenSSF REST API for easy access by consumers
+          publish_results: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.OPENSSF_SCORECARD_TOKEN }}
+        continue-on-error: true
+        id: scorecard
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+        if: always()
+        with:
+          name: SARIF file
+          path: results.sarif
+          retention-days: 30
+
+      - name: Upload to code-scanning dashboard
+        uses: github/codeql-action/upload-sarif@afb54ba388a7dca6ecae48f608c4ff05ff4cc77a # v3.25.15
+        if: steps.scorecard.outcome == 'success'
+        with:
+          sarif_file: results.sarif
+
+      - name: Generate scorecard report
+        if: always()
+        run: |
+          if [ "${{ steps.scorecard.outcome }}" == "success" ]; then
+            echo "📊 OpenSSF Scorecard Analysis Complete" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "✅ **Status**: Analysis completed successfully" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ OpenSSF Scorecard Analysis Issues" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "❌ **Status**: Analysis completed with issues" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Possible causes:**" >> $GITHUB_STEP_SUMMARY
+            echo "- Repository access permissions" >> $GITHUB_STEP_SUMMARY
+            echo "- Network connectivity issues" >> $GITHUB_STEP_SUMMARY
+            echo "- Scorecard service availability" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Next steps:**" >> $GITHUB_STEP_SUMMARY
+            echo "1. Check repository permissions" >> $GITHUB_STEP_SUMMARY
+            echo "2. Retry the workflow manually" >> $GITHUB_STEP_SUMMARY
+            echo "3. Check OpenSSF Scorecard service status" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The OpenSSF Scorecard evaluates open source projects for security best practices." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## What OpenSSF Scorecard Checks" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔒 Security Checks" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch Protection**: Ensures main branch is protected" >> $GITHUB_STEP_SUMMARY
+          echo "- **Code Reviews**: Verifies code review requirements" >> $GITHUB_STEP_SUMMARY
+          echo "- **Signed Commits**: Checks for commit signing" >> $GITHUB_STEP_SUMMARY
+          echo "- **Vulnerabilities**: Scans for known vulnerabilities" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dependency Updates**: Checks for automated dependency updates" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🏗️ Development Practices" >> $GITHUB_STEP_SUMMARY
+          echo "- **CI Tests**: Validates CI/CD pipeline testing" >> $GITHUB_STEP_SUMMARY
+          echo "- **SAST**: Static Application Security Testing" >> $GITHUB_STEP_SUMMARY
+          echo "- **Fuzzing**: Checks for fuzz testing" >> $GITHUB_STEP_SUMMARY
+          echo "- **Security Policy**: Validates SECURITY.md presence" >> $GITHUB_STEP_SUMMARY
+          echo "- **License**: Checks for project license" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Maintenance" >> $GITHUB_STEP_SUMMARY
+          echo "- **Maintained**: Checks for recent commits" >> $GITHUB_STEP_SUMMARY
+          echo "- **Packaging**: Validates package publishing" >> $GITHUB_STEP_SUMMARY
+          echo "- **Pinned Dependencies**: Checks for pinned versions" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dangerous Workflow**: Scans for dangerous GitHub Actions" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🏆 Benefits" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Security Posture**: Comprehensive security assessment" >> $GITHUB_STEP_SUMMARY
+          echo "- **Best Practices**: Validation of industry best practices" >> $GITHUB_STEP_SUMMARY
+          echo "- **Compliance**: Helps with security compliance requirements" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trust**: Builds trust with users and contributors" >> $GITHUB_STEP_SUMMARY
+          echo "- **Badges**: Provides security badges for README" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📈 Improving Your Score" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "1. **Enable branch protection** with required reviews" >> $GITHUB_STEP_SUMMARY
+          echo "2. **Add SECURITY.md** file with security policy" >> $GITHUB_STEP_SUMMARY
+          echo "3. **Enable Dependabot** for automatic dependency updates" >> $GITHUB_STEP_SUMMARY
+          echo "4. **Use signed commits** with GPG keys" >> $GITHUB_STEP_SUMMARY
+          echo "5. **Enable code scanning** with CodeQL" >> $GITHUB_STEP_SUMMARY
+          echo "6. **Pin dependencies** to specific versions" >> $GITHUB_STEP_SUMMARY
+          echo "7. **Add fuzz testing** for critical components" >> $GITHUB_STEP_SUMMARY
+          echo "8. **Regular maintenance** with recent commits" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🔗 Resources" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- [OpenSSF Scorecard Documentation](https://github.com/ossf/scorecard)" >> $GITHUB_STEP_SUMMARY
+          echo "- [Security Best Practices](https://github.com/ossf/scorecard/blob/main/docs/checks.md)" >> $GITHUB_STEP_SUMMARY
+          echo "- [Scorecard Badge](https://api.securityscorecards.dev/projects/github.com/${{ github.repository }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Results will be available in the **Security** tab of your repository." >> $GITHUB_STEP_SUMMARY

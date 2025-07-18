@@ -1,0 +1,167 @@
+name: Signed Commits Validation
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  validate-signed-commits:
+    name: Validate Signed Commits
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          fetch-depth: 0
+
+      - name: Validate commit signatures
+        run: |
+          echo "🔍 Validating commit signatures..."
+          
+          # Get the range of commits to check
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            # For PR, check commits in the PR
+            COMMITS=$(git rev-list --reverse HEAD~${{ github.event.pull_request.commits }}..HEAD)
+          else
+            # For push, check the last commit
+            COMMITS=$(git rev-parse HEAD)
+          fi
+          
+          echo "Commits to validate: $COMMITS"
+          
+          # Check each commit
+          unsigned_commits=0
+          total_commits=0
+          
+          for commit in $COMMITS; do
+            total_commits=$((total_commits + 1))
+            
+            # Check if commit is signed
+            if git verify-commit "$commit" 2>/dev/null; then
+              echo "✅ Commit $commit is signed"
+            else
+              echo "❌ Commit $commit is NOT signed"
+              unsigned_commits=$((unsigned_commits + 1))
+              
+              # Get commit details
+              echo "  Author: $(git log --format='%an <%ae>' -n 1 $commit)"
+              echo "  Date: $(git log --format='%ad' -n 1 $commit)"
+              echo "  Message: $(git log --format='%s' -n 1 $commit)"
+            fi
+          done
+          
+          echo ""
+          echo "📊 Signature Summary:"
+          echo "  Total commits: $total_commits"
+          echo "  Unsigned commits: $unsigned_commits"
+          echo "  Signed commits: $((total_commits - unsigned_commits))"
+          
+          # Set environment variables for summary
+          echo "TOTAL_COMMITS=$total_commits" >> $GITHUB_ENV
+          echo "UNSIGNED_COMMITS=$unsigned_commits" >> $GITHUB_ENV
+          echo "SIGNED_COMMITS=$((total_commits - unsigned_commits))" >> $GITHUB_ENV
+
+      - name: Generate signing instructions
+        if: env.UNSIGNED_COMMITS != '0'
+        run: |
+          echo "## 📝 How to Sign Commits" >> instructions.md
+          echo "" >> instructions.md
+          echo "To sign your commits, follow these steps:" >> instructions.md
+          echo "" >> instructions.md
+          echo "### 1. Generate GPG Key" >> instructions.md
+          echo "\`\`\`bash" >> instructions.md
+          echo "# Generate a new GPG key" >> instructions.md
+          echo "gpg --full-generate-key" >> instructions.md
+          echo "" >> instructions.md
+          echo "# List your GPG keys" >> instructions.md
+          echo "gpg --list-secret-keys --keyid-format LONG" >> instructions.md
+          echo "\`\`\`" >> instructions.md
+          echo "" >> instructions.md
+          echo "### 2. Configure Git" >> instructions.md
+          echo "\`\`\`bash" >> instructions.md
+          echo "# Set your GPG key (replace with your key ID)" >> instructions.md
+          echo "git config --global user.signingkey YOUR_KEY_ID" >> instructions.md
+          echo "" >> instructions.md
+          echo "# Enable commit signing" >> instructions.md
+          echo "git config --global commit.gpgsign true" >> instructions.md
+          echo "\`\`\`" >> instructions.md
+          echo "" >> instructions.md
+          echo "### 3. Add GPG Key to GitHub" >> instructions.md
+          echo "\`\`\`bash" >> instructions.md
+          echo "# Export your public key" >> instructions.md
+          echo "gpg --armor --export YOUR_KEY_ID" >> instructions.md
+          echo "\`\`\`" >> instructions.md
+          echo "" >> instructions.md
+          echo "Then add this key to your GitHub account at:" >> instructions.md
+          echo "https://github.com/settings/gpg/new" >> instructions.md
+          echo "" >> instructions.md
+          echo "### 4. Sign Previous Commits" >> instructions.md
+          echo "\`\`\`bash" >> instructions.md
+          echo "# To sign the last commit" >> instructions.md
+          echo "git commit --amend --no-edit -S" >> instructions.md
+          echo "" >> instructions.md
+          echo "# To sign multiple commits (interactive rebase)" >> instructions.md
+          echo "git rebase -i HEAD~n  # Replace n with number of commits" >> instructions.md
+          echo "# Change 'pick' to 'edit' for commits to sign" >> instructions.md
+          echo "# Then for each commit:" >> instructions.md
+          echo "git commit --amend --no-edit -S" >> instructions.md
+          echo "git rebase --continue" >> instructions.md
+          echo "\`\`\`" >> instructions.md
+
+      - name: Upload signing instructions
+        if: env.UNSIGNED_COMMITS != '0'
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+        with:
+          name: signing-instructions
+          path: instructions.md
+          retention-days: 30
+
+      - name: Generate summary
+        run: |
+          echo "## Commit Signature Validation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Repository**: ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Event**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Results" >> $GITHUB_STEP_SUMMARY
+          echo "- **Total Commits**: ${{ env.TOTAL_COMMITS }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Signed Commits**: ${{ env.SIGNED_COMMITS }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Unsigned Commits**: ${{ env.UNSIGNED_COMMITS }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ env.UNSIGNED_COMMITS }}" == "0" ]; then
+            echo "✅ **All commits are signed!**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Your repository follows best practices for commit signing." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ **Some commits are not signed**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 🔧 Next Steps" >> $GITHUB_STEP_SUMMARY
+            echo "1. Download the signing instructions artifact" >> $GITHUB_STEP_SUMMARY
+            echo "2. Set up GPG key signing" >> $GITHUB_STEP_SUMMARY
+            echo "3. Sign unsigned commits" >> $GITHUB_STEP_SUMMARY
+            echo "4. Configure automatic signing for future commits" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 🎯 Benefits of Signed Commits" >> $GITHUB_STEP_SUMMARY
+            echo "- **Authentication**: Verify commit authorship" >> $GITHUB_STEP_SUMMARY
+            echo "- **Integrity**: Ensure commits haven't been tampered with" >> $GITHUB_STEP_SUMMARY
+            echo "- **Trust**: Build trust in your codebase" >> $GITHUB_STEP_SUMMARY
+            echo "- **Compliance**: Meet security requirements" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📚 Resources" >> $GITHUB_STEP_SUMMARY
+          echo "- [GitHub: Signing Commits](https://docs.github.com/en/authentication/managing-commit-signature-verification/signing-commits)" >> $GITHUB_STEP_SUMMARY
+          echo "- [Git: Signing Your Work](https://git-scm.com/book/en/v2/Git-Tools-Signing-Your-Work)" >> $GITHUB_STEP_SUMMARY
+          echo "- [OpenSSF: Commit Signing](https://github.com/ossf/scorecard/blob/main/docs/checks.md#signed-releases)" >> $GITHUB_STEP_SUMMARY
+
+      - name: Fail if unsigned commits found
+        if: env.UNSIGNED_COMMITS != '0'
+        run: |
+          echo "❌ Found ${{ env.UNSIGNED_COMMITS }} unsigned commits"
+          echo "Please sign all commits before merging"
+          exit 1

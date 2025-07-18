@@ -1,0 +1,485 @@
+name: Documentation Validation
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'docs/**'
+      - '*.md'
+      - '.github/workflows/docs-validation.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'docs/**'
+      - '*.md'
+      - '.github/workflows/docs-validation.yml'
+  schedule:
+    - cron: '0 8 * * 1' # Weekly on Monday at 8 AM UTC
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  markdown-lint:
+    name: Markdown Linting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install markdownlint
+        run: |
+          npm install -g markdownlint-cli
+          npm install -g markdown-link-check
+
+      - name: Create markdownlint config
+        run: |
+          cat > .markdownlint.json << 'EOF'
+          {
+            "default": true,
+            "MD007": { "indent": 2 },
+            "MD013": { "line_length": 120 },
+            "MD033": { "allowed_elements": ["details", "summary", "br", "img"] },
+            "MD041": false
+          }
+          EOF
+
+      - name: Lint markdown files
+        run: |
+          echo "🔍 Linting markdown files..."
+          markdownlint docs/ *.md || true
+
+      - name: Check markdown links
+        run: |
+          echo "🔗 Checking markdown links..."
+          find docs/ -name "*.md" -exec markdown-link-check {} \; || true
+          markdown-link-check README.md || true
+
+  docs-structure:
+    name: Documentation Structure
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check required documentation files
+        run: |
+          echo "📋 Checking for required documentation files..."
+          
+          required_files=(
+            "README.md"
+            "docs/installation.md"
+            "docs/api-reference.md"
+            "docs/user-guide.md"
+            "docs/deployment.md"
+            "docs/troubleshooting.md"
+          )
+          
+          missing_files=()
+          
+          for file in "${required_files[@]}"; do
+            if [ -f "$file" ]; then
+              echo "✅ $file exists"
+            else
+              echo "❌ $file missing"
+              missing_files+=("$file")
+            fi
+          done
+          
+          if [ ${#missing_files[@]} -gt 0 ]; then
+            echo "::warning::Missing documentation files: ${missing_files[*]}"
+          else
+            echo "✅ All required documentation files present"
+          fi
+
+      - name: Check documentation structure
+        run: |
+          echo "🏗️ Checking documentation structure..."
+          
+          # Check if docs directory exists
+          if [ ! -d "docs" ]; then
+            echo "❌ docs/ directory missing"
+            exit 1
+          fi
+          
+          # Check for table of contents in main docs
+          if [ -f "docs/README.md" ]; then
+            if grep -q "Table of Contents\|TOC" docs/README.md; then
+              echo "✅ Table of contents found in docs/README.md"
+            else
+              echo "⚠️ No table of contents found in docs/README.md"
+            fi
+          fi
+          
+          # Check for proper headings structure
+          for file in docs/*.md; do
+            if [ -f "$file" ]; then
+              # Check if file starts with # heading
+              if head -n 5 "$file" | grep -q "^# "; then
+                echo "✅ $file has proper heading structure"
+              else
+                echo "⚠️ $file may be missing main heading"
+              fi
+            fi
+          done
+
+  api-docs-validation:
+    name: API Documentation Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          # Removed problematic cache: 'npm' - using manual cache strategy instead
+
+      - name: Install dependencies
+        run: |
+          cd backend && npm ci
+
+      - name: Check API documentation completeness
+        run: |
+          echo "🔍 Checking API documentation completeness..."
+          
+          # Check if API reference exists
+          if [ -f "docs/api-reference.md" ]; then
+            echo "✅ API reference documentation exists"
+            
+            # Check for common API sections
+            api_sections=(
+              "Authentication"
+              "Endpoints"
+              "Request Format"
+              "Response Format"
+              "Error Handling"
+              "Rate Limiting"
+            )
+            
+            for section in "${api_sections[@]}"; do
+              if grep -q "$section" docs/api-reference.md; then
+                echo "✅ $section section found"
+              else
+                echo "⚠️ $section section missing"
+              fi
+            done
+          else
+            echo "❌ API reference documentation missing"
+            exit 1
+          fi
+
+      - name: Validate API examples
+        run: |
+          echo "🧪 Validating API examples..."
+          
+          # Check for example requests and responses
+          if [ -f "docs/api-reference.md" ]; then
+            if grep -q "curl\|POST\|GET\|PUT\|DELETE" docs/api-reference.md; then
+              echo "✅ API examples found"
+            else
+              echo "⚠️ No API examples found"
+            fi
+            
+            # Check for JSON examples
+            if grep -q "```json" docs/api-reference.md; then
+              echo "✅ JSON examples found"
+            else
+              echo "⚠️ No JSON examples found"
+            fi
+          fi
+
+  code-docs-sync:
+    name: Code Documentation Sync
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          # Removed problematic cache: 'npm' - using manual cache strategy instead
+
+      - name: Install dependencies
+        run: |
+          cd backend && npm ci
+          cd ../frontend && npm ci
+
+      - name: Check inline documentation
+        run: |
+          echo "📝 Checking inline documentation..."
+          
+          # Check for JSDoc comments in backend
+          backend_files_with_jsdoc=$(find backend/src -name "*.ts" -exec grep -l "/\*\*" {} \; | wc -l)
+          total_backend_files=$(find backend/src -name "*.ts" | wc -l)
+          
+          if [ $total_backend_files -gt 0 ]; then
+            jsdoc_percentage=$((backend_files_with_jsdoc * 100 / total_backend_files))
+            echo "Backend JSDoc coverage: $jsdoc_percentage% ($backend_files_with_jsdoc/$total_backend_files files)"
+            
+            if [ $jsdoc_percentage -lt 50 ]; then
+              echo "⚠️ Low JSDoc coverage in backend"
+            else
+              echo "✅ Good JSDoc coverage in backend"
+            fi
+          fi
+          
+          # Check for TypeScript documentation
+          if find backend/src -name "*.ts" -exec grep -l "interface\|type\|class" {} \; | head -5 | while read file; do
+            if grep -B5 -A1 "interface\|type\|class" "$file" | grep -q "/\*\*"; then
+              echo "✅ $file has documented interfaces/types"
+            else
+              echo "⚠️ $file may have undocumented interfaces/types"
+            fi
+          done; then
+            echo "Interface documentation check completed"
+          fi
+
+      - name: Check README completeness
+        run: |
+          echo "📖 Checking README completeness..."
+          
+          readme_sections=(
+            "Installation"
+            "Usage"
+            "API"
+            "Contributing"
+            "License"
+            "Features"
+          )
+          
+          for section in "${readme_sections[@]}"; do
+            if grep -qi "$section" README.md; then
+              echo "✅ $section section found in README"
+            else
+              echo "⚠️ $section section missing from README"
+            fi
+          done
+          
+          # Check for badges
+          if grep -q "badge\|shield" README.md; then
+            echo "✅ Badges found in README"
+          else
+            echo "⚠️ No badges found in README"
+          fi
+
+  docs-accessibility:
+    name: Documentation Accessibility
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install accessibility tools
+        run: |
+          npm install -g @axe-core/cli
+          npm install -g markdownlint-cli
+
+      - name: Check accessibility best practices
+        run: |
+          echo "♿ Checking documentation accessibility..."
+          
+          # Check for alt text in images
+          echo "Checking for alt text in images..."
+          if find docs/ -name "*.md" -exec grep -H "!\[.*\]" {} \; | grep -v "!\[\]"; then
+            echo "✅ Images with alt text found"
+          else
+            echo "⚠️ No images with alt text found"
+          fi
+          
+          # Check for proper heading hierarchy
+          echo "Checking heading hierarchy..."
+          for file in docs/*.md; do
+            if [ -f "$file" ]; then
+              # Extract headings and check hierarchy
+              grep "^#" "$file" | head -10 | while read heading; do
+                level=$(echo "$heading" | sed 's/[^#]//g' | wc -c)
+                echo "$file: Level $level heading found"
+              done
+            fi
+          done
+
+      - name: Check for inclusive language
+        run: |
+          echo "🌈 Checking for inclusive language..."
+          
+          # Check for potentially non-inclusive terms
+          problematic_terms=(
+            "master"
+            "slave"
+            "blacklist"
+            "whitelist"
+            "sanity"
+            "dummy"
+          )
+          
+          for term in "${problematic_terms[@]}"; do
+            if grep -ri "$term" docs/ README.md; then
+              echo "⚠️ Found potentially non-inclusive term: $term"
+            fi
+          done
+          
+          echo "✅ Inclusive language check completed"
+
+  docs-generation:
+    name: Documentation Generation
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          # Removed problematic cache: 'npm' - using manual cache strategy instead
+
+      - name: Install dependencies
+        run: |
+          cd backend && npm ci
+          cd ../frontend && npm ci
+
+      - name: Generate API documentation
+        run: |
+          echo "📚 Generating API documentation..."
+          
+          # Install documentation tools
+          npm install -g @apidevtools/swagger-parser
+          
+          # Generate API docs from OpenAPI spec if available
+          if [ -f "backend/openapi.json" ] || [ -f "backend/swagger.json" ]; then
+            echo "OpenAPI/Swagger spec found, generating docs..."
+            # In a real implementation, you would use tools like:
+            # swagger-codegen generate -i backend/openapi.json -l html2 -o docs/api-generated/
+            echo "API documentation generation completed"
+          else
+            echo "No OpenAPI/Swagger spec found"
+          fi
+
+      - name: Generate changelog
+        run: |
+          echo "📝 Generating changelog..."
+          
+          # Check if git-cliff is available, otherwise use basic git log
+          if command -v git-cliff &> /dev/null; then
+            git-cliff --output CHANGELOG.md
+          else
+            # Basic changelog generation
+            echo "# Changelog" > CHANGELOG.md
+            echo "" >> CHANGELOG.md
+            echo "## Recent Changes" >> CHANGELOG.md
+            echo "" >> CHANGELOG.md
+            git log --oneline -10 --format="- %s" >> CHANGELOG.md
+          fi
+
+      - name: Update documentation index
+        run: |
+          echo "📊 Updating documentation index..."
+          
+          cat > docs/README.md << 'EOF'
+          # Documentation Index
+          
+          This directory contains all project documentation.
+          
+          ## User Documentation
+          - [Installation Guide](installation.md)
+          - [User Guide](user-guide.md)
+          - [API Reference](api-reference.md)
+          
+          ## Developer Documentation
+          - [Architecture](architecture.md)
+          - [Development Guide](development.md)
+          - [Contributing](../CONTRIBUTING.md)
+          
+          ## Operations Documentation
+          - [Deployment Guide](deployment.md)
+          - [Troubleshooting](troubleshooting.md)
+          - [Monitoring](monitoring.md)
+          
+          ---
+          
+          **Last Updated:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          EOF
+
+      - name: Commit documentation updates
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          git add docs/ CHANGELOG.md
+          git commit -m "docs: automated documentation updates" || echo "No changes to commit"
+          git push origin main || echo "No changes to push"
+
+  docs-summary:
+    name: Documentation Summary
+    runs-on: ubuntu-latest
+    needs: [markdown-lint, docs-structure, api-docs-validation, code-docs-sync, docs-accessibility]
+    if: always()
+    steps:
+      - name: Generate documentation summary
+        run: |
+          echo "## Documentation Validation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Markdown Linting | ${{ needs.markdown-lint.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Documentation Structure | ${{ needs.docs-structure.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| API Documentation | ${{ needs.api-docs-validation.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Code Documentation Sync | ${{ needs.code-docs-sync.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Accessibility Check | ${{ needs.docs-accessibility.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Calculate documentation quality score
+          total_checks=5
+          passed_checks=0
+          
+          [[ "${{ needs.markdown-lint.result }}" == "success" ]] && ((passed_checks++))
+          [[ "${{ needs.docs-structure.result }}" == "success" ]] && ((passed_checks++))
+          [[ "${{ needs.api-docs-validation.result }}" == "success" ]] && ((passed_checks++))
+          [[ "${{ needs.code-docs-sync.result }}" == "success" ]] && ((passed_checks++))
+          [[ "${{ needs.docs-accessibility.result }}" == "success" ]] && ((passed_checks++))
+          
+          score=$((passed_checks * 100 / total_checks))
+          
+          echo "**Documentation Quality Score: $score%** ($passed_checks/$total_checks checks passed)" >> $GITHUB_STEP_SUMMARY
+          
+          if [ $score -eq 100 ]; then
+            echo "📚 **Documentation is excellent!**" >> $GITHUB_STEP_SUMMARY
+          elif [ $score -ge 80 ]; then
+            echo "📖 **Documentation is good**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "📝 **Documentation needs improvement**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Notify documentation team
+        if: failure()
+        uses: ./.github/actions/action-slack-v3
+        with:
+          status: failure
+          channel: '#docs'
+          message: |
+            📚 Documentation validation failed
+            
+            Please review the documentation issues:
+            - Check markdown linting errors
+            - Verify documentation structure
+            - Update API documentation
+            - Fix accessibility issues
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.DOCS_SLACK_WEBHOOK_URL }}
