@@ -10,6 +10,7 @@ import { Worker } from 'worker_threads';
 import { LRUCache } from 'lru-cache';
 import { promisify } from 'util';
 import { setTimeout } from 'timers/promises';
+import { cpus } from 'os';
 
 export interface TestJob {
   test_execution_id: string;
@@ -90,7 +91,7 @@ export class TestQueueManager extends EventEmitter {
     super();
     
     this.defaultConfiguration = {
-      max_concurrent_tests: Math.min(8, require('os').cpus().length * 2), // Dynamic based on CPU cores
+      max_concurrent_tests: Math.min(8, cpus().length * 2), // Dynamic based on CPU cores
       timeout_per_test: 30000, // 30 seconds
       retry_failed_tests: true,
       max_retries: 2,
@@ -110,7 +111,7 @@ export class TestQueueManager extends EventEmitter {
     });
     
     this.performanceMetrics = new Map();
-    this.maxConnections = Math.min(10, require('os').cpus().length * 2);
+    this.maxConnections = Math.min(10, cpus().length * 2);
     this.connectionPool = [];
     this.workerPool = [];
 
@@ -260,7 +261,7 @@ export class TestQueueManager extends EventEmitter {
    */
   private setupJobProcessors(): void {
     // Main test execution processor with dynamic concurrency
-    const concurrency = Math.min(5, require('os').cpus().length);
+    const concurrency = Math.min(5, cpus().length);
     
     this.testQueue.process('execute-tests', concurrency, async (job: Bull.Job<TestJob>) => {
       const { data } = job;

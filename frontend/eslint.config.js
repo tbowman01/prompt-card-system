@@ -18,6 +18,7 @@ export default [
         }
       },
       globals: {
+        // Standard Node.js/Browser globals
         console: 'readonly',
         process: 'readonly',
         Buffer: 'readonly',
@@ -27,6 +28,8 @@ export default [
         module: 'readonly',
         require: 'readonly',
         exports: 'readonly',
+        
+        // Browser globals
         window: 'readonly',
         document: 'readonly',
         localStorage: 'readonly',
@@ -47,7 +50,26 @@ export default [
         HTMLElement: 'readonly',
         Node: 'readonly',
         NodeList: 'readonly',
-        HTMLCollection: 'readonly'
+        HTMLCollection: 'readonly',
+        
+        // Timer functions
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        setInterval: 'readonly',
+        clearInterval: 'readonly',
+        setImmediate: 'readonly',
+        clearImmediate: 'readonly',
+        
+        // Node.js types
+        NodeJS: 'readonly',
+        
+        // React global
+        React: 'readonly',
+        
+        // Window methods
+        confirm: 'readonly',
+        alert: 'readonly',
+        prompt: 'readonly'
       }
     },
     plugins: {
@@ -60,6 +82,7 @@ export default [
       '@typescript-eslint/no-explicit-any': 'warn',
       'prefer-const': 'error',
       'no-console': 'warn',
+      'no-undef': 'off', // TypeScript handles this
       // Next.js specific rules
       'react/react-in-jsx-scope': 'off',
       'react/prop-types': 'off'

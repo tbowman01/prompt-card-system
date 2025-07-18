@@ -7,6 +7,7 @@ import { performance } from 'perf_hooks';
 import { Worker } from 'worker_threads';
 import { promisify } from 'util';
 import { createHash } from 'crypto';
+import { cpus } from 'os';
 
 export interface OptimizationSuggestion {
   id: string;
@@ -151,7 +152,7 @@ export class OptimizationEngine {
     });
     
     this.performanceMetrics = new Map();
-    this.maxWorkers = Math.min(4, require('os').cpus().length);
+    this.maxWorkers = Math.min(4, cpus().length);
     this.workerPool = [];
     
     // Initialize worker pool for parallel processing
