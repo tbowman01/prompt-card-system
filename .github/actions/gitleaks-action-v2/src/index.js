@@ -7,7 +7,7 @@ const { Octokit } = require("@octokit/rest");
 const { readFileSync } = require("fs");
 const core = require("@actions/core");
 const summary = require("./summary.js");
-const keygen = require("./keygen.js");
+
 const gitleaks = require("./gitleaks.js");
 
 let gitleaksEnableSummary = true;
