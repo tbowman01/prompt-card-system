@@ -37,19 +37,26 @@ import { parallelTestExecutionRoutes } from './routes/parallelTestExecution';
 import { yamlRoutes } from './routes/yaml';
 import { assertionRoutes } from './routes/assertions';
 import { analyticsRoutes } from './routes/analytics';
+import { predictiveAnalyticsRoutes } from './routes/predictive-analytics';
 import optimizationRoutes from './routes/optimization';
 import { reportRoutes } from './routes/reports';
 import performanceRoutes from './routes/performance';
 import trainingRoutes from './routes/training';
 import { authRoutes } from './routes/auth';
+import loadTestingRoutes from './routes/loadTesting';
+import { securityRoutes } from './routes/security';
 import { initializeOptimizationServices } from './services/optimization';
 import { performanceMonitor } from './services/performance/PerformanceMonitor';
+import { loadTestScheduler } from './services/performance/LoadTestScheduler';
+import { performanceRegressionDetector } from './services/performance/PerformanceRegressionDetector';
 import { ProgressService } from './services/websocket/ProgressService';
 import { errorHandler } from './middleware/errorHandler';
 import { healthOrchestrator } from './services/health/HealthOrchestrator';
 import { alertingSystem } from './services/health/AlertingSystem';
 import { modelTrainingEngine } from './services/training/ModelTrainingEngine';
 import { modelRegistry } from './services/training/ModelRegistry';
+import { securityMonitor, logAggregator, alertingSystem as securityAlerting, complianceChecker } from './services/security';
+import { mlAnalyticsCoordinator } from './services/analytics/MLAnalyticsCoordinator';
 
 dotenv.config();
 
@@ -87,6 +94,8 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-CSRF-Token', 'X-Session-ID', 'X-Request-ID'],
   exposedHeaders: ['X-Request-ID', 'X-RateLimit-Limit', 'X-RateLimit-Remaining']
 }));
+// Setup log aggregation middleware
+app.use(logAggregator.getExpressMiddleware());
 
 // Morgan logging with custom format
 app.use(morgan('combined', {
@@ -161,6 +170,44 @@ modelRegistry.initialize().catch(error => {
   console.error('Failed to initialize model registry:', error);
 });
 
+// Initialize load testing services
+loadTestScheduler.initialize().catch(error => {
+  console.error('Failed to initialize load test scheduler:', error);
+});
+
+performanceRegressionDetector.startMonitoring(15).catch?.(error => {
+  console.error('Failed to start regression monitoring:', error);
+}) || performanceRegressionDetector.startMonitoring(15);
+
+// Initialize security monitoring systems
+console.log('Initializing security monitoring systems...');
+logAggregator.info('server', 'Security monitoring systems starting up', {}, ['security', 'startup']);
+
+// Perform initial security scan
+securityMonitor.performComprehensiveScan().then(() => {
+  logAggregator.info('server', 'Initial security scan completed', {}, ['security', 'scan']);
+}).catch(error => {
+  logAggregator.error('server', 'Initial security scan failed', { error }, ['security', 'error']);
+});
+
+// Generate initial compliance report
+complianceChecker.generateComplianceReport().then(() => {
+  logAggregator.info('server', 'Initial compliance report generated', {}, ['compliance', 'report']);
+}).catch(error => {
+  logAggregator.error('server', 'Initial compliance report failed', { error }, ['compliance', 'error']);
+});
+
+// Initialize ML Analytics Coordinator
+console.log('Initializing ML Analytics Coordinator...');
+mlAnalyticsCoordinator.initialize().then(() => {
+  console.log('ML Analytics Coordinator initialized successfully');
+  return mlAnalyticsCoordinator.start();
+}).then(() => {
+  console.log('ML Analytics Coordinator started successfully');
+}).catch(error => {
+  console.error('Failed to initialize ML Analytics Coordinator:', error);
+});
+
 // Security endpoints (no rate limiting for CSRF token)
 app.get('/api/security/csrf-token', getCSRFToken);
 
@@ -179,16 +226,20 @@ app.use('/api/parallel-test-execution', testExecutionRateLimit, parallelTestExec
 app.use('/api/yaml', apiRateLimit, yamlRoutes);
 app.use('/api/assertions', apiRateLimit, assertionRoutes);
 app.use('/api/analytics', apiRateLimit, analyticsRoutes);
+app.use('/api/predictive-analytics', predictiveAnalyticsRoutes);
 app.use('/api/optimization', heavyOperationRateLimit, optimizationRoutes); // Heavy operations
 app.use('/api/reports', heavyOperationRateLimit, reportRoutes); // Heavy operations
 app.use('/api/performance', apiRateLimit, performanceRoutes);
 app.use('/api/training', heavyOperationRateLimit, trainingRoutes); // Heavy operations
+app.use('/api/load-testing', loadTestingRoutes);
+app.use('/api/security', securityRoutes);
 
 // Error handling middleware
 app.use(errorHandler);
 
-// Store WebSocket instance for health checks
+// Store WebSocket instance for health checks and log aggregator
 app.set('io', io);
+app.set('logAggregator', logAggregator);
 
 // Start server
 server.listen(PORT, () => {
@@ -205,6 +256,19 @@ server.listen(PORT, () => {
   console.log(`📋 Health dashboard available at /api/health/orchestrator/summary`);
   console.log(`🚨 Alerting system active`);
   console.log(`📢 Alerts API available at /api/alerts`);
+  console.log(`🧪 Load testing framework active`);
+  console.log(`⚡ Load testing API available at /api/load-testing`);
+  console.log(`📉 Performance regression detection active`);
+  console.log(`⏰ Automated load test scheduling enabled`);
+  console.log(`🛡️ Security monitoring system active`);
+  console.log(`🔒 Security API available at /api/security`);
+  console.log(`🔍 Vulnerability scanning enabled`);
+  console.log(`✅ Compliance checking active`);
+  console.log(`📝 Log aggregation and analysis enabled`);
+  console.log(`🔮 Predictive Analytics API available at /api/predictive-analytics`);
+  console.log(`🤖 ML-powered anomaly detection active`);
+  console.log(`📊 Capacity planning and forecasting enabled`);
+  console.log(`🎯 Auto-training ML models enabled`);
   
   // Security status
   console.log(`\n🔒 Security Features Active:`);
