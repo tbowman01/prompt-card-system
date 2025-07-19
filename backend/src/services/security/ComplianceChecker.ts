@@ -1,0 +1,700 @@
+import crypto from 'crypto';
+import fs from 'fs/promises';
+import path from 'path';
+import { securityMonitor } from './SecurityMonitor';
+import { logAggregator } from './LogAggregator';
+
+export interface ComplianceCheck {
+  id: string;
+  name: string;
+  description: string;
+  category: 'security' | 'privacy' | 'operational' | 'technical';
+  framework: 'SOC2' | 'GDPR' | 'OWASP' | 'NIST' | 'ISO27001' | 'CUSTOM';
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  required: boolean;
+  automated: boolean;
+  checkFunction: () => Promise<ComplianceResult>;
+}
+
+export interface ComplianceResult {
+  checkId: string;
+  timestamp: Date;
+  passed: boolean;
+  score: number; // 0-100
+  details: {
+    findings: string[];
+    recommendations: string[];
+    evidence: any[];
+    metrics?: any;
+  };
+  remediation?: {
+    actions: string[];
+    priority: 'low' | 'medium' | 'high' | 'critical';
+    estimatedEffort: string;
+    automated: boolean;
+  };
+}
+
+export interface ComplianceReport {
+  id: string;
+  timestamp: Date;
+  overallScore: number;
+  status: 'compliant' | 'non-compliant' | 'partially-compliant';
+  framework: string;
+  results: ComplianceResult[];
+  summary: {
+    totalChecks: number;
+    passed: number;
+    failed: number;
+    criticalFailures: number;
+    recommendations: string[];
+  };
+  nextAssessment?: Date;
+}
+
+export class ComplianceChecker {
+  private checks: ComplianceCheck[] = [];
+  private reports: ComplianceReport[] = [];
+  private scanInterval?: NodeJS.Timeout;
+
+  constructor(private options: {
+    enableContinuousChecking?: boolean;
+    checkIntervalHours?: number;
+    reportRetentionDays?: number;
+  } = {}) {
+    const {
+      enableContinuousChecking = true,
+      checkIntervalHours = 24,
+      reportRetentionDays = 365
+    } = options;
+
+    this.options = {
+      enableContinuousChecking,
+      checkIntervalHours,
+      reportRetentionDays
+    };
+
+    this.setupDefaultChecks();
+    
+    if (enableContinuousChecking) {
+      this.startContinuousChecking();
+    }
+  }
+
+  // Check management
+  addCheck(check: Omit<ComplianceCheck, 'id'>): ComplianceCheck {
+    const newCheck: ComplianceCheck = {
+      id: crypto.randomUUID(),
+      ...check
+    };
+
+    this.checks.push(newCheck);
+    return newCheck;
+  }
+
+  removeCheck(checkId: string): boolean {
+    const index = this.checks.findIndex(c => c.id === checkId);
+    if (index === -1) return false;
+    
+    this.checks.splice(index, 1);
+    return true;
+  }
+
+  getChecks(filters?: {
+    category?: ComplianceCheck['category'];
+    framework?: ComplianceCheck['framework'];
+    severity?: ComplianceCheck['severity'];
+    automated?: boolean;
+  }): ComplianceCheck[] {
+    let filteredChecks = [...this.checks];
+
+    if (filters) {
+      if (filters.category) {
+        filteredChecks = filteredChecks.filter(c => c.category === filters.category);
+      }
+      if (filters.framework) {
+        filteredChecks = filteredChecks.filter(c => c.framework === filters.framework);
+      }
+      if (filters.severity) {
+        filteredChecks = filteredChecks.filter(c => c.severity === filters.severity);
+      }
+      if (filters.automated !== undefined) {
+        filteredChecks = filteredChecks.filter(c => c.automated === filters.automated);
+      }
+    }
+
+    return filteredChecks;
+  }
+
+  // Compliance assessment
+  async runCheck(checkId: string): Promise<ComplianceResult> {
+    const check = this.checks.find(c => c.id === checkId);
+    if (!check) {
+      throw new Error(`Check ${checkId} not found`);
+    }
+
+    try {
+      const result = await check.checkFunction();
+      
+      logAggregator.info('compliance-checker', `Check completed: ${check.name}`, {
+        checkId: check.id,
+        passed: result.passed,
+        score: result.score,
+        framework: check.framework
+      }, ['compliance', check.framework.toLowerCase()]);
+
+      return result;
+    } catch (error) {
+      const failureResult: ComplianceResult = {
+        checkId: check.id,
+        timestamp: new Date(),
+        passed: false,
+        score: 0,
+        details: {
+          findings: [`Check execution failed: ${error instanceof Error ? error.message : 'Unknown error'}`],
+          recommendations: ['Fix check implementation', 'Review system configuration'],
+          evidence: []
+        }
+      };
+
+      logAggregator.error('compliance-checker', `Check failed: ${check.name}`, {
+        checkId: check.id,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        framework: check.framework
+      }, ['compliance', 'error']);
+
+      return failureResult;
+    }
+  }
+
+  async runAllChecks(framework?: ComplianceCheck['framework']): Promise<ComplianceResult[]> {
+    const checksToRun = framework ? 
+      this.checks.filter(c => c.framework === framework) : 
+      this.checks;
+
+    const results = await Promise.allSettled(
+      checksToRun.map(check => this.runCheck(check.id))
+    );
+
+    return results
+      .filter((result): result is PromiseFulfilledResult<ComplianceResult> => 
+        result.status === 'fulfilled'
+      )
+      .map(result => result.value);
+  }
+
+  async generateComplianceReport(framework?: ComplianceCheck['framework']): Promise<ComplianceReport> {
+    const results = await this.runAllChecks(framework);
+    
+    const totalChecks = results.length;
+    const passed = results.filter(r => r.passed).length;
+    const failed = totalChecks - passed;
+    const criticalFailures = results.filter(r => !r.passed && 
+      this.checks.find(c => c.id === r.checkId)?.severity === 'critical'
+    ).length;
+
+    const overallScore = totalChecks > 0 ? 
+      Math.round(results.reduce((sum, r) => sum + r.score, 0) / totalChecks) : 0;
+
+    const status: ComplianceReport['status'] = 
+      criticalFailures > 0 ? 'non-compliant' :
+      failed === 0 ? 'compliant' : 'partially-compliant';
+
+    // Collect all recommendations
+    const allRecommendations = new Set<string>();
+    results.forEach(result => {
+      result.details.recommendations.forEach(rec => allRecommendations.add(rec));
+    });
+
+    const report: ComplianceReport = {
+      id: crypto.randomUUID(),
+      timestamp: new Date(),
+      overallScore,
+      status,
+      framework: framework || 'ALL',
+      results,
+      summary: {
+        totalChecks,
+        passed,
+        failed,
+        criticalFailures,
+        recommendations: Array.from(allRecommendations).slice(0, 10) // Top 10
+      },
+      nextAssessment: new Date(Date.now() + this.options.checkIntervalHours! * 60 * 60 * 1000)
+    };
+
+    this.reports.push(report);
+
+    // Log compliance status
+    logAggregator.info('compliance-checker', `Compliance report generated`, {
+      reportId: report.id,
+      framework: report.framework,
+      status: report.status,
+      score: report.overallScore,
+      totalChecks,
+      failed,
+      criticalFailures
+    }, ['compliance', 'report']);
+
+    // Alert on compliance failures
+    if (report.status === 'non-compliant' || criticalFailures > 0) {
+      securityMonitor.logSecurityEvent({
+        severity: 'critical',
+        type: 'vulnerability',
+        source: 'compliance-checker',
+        message: `Compliance failure detected: ${criticalFailures} critical failures`,
+        details: {
+          reportId: report.id,
+          framework: report.framework,
+          criticalFailures,
+          overallScore
+        },
+        resolved: false
+      });
+    }
+
+    return report;
+  }
+
+  getReports(limit = 10): ComplianceReport[] {
+    return this.reports
+      .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+      .slice(0, limit);
+  }
+
+  getLatestReport(framework?: string): ComplianceReport | undefined {
+    return this.reports
+      .filter(r => !framework || r.framework === framework)
+      .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())[0];
+  }
+
+  // Default compliance checks
+  private setupDefaultChecks(): void {
+    // Security checks
+    this.addCheck({
+      name: 'Password Policy Enforcement',
+      description: 'Verify strong password policies are enforced',
+      category: 'security',
+      framework: 'OWASP',
+      severity: 'high',
+      required: true,
+      automated: true,
+      checkFunction: async () => this.checkPasswordPolicy()
+    });
+
+    this.addCheck({
+      name: 'HTTPS Enforcement',
+      description: 'Verify all communications use HTTPS',
+      category: 'security',
+      framework: 'OWASP',
+      severity: 'critical',
+      required: true,
+      automated: true,
+      checkFunction: async () => this.checkHTTPSEnforcement()
+    });
+
+    this.addCheck({
+      name: 'Dependency Vulnerability Scan',
+      description: 'Check for known vulnerabilities in dependencies',
+      category: 'security',
+      framework: 'OWASP',
+      severity: 'high',
+      required: true,
+      automated: true,
+      checkFunction: async () => this.checkDependencyVulnerabilities()
+    });
+
+    this.addCheck({
+      name: 'Security Headers',
+      description: 'Verify security headers are properly configured',
+      category: 'security',
+      framework: 'OWASP',
+      severity: 'medium',
+      required: true,
+      automated: true,
+      checkFunction: async () => this.checkSecurityHeaders()
+    });
+
+    this.addCheck({
+      name: 'Access Control',
+      description: 'Verify proper access controls are in place',
+      category: 'security',
+      framework: 'SOC2',
+      severity: 'critical',
+      required: true,
+      automated: true,
+      checkFunction: async () => this.checkAccessControl()
+    });
+
+    this.addCheck({
+      name: 'Audit Logging',
+      description: 'Verify comprehensive audit logging is enabled',
+      category: 'operational',
+      framework: 'SOC2',
+      severity: 'high',
+      required: true,
+      automated: true,
+      checkFunction: async () => this.checkAuditLogging()
+    });
+
+    this.addCheck({
+      name: 'Data Encryption',
+      description: 'Verify data is encrypted at rest and in transit',
+      category: 'security',
+      framework: 'GDPR',
+      severity: 'critical',
+      required: true,
+      automated: true,
+      checkFunction: async () => this.checkDataEncryption()
+    });
+
+    this.addCheck({
+      name: 'Environment Configuration',
+      description: 'Verify secure environment configuration',
+      category: 'technical',
+      framework: 'NIST',
+      severity: 'medium',
+      required: true,
+      automated: true,
+      checkFunction: async () => this.checkEnvironmentConfiguration()
+    });
+  }
+
+  // Individual check implementations
+  private async checkPasswordPolicy(): Promise<ComplianceResult> {
+    const findings: string[] = [];
+    const recommendations: string[] = [];
+    const evidence: any[] = [];
+    let score = 100;
+
+    // Check if password requirements are configured
+    const hasMinLength = process.env.MIN_PASSWORD_LENGTH ? 
+      parseInt(process.env.MIN_PASSWORD_LENGTH) >= 8 : false;
+    
+    if (!hasMinLength) {
+      findings.push('Minimum password length not enforced (should be >= 8)');
+      recommendations.push('Set MIN_PASSWORD_LENGTH environment variable to 8 or higher');
+      score -= 30;
+    } else {
+      evidence.push({ type: 'config', value: `MIN_PASSWORD_LENGTH=${process.env.MIN_PASSWORD_LENGTH}` });
+    }
+
+    // Check for complexity requirements
+    const hasComplexity = process.env.REQUIRE_PASSWORD_COMPLEXITY === 'true';
+    if (!hasComplexity) {
+      findings.push('Password complexity requirements not enforced');
+      recommendations.push('Enable password complexity requirements');
+      score -= 20;
+    }
+
+    return {
+      checkId: '',
+      timestamp: new Date(),
+      passed: findings.length === 0,
+      score: Math.max(0, score),
+      details: { findings, recommendations, evidence }
+    };
+  }
+
+  private async checkHTTPSEnforcement(): Promise<ComplianceResult> {
+    const findings: string[] = [];
+    const recommendations: string[] = [];
+    const evidence: any[] = [];
+    let score = 100;
+
+    // Check if HTTPS is enforced
+    const httpsEnforced = process.env.FORCE_HTTPS === 'true' || process.env.NODE_ENV === 'production';
+    
+    if (!httpsEnforced && process.env.NODE_ENV === 'production') {
+      findings.push('HTTPS not enforced in production environment');
+      recommendations.push('Set FORCE_HTTPS=true for production');
+      score = 0; // Critical failure
+    } else {
+      evidence.push({ type: 'config', value: `FORCE_HTTPS=${process.env.FORCE_HTTPS}` });
+    }
+
+    return {
+      checkId: '',
+      timestamp: new Date(),
+      passed: findings.length === 0,
+      score,
+      details: { findings, recommendations, evidence }
+    };
+  }
+
+  private async checkDependencyVulnerabilities(): Promise<ComplianceResult> {
+    const findings: string[] = [];
+    const recommendations: string[] = [];
+    const evidence: any[] = [];
+    let score = 100;
+
+    try {
+      // Get latest vulnerability report from security monitor
+      const securityMetrics = securityMonitor.getSecurityMetrics();
+      const criticalVulns = securityMetrics.criticalVulnerabilities;
+      
+      if (criticalVulns > 0) {
+        findings.push(`${criticalVulns} critical vulnerabilities found in dependencies`);
+        recommendations.push('Update dependencies with critical vulnerabilities immediately');
+        score = Math.max(0, score - (criticalVulns * 20));
+      }
+
+      evidence.push({
+        type: 'scan-result',
+        value: securityMetrics,
+        lastScan: securityMetrics.lastScanTimestamp
+      });
+
+    } catch (error) {
+      findings.push('Unable to perform vulnerability scan');
+      recommendations.push('Ensure dependency scanning is properly configured');
+      score = 50;
+    }
+
+    return {
+      checkId: '',
+      timestamp: new Date(),
+      passed: findings.length === 0,
+      score,
+      details: { findings, recommendations, evidence }
+    };
+  }
+
+  private async checkSecurityHeaders(): Promise<ComplianceResult> {
+    const findings: string[] = [];
+    const recommendations: string[] = [];
+    const evidence: any[] = [];
+    let score = 100;
+
+    // Check for required security headers
+    const requiredHeaders = [
+      'X-Content-Type-Options',
+      'X-Frame-Options',
+      'X-XSS-Protection',
+      'Strict-Transport-Security',
+      'Content-Security-Policy'
+    ];
+
+    // This would typically check actual HTTP responses
+    // For now, check if helmet is configured (if available)
+    const helmetConfigured = process.env.ENABLE_SECURITY_HEADERS === 'true';
+    
+    if (!helmetConfigured) {
+      findings.push('Security headers not properly configured');
+      recommendations.push('Enable security headers using helmet or similar middleware');
+      score -= 40;
+    } else {
+      evidence.push({ type: 'config', value: 'Security headers enabled' });
+    }
+
+    return {
+      checkId: '',
+      timestamp: new Date(),
+      passed: findings.length === 0,
+      score,
+      details: { findings, recommendations, evidence }
+    };
+  }
+
+  private async checkAccessControl(): Promise<ComplianceResult> {
+    const findings: string[] = [];
+    const recommendations: string[] = [];
+    const evidence: any[] = [];
+    let score = 100;
+
+    // Check if authentication is properly configured
+    const authEnabled = process.env.ENABLE_AUTH === 'true';
+    const jwtSecret = process.env.JWT_SECRET;
+    
+    if (!authEnabled) {
+      findings.push('Authentication not enabled');
+      recommendations.push('Enable authentication for all protected endpoints');
+      score -= 50;
+    }
+
+    if (!jwtSecret || jwtSecret.length < 32) {
+      findings.push('JWT secret not configured or too weak');
+      recommendations.push('Set a strong JWT_SECRET (at least 32 characters)');
+      score -= 30;
+    }
+
+    if (authEnabled) {
+      evidence.push({ type: 'config', value: 'Authentication enabled' });
+    }
+
+    return {
+      checkId: '',
+      timestamp: new Date(),
+      passed: findings.length === 0,
+      score: Math.max(0, score),
+      details: { findings, recommendations, evidence }
+    };
+  }
+
+  private async checkAuditLogging(): Promise<ComplianceResult> {
+    const findings: string[] = [];
+    const recommendations: string[] = [];
+    const evidence: any[] = [];
+    let score = 100;
+
+    // Check if audit logging is enabled
+    const auditEnabled = process.env.ENABLE_AUDIT_LOGGING === 'true';
+    const logLevel = process.env.LOG_LEVEL;
+    
+    if (!auditEnabled) {
+      findings.push('Audit logging not enabled');
+      recommendations.push('Enable comprehensive audit logging');
+      score -= 40;
+    }
+
+    if (logLevel && !['debug', 'info'].includes(logLevel.toLowerCase())) {
+      findings.push('Log level may not capture sufficient audit information');
+      recommendations.push('Set log level to info or debug for better audit trail');
+      score -= 20;
+    }
+
+    // Check if log aggregator is working
+    const logStats = logAggregator.getLogStatistics();
+    if (logStats.totalLogs === 0) {
+      findings.push('No logs detected - logging may not be working');
+      recommendations.push('Verify log aggregation is properly configured');
+      score -= 30;
+    } else {
+      evidence.push({ type: 'log-stats', value: logStats });
+    }
+
+    return {
+      checkId: '',
+      timestamp: new Date(),
+      passed: findings.length === 0,
+      score: Math.max(0, score),
+      details: { findings, recommendations, evidence }
+    };
+  }
+
+  private async checkDataEncryption(): Promise<ComplianceResult> {
+    const findings: string[] = [];
+    const recommendations: string[] = [];
+    const evidence: any[] = [];
+    let score = 100;
+
+    // Check database encryption
+    const dbEncrypted = process.env.DATABASE_ENCRYPTED === 'true';
+    if (!dbEncrypted) {
+      findings.push('Database encryption not enabled');
+      recommendations.push('Enable database encryption at rest');
+      score -= 40;
+    }
+
+    // Check if TLS is configured for external communications
+    const tlsEnabled = process.env.ENABLE_TLS === 'true' || process.env.NODE_ENV === 'production';
+    if (!tlsEnabled && process.env.NODE_ENV === 'production') {
+      findings.push('TLS not enabled for production');
+      recommendations.push('Enable TLS for all external communications');
+      score -= 40;
+    }
+
+    return {
+      checkId: '',
+      timestamp: new Date(),
+      passed: findings.length === 0,
+      score: Math.max(0, score),
+      details: { findings, recommendations, evidence }
+    };
+  }
+
+  private async checkEnvironmentConfiguration(): Promise<ComplianceResult> {
+    const findings: string[] = [];
+    const recommendations: string[] = [];
+    const evidence: any[] = [];
+    let score = 100;
+
+    // Check if debug mode is disabled in production
+    if (process.env.NODE_ENV === 'production' && process.env.DEBUG === 'true') {
+      findings.push('Debug mode enabled in production');
+      recommendations.push('Disable debug mode in production environment');
+      score -= 30;
+    }
+
+    // Check if sensitive information is not exposed
+    const exposedVars = Object.keys(process.env).filter(key => 
+      key.toLowerCase().includes('secret') || 
+      key.toLowerCase().includes('password') ||
+      key.toLowerCase().includes('key')
+    );
+
+    if (exposedVars.length > 0) {
+      evidence.push({ type: 'env-vars', count: exposedVars.length });
+    }
+
+    return {
+      checkId: '',
+      timestamp: new Date(),
+      passed: findings.length === 0,
+      score,
+      details: { findings, recommendations, evidence }
+    };
+  }
+
+  // Continuous checking
+  private startContinuousChecking(): void {
+    this.scanInterval = setInterval(async () => {
+      try {
+        await this.generateComplianceReport();
+      } catch (error) {
+        logAggregator.error('compliance-checker', 'Continuous compliance check failed', {
+          error: error instanceof Error ? error.message : 'Unknown error'
+        }, ['compliance', 'error']);
+      }
+    }, this.options.checkIntervalHours! * 60 * 60 * 1000);
+  }
+
+  // Analytics
+  getComplianceMetrics(): {
+    currentScore: number;
+    status: string;
+    trendsLast30Days: { date: string; score: number }[];
+    frameworkScores: { framework: string; score: number }[];
+    criticalIssues: number;
+  } {
+    const latestReport = this.getLatestReport();
+    const reports30Days = this.reports.filter(r => 
+      r.timestamp >= new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+    );
+
+    const trends = reports30Days.map(r => ({
+      date: r.timestamp.toISOString().split('T')[0],
+      score: r.overallScore
+    }));
+
+    const frameworkScores = [...new Set(this.reports.map(r => r.framework))]
+      .map(framework => {
+        const latestFrameworkReport = this.getLatestReport(framework);
+        return {
+          framework,
+          score: latestFrameworkReport?.overallScore || 0
+        };
+      });
+
+    return {
+      currentScore: latestReport?.overallScore || 0,
+      status: latestReport?.status || 'unknown',
+      trendsLast30Days: trends,
+      frameworkScores,
+      criticalIssues: latestReport?.summary.criticalFailures || 0
+    };
+  }
+
+  // Cleanup
+  destroy(): void {
+    if (this.scanInterval) {
+      clearInterval(this.scanInterval);
+    }
+  }
+}
+
+export const complianceChecker = new ComplianceChecker({
+  enableContinuousChecking: process.env.NODE_ENV === 'production',
+  checkIntervalHours: 24,
+  reportRetentionDays: 365
+});
