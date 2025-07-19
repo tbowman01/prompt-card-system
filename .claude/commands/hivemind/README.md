@@ -1,172 +1,326 @@
-# Hive Mind Commands
+# HiveMind Commands
 
-Commands for hive mind collective intelligence operations in Claude Flow.
+Distributed intelligence and collective learning capabilities for Claude Flow. These commands enable shared knowledge, pattern recognition, collaborative decision-making, and advanced cognitive coordination across agent networks.
 
-## Available Commands
+## 🎯 Overview
 
-### Collective Intelligence
-- [consensus-vote](./consensus-vote.md) - Democratic decision making across the hive
-- [memory-share](./memory-share.md) - Share knowledge and discoveries across all hive members  
-- [neural-sync](./neural-sync.md) - Synchronize learning patterns across the collective
-- [swarm-think](./swarm-think.md) - Engage collective problem-solving intelligence
+The HiveMind suite provides:
+- **Collective Intelligence** - Shared knowledge and distributed decision-making across agent networks
+- **Pattern Recognition** - Advanced pattern detection and learning from collective experiences
+- **Neural Coordination** - Synchronized neural model training and knowledge sharing
+- **Distributed Memory** - Shared memory systems for cross-agent knowledge persistence
+- **Collaborative Processing** - Task aggregation, distribution, and collective problem-solving
 
-### Queen Coordination
-- [queen-command](./queen-command.md) - Issue strategic directives from Queen to workers
-- [queen-monitor](./queen-monitor.md) - Monitor overall swarm health and performance
-- [queen-delegate](./queen-delegate.md) - Delegate complex tasks to appropriate worker teams
-- [queen-aggregate](./queen-aggregate.md) - Combine and synthesize results from multiple workers
+## 🧠 Core HiveMind Commands
 
-### Worker Management  
-- [agent-spawn](./agent-spawn.md) - Create specialized worker agents with specific capabilities
-- [agent-assign](./agent-assign.md) - Assign specific tasks to individual or groups of agents
-- [agent-communicate](./agent-communicate.md) - Enable direct peer-to-peer communication between agents
-- [agent-metrics](./agent-metrics.md) - Track individual and collective agent performance
+### Intelligence Coordination
+- **[pattern-recognize](./pattern-recognize.md)** - Identify and learn from patterns across agent behaviors and outcomes
+- **[neural-train](./neural-train.md)** - Train collective intelligence models with distributed learning
+- **[memory-retrieve](./memory-retrieve.md)** - Access and manage shared knowledge base across agent network
 
-### Task Orchestration
-- [task-create](./task-create.md) - Create hierarchical, complex task structures
-- [task-distribute](./task-distribute.md) - Efficiently distribute work across available agents
-- [task-monitor](./task-monitor.md) - Track progress of distributed tasks in real-time
-- [task-aggregate](./task-aggregate.md) - Combine results from distributed task execution
+### Task Management
+- **[task-aggregate](./task-aggregate.md)** - Combine and synthesize results from multiple agents
+- **[task-distribute](./task-distribute.md)** - Intelligently distribute tasks across agent network
+- **[task-monitor](./task-monitor.md)** - Monitor collective task progress and coordination
 
-### Memory & Learning
-- [memory-store](./memory-store.md) - Store knowledge in the collective memory system
-- [memory-retrieve](./memory-retrieve.md) - Access stored knowledge from collective memory
-- [neural-train](./neural-train.md) - Train the collective intelligence from experiences
-- [pattern-recognize](./pattern-recognize.md) - Identify patterns in data and behaviors
+### System Intelligence
+- **[agent-metrics](./agent-metrics.md)** - Analyze collective agent performance and intelligence metrics
+- **[available-commands](./available-commands.md)** - Dynamic command discovery and capability mapping
 
-## Quick Reference
+## 🚀 Quick Start Examples
 
-See [available-commands.md](./available-commands.md) for a complete command reference table.
+### Basic HiveMind Setup
+```bash
+# Initialize pattern recognition across agents
+npx claude-flow hivemind pattern-recognize --initialize --collective-learning
 
-## Core Concepts
+# Start neural training with shared data
+npx claude-flow hivemind neural-train --collective --distributed-learning --epochs 100
 
-### Collective Intelligence
-The Hive Mind system transforms individual AI agents into a coordinated swarm capable of:
-- **Democratic Decision Making**: Consensus-based voting on complex decisions
-- **Shared Knowledge**: Real-time memory synchronization across all agents
-- **Distributed Problem Solving**: Collective intelligence that exceeds individual capabilities
-- **Adaptive Learning**: Continuous improvement through shared experiences
+# Access shared knowledge base
+npx claude-flow hivemind memory-retrieve --pattern "successful-patterns" --collective-access
+```
 
-### Queen Coordination
-Strategic oversight and high-level coordination:
-- **Strategic Directives**: Issue commands and set priorities across the swarm
-- **Performance Monitoring**: Track swarm health and individual agent metrics
-- **Task Delegation**: Assign complex projects to appropriate specialist teams
-- **Result Synthesis**: Combine outputs from multiple agents into cohesive deliverables
+### Advanced Collective Intelligence
+```bash
+# Distributed task processing with intelligence sharing
+npx claude-flow hivemind task-distribute --intelligent-routing --learn-patterns --optimize-allocation
 
-### Worker Specialization
-Specialized agents with distinct capabilities:
-- **Agent Types**: researcher, coder, architect, tester, analyst, coordinator, specialist
-- **Skill Matching**: Intelligent assignment based on capabilities and experience
-- **Performance Tracking**: Individual and collective performance analytics
-- **Peer Communication**: Direct agent-to-agent coordination and knowledge sharing
+# Aggregate results with pattern analysis
+npx claude-flow hivemind task-aggregate --pattern-analysis --collective-insights --synthesize
 
-## Usage Patterns
+# Monitor collective intelligence evolution
+npx claude-flow hivemind agent-metrics --collective-intelligence --learning-progress --pattern-evolution
+```
 
-### Project Development Workflow
-1. **Initialize Swarm**: Create hierarchical swarm with appropriate agent types
-2. **Delegate Project**: Queen delegates complex project to specialist team
-3. **Distribute Tasks**: Break down project into specific task assignments
-4. **Monitor Progress**: Real-time tracking with alerts and performance metrics
-5. **Aggregate Results**: Combine individual outputs into integrated deliverable
+## 🧠 Collective Intelligence Architecture
 
-### Research and Analysis
-1. **Spawn Research Team**: Create researchers, analysts, and domain specialists
-2. **Collective Thinking**: Use swarm intelligence for problem exploration
-3. **Knowledge Sharing**: Distribute findings across the collective memory
-4. **Pattern Recognition**: Identify insights and trends in collected data
-5. **Consensus Formation**: Democratic validation of findings and recommendations
+### 1. Distributed Pattern Recognition
+```bash
+# Cross-agent pattern identification
+npx claude-flow hivemind pattern-recognize --scope collective --pattern-types behavioral,performance,success
+```
+- **Behavioral Patterns** - Agent collaboration and decision-making patterns
+- **Performance Patterns** - Optimal performance configurations and strategies
+- **Success Patterns** - Successful task completion patterns and approaches
+- **Learning Patterns** - Effective learning and adaptation strategies
 
-### Quality Assurance and Optimization
-1. **Performance Analysis**: Identify bottlenecks and optimization opportunities
-2. **Code Quality Assessment**: Automated and peer review processes
-3. **Neural Training**: Learn from successful patterns and outcomes
-4. **Continuous Improvement**: Adaptive optimization based on feedback loops
+### 2. Shared Neural Training
+```bash
+# Collective model training and improvement
+npx claude-flow hivemind neural-train --distributed --knowledge-sharing --model-synchronization
+```
+- **Distributed Learning** - Parallel training across multiple agent instances
+- **Knowledge Sharing** - Transfer learning between specialized agents
+- **Model Synchronization** - Consistent model updates across agent network
+- **Collective Optimization** - Network-wide performance optimization
 
-## Integration with Claude Code
+### 3. Collective Memory Systems
+```bash
+# Shared knowledge management
+npx claude-flow hivemind memory-retrieve --collective-memory --pattern-search --knowledge-synthesis
+```
+- **Collective Memory** - Shared memory pool accessible by all agents
+- **Pattern Search** - Intelligent search through collective experiences
+- **Knowledge Synthesis** - Combine knowledge from multiple sources
+- **Experience Indexing** - Efficient indexing and retrieval of shared experiences
 
-Use MCP tools in Claude Code for hive mind operations:
+## 🔄 Task Intelligence Coordination
 
+### 1. Intelligent Task Distribution
+```bash
+# Smart task routing based on agent capabilities and learning
+npx claude-flow hivemind task-distribute --intelligence-routing --capability-matching --load-optimize
+```
+- **Intelligence Routing** - Route tasks based on agent intelligence and specialization
+- **Capability Matching** - Match tasks to agent capabilities and learning history
+- **Load Optimization** - Balance cognitive load across agent network
+- **Learning Integration** - Use learning patterns to improve task distribution
+
+### 2. Collective Task Aggregation
+```bash
+# Synthesize results from multiple agents with intelligence
+npx claude-flow hivemind task-aggregate --collective-synthesis --pattern-integration --quality-assessment
+```
+- **Collective Synthesis** - Combine results using collective intelligence
+- **Pattern Integration** - Apply learned patterns to result aggregation
+- **Quality Assessment** - Assess result quality using collective knowledge
+- **Consensus Building** - Build consensus from diverse agent perspectives
+
+### 3. Intelligent Monitoring
+```bash
+# Monitor collective intelligence and task coordination
+npx claude-flow hivemind task-monitor --intelligence-tracking --pattern-evolution --collective-health
+```
+- **Intelligence Tracking** - Monitor collective intelligence development
+- **Pattern Evolution** - Track how patterns evolve over time
+- **Collective Health** - Assess overall network intelligence health
+- **Learning Progress** - Monitor collective learning advancement
+
+## 🧠 Neural Coordination Features
+
+### Distributed Learning
+```bash
+# Advanced distributed neural training
+npx claude-flow hivemind neural-train --federated-learning --privacy-preserving --model-averaging
+```
+- **Federated Learning** - Train models while keeping data distributed
+- **Privacy-Preserving** - Maintain privacy while sharing knowledge
+- **Model Averaging** - Combine models from multiple agents
+- **Transfer Learning** - Transfer knowledge between specialized domains
+
+### Pattern-Based Intelligence
+```bash
+# Pattern-driven intelligence development
+npx claude-flow hivemind pattern-recognize --cognitive-patterns --learning-optimization --adaptation-strategies
+```
+- **Cognitive Patterns** - Identify cognitive processing patterns
+- **Learning Optimization** - Optimize learning strategies based on patterns
+- **Adaptation Strategies** - Develop adaptive intelligence strategies
+- **Collective Cognition** - Enable collective cognitive processing
+
+## 🔧 MCP Integration
+
+### Claude Code HiveMind Integration
 ```javascript
-// Initialize swarm
-mcp__claude-flow__swarm_init({ 
-  topology: "hierarchical", 
-  maxAgents: 8,
-  strategy: "specialized" 
+// Pattern recognition via MCP
+mcp__claude-flow__pattern_recognize({
+  data: ["behavioral", "performance", "cognitive"],
+  patterns: ["success", "failure", "optimization"],
+  collective_analysis: true
 })
 
-// Spawn specialized agents
-mcp__claude-flow__agent_spawn({ 
-  type: "researcher", 
-  name: "Knowledge_Specialist" 
+// Neural training coordination
+mcp__claude-flow__neural_train({
+  pattern_type: "collective",
+  training_data: "distributed_experiences",
+  federated_learning: true
 })
 
-// Collective decision making
-mcp__claude-flow__consensus_vote({
-  proposal: "Architecture selection for new service",
-  options: ["microservices", "serverless", "monolith"],
-  voters: ["architect", "developer", "ops_specialist"],
-  threshold: 0.67
-})
-
-// Store collective knowledge
-mcp__claude-flow__memory_store({
-  key: "best_practices/api_design",
-  value: { patterns: [...], security: [...] },
-  namespace: "hive/"
+// Collective memory access
+mcp__claude-flow__memory_usage({
+  action: "retrieve",
+  namespace: "collective",
+  pattern: "success_patterns",
+  synthesis_mode: true
 })
 ```
 
-## Advanced Features
+### Hooks Integration
+```bash
+# Pre-task collective intelligence activation
+npx claude-flow hooks pre-task --hivemind-activation --pattern-analysis --collective-preparation
 
-### Neural Learning
-- **Pattern Recognition**: Identify successful strategies and anti-patterns
-- **Adaptive Behavior**: Agents improve decision-making based on experience
-- **Cross-Domain Transfer**: Apply learnings from one domain to another
-- **Predictive Analytics**: Anticipate outcomes and optimize strategies
+# Post-task learning integration
+npx claude-flow hooks post-task --hivemind-learning --pattern-update --collective-memory-update
 
-### Memory Management
-- **Collective Memory**: Shared knowledge base accessible to all agents
-- **Intelligent Retrieval**: Semantic search and pattern-based discovery
-- **Knowledge Validation**: Peer review and quality scoring of stored information
-- **Memory Evolution**: Continuous refinement and updating of knowledge base
+# Session-end collective analysis
+npx claude-flow hooks session-end --hivemind-synthesis --pattern-evolution --collective-insights
+```
 
-### Performance Optimization
-- **Load Balancing**: Intelligent task distribution based on agent capabilities
-- **Resource Optimization**: Efficient utilization of computational resources
-- **Bottleneck Detection**: Identify and resolve performance constraints
-- **Scalability**: Dynamic scaling based on workload requirements
+## 📊 HiveMind Categories
 
-## Best Practices
+### Collective Intelligence
+- **Distributed Decision Making** - Collaborative decision processes across agent network
+- **Shared Knowledge Base** - Collective memory and experience repository
+- **Pattern Learning** - Continuous learning from collective experiences
+- **Consensus Mechanisms** - Building agreement and shared understanding
 
-### Swarm Design
-- Choose topology based on project complexity and team size
-- Balance agent specialization with cross-functional capabilities
-- Plan for knowledge transfer and documentation from the start
-- Monitor swarm health and adjust composition as needed
+### Neural Coordination
+- **Model Synchronization** - Keeping agent models aligned and updated
+- **Transfer Learning** - Sharing learned capabilities between agents
+- **Distributed Training** - Parallel training across agent network
+- **Collective Optimization** - Network-wide performance optimization
 
-### Decision Making
-- Use consensus voting for critical architectural and strategic decisions
-- Combine collective intelligence with individual expertise
-- Document decision rationale in collective memory
-- Learn from both successful and failed decisions
+### Task Intelligence
+- **Intelligent Routing** - Smart task distribution based on collective knowledge
+- **Result Synthesis** - Combining results using collective intelligence
+- **Quality Assessment** - Evaluating outcomes using shared standards
+- **Collaborative Processing** - Joint problem-solving approaches
 
 ### Knowledge Management
-- Store all important discoveries and insights in collective memory
-- Use structured data formats for consistent knowledge representation
-- Implement quality controls and validation processes
-- Enable easy discovery and retrieval of relevant information
+- **Experience Indexing** - Organizing collective experiences for retrieval
+- **Pattern Storage** - Maintaining learned patterns for future use
+- **Knowledge Discovery** - Finding insights in collective data
+- **Wisdom Accumulation** - Building long-term collective wisdom
 
-### Performance Monitoring
-- Track both individual agent and collective swarm performance
-- Use metrics to guide task assignment and resource allocation
-- Identify patterns in successful collaborations and replicate them
-- Continuously optimize based on performance data and feedback
+## 📈 HiveMind Metrics
 
-## See Also
+### Collective Intelligence Quality
+- **Pattern Recognition Accuracy** - How well the system identifies useful patterns
+- **Learning Convergence** - Speed of collective learning and improvement
+- **Knowledge Synthesis Quality** - Effectiveness of combining diverse inputs
+- **Collective Decision Quality** - Quality of group decision-making
 
-- **Coordination Commands**: Basic swarm setup and task orchestration
-- **Memory Commands**: Advanced memory management and persistence
-- **Monitoring Commands**: Performance tracking and health monitoring
-- **GitHub Commands**: Repository management and code collaboration
-- **Analysis Commands**: Performance analysis and optimization
+### Network Coordination
+- **Agent Synchronization** - How well agents stay coordinated
+- **Knowledge Sharing Efficiency** - Effectiveness of knowledge transfer
+- **Collective Memory Utilization** - Usage and effectiveness of shared memory
+- **Task Distribution Intelligence** - Quality of intelligent task routing
+
+### Learning Progress
+- **Pattern Evolution Rate** - How quickly patterns improve over time
+- **Model Convergence** - Neural model training effectiveness
+- **Adaptation Speed** - How quickly the system adapts to new situations
+- **Collective Capability Growth** - Overall improvement in collective abilities
+
+## 🎯 Best Practices
+
+### HiveMind Design
+1. **Distributed Architecture** - Design for distributed intelligence from the start
+2. **Privacy Considerations** - Implement privacy-preserving learning mechanisms
+3. **Quality Controls** - Establish quality gates for collective learning
+4. **Continuous Learning** - Enable continuous adaptation and improvement
+
+### Pattern Recognition
+1. **Pattern Validation** - Validate patterns before applying them broadly
+2. **Pattern Evolution** - Allow patterns to evolve and improve over time
+3. **Pattern Pruning** - Remove outdated or ineffective patterns
+4. **Pattern Documentation** - Document learned patterns for understanding
+
+### Collective Learning
+1. **Learning Diversity** - Ensure diverse learning inputs and perspectives
+2. **Learning Validation** - Validate collective learning against known outcomes
+3. **Learning Transfer** - Facilitate effective knowledge transfer between agents
+4. **Learning Persistence** - Maintain learning across system restarts and updates
+
+## 🔄 HiveMind Workflows
+
+### 1. Collective Intelligence Initialization
+```bash
+# Initialize collective intelligence capabilities
+npx claude-flow hivemind pattern-recognize --initialize-collective --setup-learning
+npx claude-flow hivemind memory-retrieve --initialize-collective-memory --setup-indexing
+npx claude-flow hivemind neural-train --initialize-distributed --setup-coordination
+```
+
+### 2. Collaborative Task Processing
+```bash
+# Distribute and process tasks collectively
+npx claude-flow hivemind task-distribute --intelligent-allocation --learning-based
+npx claude-flow hivemind task-monitor --collective-tracking --pattern-analysis
+npx claude-flow hivemind task-aggregate --collective-synthesis --quality-validation
+```
+
+### 3. Continuous Learning and Improvement
+```bash
+# Continuous collective learning cycle
+npx claude-flow hivemind pattern-recognize --continuous-learning --pattern-evolution
+npx claude-flow hivemind neural-train --incremental-learning --model-updating
+npx claude-flow hivemind memory-retrieve --knowledge-consolidation --wisdom-building
+```
+
+## 🔗 Integration Points
+
+### Analysis Commands
+```bash
+# Analyze collective intelligence performance
+npx claude-flow analysis performance-report --hivemind-focus --collective-metrics
+
+# Pattern analysis and optimization
+npx claude-flow analysis pattern-analysis --collective-patterns --learning-effectiveness
+```
+
+### Coordination Commands
+```bash
+# Coordinate agents with collective intelligence
+npx claude-flow coordination swarm-init --hivemind-enabled --collective-coordination
+
+# Task orchestration with collective intelligence
+npx claude-flow coordination task-orchestrate --hivemind-routing --collective-processing
+```
+
+### Training Commands
+```bash
+# Train models with collective intelligence
+npx claude-flow training neural-train --hivemind-integration --collective-learning
+
+# Pattern learning with collective intelligence
+npx claude-flow training pattern-learn --collective-patterns --distributed-learning
+```
+
+## 🔗 Related Documentation
+
+- **[Coordination Commands](../coordination/README.md)** - Agent coordination with collective intelligence
+- **[Training Commands](../training/README.md)** - Neural training with distributed learning
+- **[Memory Commands](../memory/README.md)** - Memory management and collective storage
+- **[Analysis Commands](../analysis/README.md)** - Analysis of collective intelligence
+
+## 🆘 Troubleshooting
+
+### Common HiveMind Issues
+- **Synchronization Problems** - Agents getting out of sync with collective intelligence
+- **Pattern Overfitting** - Learning patterns that don't generalize well
+- **Memory Fragmentation** - Collective memory becoming fragmented or inefficient
+- **Learning Stagnation** - Collective learning reaching plateaus
+
+### Performance Tips
+- Monitor pattern quality and prune ineffective patterns regularly
+- Implement proper synchronization mechanisms for distributed learning
+- Use federated learning approaches for privacy-preserving collective intelligence
+- Regular collective memory maintenance and optimization
+- Balance individual agent intelligence with collective coordination
+
+---
+
+*For detailed command usage, see individual command documentation files.*
