@@ -33,8 +33,10 @@ The Prompt Card System follows a modern, scalable architecture with clear separa
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Application Services                        │
 ├─────────────────────────────────────────────────────────────────┤
-│  Analytics Engine  │  Optimization AI  │  Report Generator     │
-│  Test Execution    │  Security Scanner │  Cost Tracker        │
+│  Analytics Engine     │  Optimization AI    │  Report Generator │
+│  Test Execution       │  Security Scanner   │  Cost Tracker     │
+│  Voice Interface      │  Blockchain Audit   │  Collaboration    │
+│  Multi-Tenant Manager │  ML/AI Coordinator  │  Monitoring Stack │
 └─────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
@@ -96,16 +98,34 @@ src/
 │   ├── promptCards.ts    # Prompt card operations
 │   ├── testCases.ts      # Test case operations
 │   ├── analytics.ts      # Analytics endpoints
-│   └── reports.ts        # Report generation
+│   ├── reports.ts        # Report generation
+│   ├── health-enhanced.ts # Advanced health monitoring
+│   ├── optimization.ts   # AI optimization endpoints
+│   └── yaml.ts           # YAML import/export
 ├── services/             # Business logic services
-│   ├── analytics/        # Analytics engine
+│   ├── analytics/        # Analytics engine & predictive analytics
+│   │   ├── AnalyticsEngine.ts
+│   │   ├── VoiceInterface.ts
+│   │   ├── BlockchainAuditTrail.ts
+│   │   └── PredictiveAnalytics.ts
+│   ├── collaboration/    # Real-time collaboration
+│   │   ├── CollaborationService.ts
+│   │   ├── CRDTService.ts
+│   │   └── OperationalTransform.ts
+│   ├── ml/              # Machine learning services
+│   │   └── FederatedLearningEngine.ts
 │   ├── optimization/     # AI optimization
 │   ├── reports/          # Report generation
 │   ├── testing/          # Test execution
+│   ├── training/         # Model training
+│   ├── performance/      # Performance monitoring
+│   ├── security/         # Security monitoring
 │   └── websocket/        # Real-time updates
 ├── middleware/           # Express middleware
-├── database/             # Database connection
+├── database/             # Database connection & migrations
+│   └── migrations/       # Multi-tenant schema updates
 ├── types/                # TypeScript definitions
+│   └── workspace.ts      # Multi-tenant types
 └── utils/                # Utility functions
 ```
 
@@ -172,19 +192,57 @@ CREATE TABLE test_results (
 
 ## ⚡ Service Architecture
 
-### Analytics Engine
+### Advanced Analytics Engine
 
 **Components**:
-- **Event Store**: Captures all system events
-- **Metrics Calculator**: Computes performance metrics
-- **Trend Analyzer**: Identifies patterns and trends
-- **Insight Generator**: Provides actionable insights
+- **Event Store**: Captures all system events with blockchain audit trail
+- **Metrics Calculator**: Computes performance metrics with ML enhancement
+- **Trend Analyzer**: Identifies patterns and trends with predictive analytics
+- **Insight Generator**: Provides actionable insights with AI recommendations
+- **Voice Interface**: Natural language analytics queries
+- **Blockchain Audit**: Immutable audit trail with smart contracts
 
-**Data Pipeline**:
+**Enhanced Data Pipeline**:
 ```
-Raw Events → Event Store → Metrics Calculator → Analytics DB
-                                ↓
-UI Dashboard ← API Layer ← Insight Generator ← Trend Analyzer
+Raw Events → Blockchain Audit → Event Store → ML Analytics → Predictions
+                                     ↓              ↓
+Voice Interface ← UI Dashboard ← API Layer ← Insight Generator ← Trend Analyzer
+                                     ↓
+                            Real-time Alerts ← Anomaly Detection ← Performance Monitor
+```
+
+### Multi-Tenant Architecture
+
+**Components**:
+- **Workspace Manager**: Handles workspace isolation and management
+- **User Service**: Multi-tenant user authentication and authorization
+- **Billing Service**: Usage tracking and subscription management
+- **API Gateway**: Tenant-aware request routing and rate limiting
+
+**Isolation Strategy**:
+```
+Request → Tenant Resolution → Workspace Context → Data Isolation → Response
+              ↓                      ↓
+         API Keys/Tokens      Row-Level Security
+              ↓                      ↓
+         Rate Limiting        Resource Quotas
+```
+
+### Real-time Collaboration
+
+**Components**:
+- **WebSocket Manager**: Real-time connection management
+- **Operational Transform**: Conflict-free collaborative editing
+- **CRDT Service**: Conflict-free replicated data types
+- **Presence Service**: User presence and awareness
+
+**Collaboration Flow**:
+```
+User Edit → Operational Transform → Conflict Resolution → Broadcast
+              ↓                          ↓
+         Version Control            Live Presence
+              ↓                          ↓
+         Document Sync             Cursor Tracking
 ```
 
 ### Test Execution Engine
