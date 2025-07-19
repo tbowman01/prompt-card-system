@@ -5,38 +5,69 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      # Multi-stage build arguments for optimization
+      args:
+        - NODE_ENV=production
+      # Build cache optimization
+      cache_from:
+        - node:20-alpine
     ports:
       - "3000:3000"
     depends_on:
       - backend
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:3001
-      - NODE_ENV=development
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
+      - NEXT_PUBLIC_API_URL=http://backend:3001
+      - NODE_ENV=production
+      - NEXT_TELEMETRY_DISABLED=1
+    # Remove volumes for production builds - use built images
+    # volumes:
+    #   - ./frontend:/app
+    #   - /app/node_modules
     networks:
       - app-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      # Multi-stage build arguments for optimization
+      args:
+        - NODE_ENV=production
+      # Build cache optimization
+      cache_from:
+        - node:20-alpine
     ports:
       - "3001:3001"
     depends_on:
-      - ollama
+      ollama:
+        condition: service_healthy
     environment:
-      - NODE_ENV=development
+      - NODE_ENV=production
       - OLLAMA_BASE_URL=http://ollama:11434
       - DATABASE_PATH=/app/data/database.sqlite
-      - CORS_ORIGIN=http://localhost:3000
+      - CORS_ORIGIN=http://frontend:3000
+    # Remove volumes for production builds - use built images
+    # volumes:
+    #   - ./backend:/app
+    #   - /app/node_modules
     volumes:
-      - ./backend:/app
-      - /app/node_modules
       - ./data:/app/data
     networks:
       - app-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   ollama:
     image: ollama/ollama:latest
