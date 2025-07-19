@@ -17,6 +17,16 @@ const customJestConfig = {
   },
   testEnvironment: 'jest-environment-jsdom',
   
+  // Add proper TypeScript support for tests
+  moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
+  
+  // TypeScript files handling
+  globals: {
+    'ts-jest': {
+      useESM: true,
+    },
+  },
+  
   // Speed Optimizer: Parallel execution for frontend tests
   maxWorkers: '50%',
   
