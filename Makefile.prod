@@ -1,0 +1,243 @@
+# Production Makefile for Prompt Card System
+# ==========================================
+
+.PHONY: help deploy status health logs backup restore ssl-setup monitoring-setup scale clean
+
+# Colors
+BLUE := \033[0;34m
+GREEN := \033[0;32m
+YELLOW := \033[0;33m
+RED := \033[0;31m
+NC := \033[0m
+
+# Configuration
+COMPOSE_FILE := docker-compose.prod.yml
+ENV_FILE := .env.production
+
+help: ## Show this help message
+	@echo -e "$(BLUE)Prompt Card System - Production Commands$(NC)"
+	@echo "========================================"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "$(BLUE)%-20s$(NC) %s\n", $$1, $$2}'
+
+# Deployment Commands
+deploy: ## Deploy production stack
+	@echo -e "$(BLUE)🚀 Deploying production stack...$(NC)"
+	@./scripts/production/deploy.sh production
+
+deploy-staging: ## Deploy to staging environment
+	@echo -e "$(YELLOW)🔄 Deploying to staging...$(NC)"
+	@./scripts/production/deploy.sh staging
+
+# Status and Health
+status: ## Show service status
+	@echo -e "$(BLUE)📊 Production service status:$(NC)"
+	@docker-compose -f $(COMPOSE_FILE) ps
+
+health: ## Run comprehensive health checks
+	@echo -e "$(BLUE)🏥 Running health checks...$(NC)"
+	@curl -f https://promptcard.ai/api/health || echo -e "$(RED)❌ Frontend health check failed$(NC)"
+	@curl -f https://api.promptcard.ai/api/health || echo -e "$(RED)❌ Backend health check failed$(NC)"
+	@curl -f https://monitoring.promptcard.ai/grafana/api/health || echo -e "$(RED)❌ Monitoring health check failed$(NC)"
+
+health-detailed: ## Run detailed health checks
+	@echo -e "$(BLUE)🔍 Running detailed health checks...$(NC)"
+	@curl -s https://api.promptcard.ai/api/health/comprehensive | jq '.' || echo -e "$(RED)❌ Detailed health check failed$(NC)"
+
+# Logging
+logs: ## Show logs for all services
+	@docker-compose -f $(COMPOSE_FILE) logs -f
+
+logs-backend: ## Show backend logs
+	@docker-compose -f $(COMPOSE_FILE) logs -f backend
+
+logs-frontend: ## Show frontend logs
+	@docker-compose -f $(COMPOSE_FILE) logs -f frontend
+
+logs-nginx: ## Show NGINX logs
+	@docker-compose -f $(COMPOSE_FILE) logs -f nginx
+
+logs-db: ## Show database logs
+	@docker-compose -f $(COMPOSE_FILE) logs -f postgres
+
+logs-monitoring: ## Show monitoring logs
+	@docker-compose -f $(COMPOSE_FILE) logs -f prometheus grafana
+
+# Backup and Restore
+backup: ## Create full backup
+	@echo -e "$(BLUE)💾 Creating full backup...$(NC)"
+	@./scripts/production/backup.sh full
+
+backup-db: ## Create database backup only
+	@echo -e "$(BLUE)🗄️ Creating database backup...$(NC)"
+	@./scripts/production/backup.sh database
+
+backup-app: ## Create application data backup
+	@echo -e "$(BLUE)📁 Creating application backup...$(NC)"
+	@./scripts/production/backup.sh app
+
+restore: ## Restore from backup (specify BACKUP_FILE=filename)
+	@echo -e "$(YELLOW)⚠️ Restoring from backup...$(NC)"
+	@read -p "Enter backup filename: " backup_file; \
+	./scripts/production/restore.sh $$backup_file
+
+# SSL and Security
+ssl-setup: ## Setup SSL certificates
+	@echo -e "$(BLUE)🔒 Setting up SSL certificates...$(NC)"
+	@read -p "Enter domain name: " domain; \
+	read -p "Enter email address: " email; \
+	sudo ./scripts/production/ssl-setup.sh $$domain $$email letsencrypt
+
+ssl-renew: ## Renew SSL certificates
+	@echo -e "$(BLUE)🔄 Renewing SSL certificates...$(NC)"
+	@sudo certbot renew --deploy-hook "docker-compose -f $(COMPOSE_FILE) restart nginx"
+
+# Monitoring
+monitoring-setup: ## Configure monitoring dashboards and alerts
+	@echo -e "$(BLUE)📊 Setting up monitoring...$(NC)"
+	@./scripts/production/monitoring-setup.sh
+
+monitoring-status: ## Check monitoring services status
+	@echo -e "$(BLUE)📈 Monitoring services status:$(NC)"
+	@curl -s http://localhost:9090/-/healthy && echo -e "$(GREEN)✅ Prometheus healthy$(NC)" || echo -e "$(RED)❌ Prometheus unhealthy$(NC)"
+	@curl -s http://localhost:3002/api/health && echo -e "$(GREEN)✅ Grafana healthy$(NC)" || echo -e "$(RED)❌ Grafana unhealthy$(NC)"
+	@curl -s http://localhost:16686 >/dev/null && echo -e "$(GREEN)✅ Jaeger healthy$(NC)" || echo -e "$(RED)❌ Jaeger unhealthy$(NC)"
+
+# Scaling
+scale-backend: ## Scale backend services (specify REPLICAS=number)
+	@echo -e "$(BLUE)📈 Scaling backend services...$(NC)"
+	@read -p "Enter number of replicas: " replicas; \
+	docker-compose -f $(COMPOSE_FILE) up -d --scale backend=$$replicas
+
+scale-frontend: ## Scale frontend services (specify REPLICAS=number)
+	@echo -e "$(BLUE)📈 Scaling frontend services...$(NC)"
+	@read -p "Enter number of replicas: " replicas; \
+	docker-compose -f $(COMPOSE_FILE) up -d --scale frontend=$$replicas
+
+# Database Operations
+db-migrate: ## Run database migrations
+	@echo -e "$(BLUE)🔄 Running database migrations...$(NC)"
+	@docker-compose -f $(COMPOSE_FILE) exec backend npm run migrate
+
+db-backup: ## Create database backup
+	@echo -e "$(BLUE)💾 Creating database backup...$(NC)"
+	@docker-compose -f $(COMPOSE_FILE) exec postgres pg_dump -U promptcard_user promptcard_prod > backup_$(shell date +%Y%m%d_%H%M%S).sql
+
+db-shell: ## Open database shell
+	@docker-compose -f $(COMPOSE_FILE) exec postgres psql -U promptcard_user -d promptcard_prod
+
+# Maintenance
+update: ## Update system (pull latest images and redeploy)
+	@echo -e "$(YELLOW)🔄 Updating system...$(NC)"
+	@git pull origin main
+	@docker-compose -f $(COMPOSE_FILE) pull
+	@./scripts/production/deploy.sh production
+
+restart: ## Restart all services
+	@echo -e "$(BLUE)🔄 Restarting all services...$(NC)"
+	@docker-compose -f $(COMPOSE_FILE) restart
+
+restart-backend: ## Restart backend service only
+	@echo -e "$(BLUE)🔄 Restarting backend...$(NC)"
+	@docker-compose -f $(COMPOSE_FILE) restart backend
+
+restart-frontend: ## Restart frontend service only
+	@echo -e "$(BLUE)🔄 Restarting frontend...$(NC)"
+	@docker-compose -f $(COMPOSE_FILE) restart frontend
+
+restart-nginx: ## Restart NGINX reverse proxy
+	@echo -e "$(BLUE)🔄 Restarting NGINX...$(NC)"
+	@docker-compose -f $(COMPOSE_FILE) restart nginx
+
+# Cleanup
+clean: ## Stop and remove all containers and volumes
+	@echo -e "$(RED)🧹 Cleaning up production environment...$(NC)"
+	@read -p "This will stop and remove all containers and volumes. Are you sure? (y/N): " confirm; \
+	if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
+		docker-compose -f $(COMPOSE_FILE) down -v --remove-orphans; \
+		docker system prune -f; \
+	else \
+		echo -e "$(YELLOW)Operation cancelled$(NC)"; \
+	fi
+
+clean-logs: ## Clean up old log files
+	@echo -e "$(BLUE)🧹 Cleaning up logs...$(NC)"
+	@docker-compose -f $(COMPOSE_FILE) exec -T nginx find /var/log/nginx -name "*.log" -mtime +7 -delete
+	@docker system prune -f
+
+# Security
+security-scan: ## Run security vulnerability scan
+	@echo -e "$(BLUE)🔒 Running security scan...$(NC)"
+	@docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy image prompt-card-backend:latest
+	@docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy image prompt-card-frontend:latest
+
+security-update: ## Update security packages
+	@echo -e "$(BLUE)🛡️ Updating security packages...$(NC)"
+	@sudo apt-get update && sudo apt-get upgrade -y
+	@docker-compose -f $(COMPOSE_FILE) pull
+
+# Performance
+benchmark: ## Run performance benchmark
+	@echo -e "$(BLUE)⚡ Running performance benchmark...$(NC)"
+	@curl -X POST https://api.promptcard.ai/api/benchmark/run
+
+load-test: ## Run load test (requires k6 or similar)
+	@echo -e "$(BLUE)🔥 Running load test...$(NC)"
+	@docker run --rm -i grafana/k6 run - < scripts/load-test.js
+
+# Configuration
+config-validate: ## Validate configuration files
+	@echo -e "$(BLUE)✅ Validating configuration...$(NC)"
+	@docker-compose -f $(COMPOSE_FILE) config
+	@docker-compose -f $(COMPOSE_FILE) exec nginx nginx -t
+
+config-reload: ## Reload NGINX configuration
+	@echo -e "$(BLUE)🔄 Reloading NGINX configuration...$(NC)"
+	@docker-compose -f $(COMPOSE_FILE) exec nginx nginx -s reload
+
+# Monitoring and Alerts
+alerts: ## Show active alerts
+	@echo -e "$(BLUE)🚨 Active alerts:$(NC)"
+	@curl -s http://localhost:9090/api/v1/alerts | jq '.data.alerts[] | select(.state=="firing")'
+
+metrics: ## Show key metrics
+	@echo -e "$(BLUE)📊 Key metrics:$(NC)"
+	@curl -s "http://localhost:9090/api/v1/query?query=up" | jq '.data.result[] | {job: .metric.job, status: .value[1]}'
+
+# Backup Verification
+verify-backup: ## Verify latest backup integrity
+	@echo -e "$(BLUE)🔍 Verifying backup integrity...$(NC)"
+	@ls -la database/backups/ | tail -5
+
+# Emergency Commands
+emergency-stop: ## Emergency stop all services
+	@echo -e "$(RED)🛑 Emergency stop initiated...$(NC)"
+	@docker-compose -f $(COMPOSE_FILE) down
+
+emergency-restart: ## Emergency restart with health checks
+	@echo -e "$(YELLOW)🚨 Emergency restart initiated...$(NC)"
+	@docker-compose -f $(COMPOSE_FILE) down
+	@sleep 5
+	@docker-compose -f $(COMPOSE_FILE) up -d
+	@make health
+
+# Information
+info: ## Show production system information
+	@echo -e "$(BLUE)ℹ️ Production System Information:$(NC)"
+	@echo "================================"
+	@echo "Docker version: $$(docker --version)"
+	@echo "Docker Compose version: $$(docker-compose --version)"
+	@echo "System uptime: $$(uptime)"
+	@echo "Available memory: $$(free -h | grep '^Mem:' | awk '{print $$7}')"
+	@echo "Disk usage: $$(df -h / | tail -1 | awk '{print $$5}')"
+	@echo "Services running: $$(docker-compose -f $(COMPOSE_FILE) ps --services | wc -l)"
+
+urls: ## Show all service URLs
+	@echo -e "$(BLUE)🌐 Production Service URLs:$(NC)"
+	@echo "================================"
+	@echo -e "   • Main Application: $(GREEN)https://promptcard.ai$(NC)"
+	@echo -e "   • API Endpoint: $(GREEN)https://api.promptcard.ai$(NC)"
+	@echo -e "   • API Documentation: $(GREEN)https://api.promptcard.ai/docs$(NC)"
+	@echo -e "   • Monitoring Dashboard: $(GREEN)https://monitoring.promptcard.ai$(NC)"
+	@echo -e "   • Prometheus: $(GREEN)https://monitoring.promptcard.ai/prometheus$(NC)"
+	@echo -e "   • Grafana: $(GREEN)https://monitoring.promptcard.ai/grafana$(NC)"
+	@echo -e "   • Jaeger Tracing: $(GREEN)https://monitoring.promptcard.ai/jaeger$(NC)"
