@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { db } from '../database/connection';
 import { llmService } from '../services/llmService';
 import { performanceMonitor } from '../services/performance/PerformanceMonitor';
+import { securityMonitor, logAggregator, alertingSystem, complianceChecker } from '../services/security';
 import { createClient } from 'redis';
 import axios from 'axios';
 import os from 'os';
@@ -242,6 +243,41 @@ async function checkSystem(): Promise<HealthCheckResult> {
   }
 }
 
+// Security health check
+async function checkSecurity(): Promise<HealthCheckResult> {
+  try {
+    const securityMetrics = securityMonitor.getSecurityMetrics();
+    const alertStats = alertingSystem.getAlertStatistics();
+    const complianceMetrics = complianceChecker.getComplianceMetrics();
+    
+    // Determine health based on security metrics
+    let status: 'healthy' | 'degraded' | 'unhealthy' = 'healthy';
+    if (securityMetrics.criticalVulnerabilities > 0 || alertStats.critical > 0) {
+      status = 'unhealthy';
+    } else if (securityMetrics.threatLevel === 'high' || complianceMetrics.criticalIssues > 0) {
+      status = 'degraded';
+    }
+    
+    return {
+      status,
+      details: {
+        securityScore: securityMetrics.securityScore,
+        threatLevel: securityMetrics.threatLevel,
+        criticalVulnerabilities: securityMetrics.criticalVulnerabilities,
+        eventsLast24h: securityMetrics.eventsLast24h,
+        complianceScore: complianceMetrics.currentScore,
+        criticalAlerts: alertStats.critical,
+        lastScanTimestamp: securityMetrics.lastScanTimestamp
+      }
+    };
+  } catch (error) {
+    return {
+      status: 'unhealthy',
+      message: error instanceof Error ? error.message : 'Security check failed'
+    };
+  }
+}
+
 // Comprehensive health check endpoint
 router.get('/', async (req, res) => {
   const detailed = req.query.detailed === 'true';
@@ -249,12 +285,13 @@ router.get('/', async (req, res) => {
   
   try {
     // Run all health checks in parallel
-    const [database, redis, ollama, websocket, system] = await Promise.all([
+    const [database, redis, ollama, websocket, system, security] = await Promise.all([
       performHealthCheck('database', checkDatabase),
       performHealthCheck('redis', checkRedis),
       performHealthCheck('ollama', checkOllama),
       performHealthCheck('websocket', () => checkWebSocket(req.app.get('io'))),
-      performHealthCheck('system', checkSystem)
+      performHealthCheck('system', checkSystem),
+      performHealthCheck('security', checkSecurity)
     ]);
     
     const services: ServiceHealth = {
@@ -262,7 +299,8 @@ router.get('/', async (req, res) => {
       redis,
       ollama,
       websocket,
-      system
+      system,
+      security
     };
     
     // Calculate overall status
@@ -328,20 +366,27 @@ router.get('/system', async (req, res) => {
   res.status(result.status === 'healthy' ? 200 : 503).json(result);
 });
 
+router.get('/security', async (req, res) => {
+  const result = await performHealthCheck('security', checkSecurity);
+  res.status(result.status === 'healthy' ? 200 : 503).json(result);
+});
+
 // Readiness check (for k8s/docker)
 router.get('/ready', async (req, res) => {
   // Check only critical services for readiness
-  const [database, ollama] = await Promise.all([
+  const [database, ollama, security] = await Promise.all([
     performHealthCheck('database', checkDatabase),
-    performHealthCheck('ollama', checkOllama)
+    performHealthCheck('ollama', checkOllama),
+    performHealthCheck('security', checkSecurity)
   ]);
   
   const isReady = database.status === 'healthy' && 
-                  (ollama.status === 'healthy' || ollama.status === 'degraded');
+                  (ollama.status === 'healthy' || ollama.status === 'degraded') &&
+                  security.status !== 'unhealthy';
   
   res.status(isReady ? 200 : 503).json({
     ready: isReady,
-    services: { database, ollama }
+    services: { database, ollama, security }
   });
 });
 
