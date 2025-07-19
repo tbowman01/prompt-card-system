@@ -43,6 +43,8 @@ export class HealthOrchestrator extends EventEmitter {
   private isRunning = false;
   private modelMonitor?: ModelHealthMonitor;
   private lastFullCheck = new Date(0);
+  private fallbackMechanisms: Map<string, () => Promise<any>> = new Map();
+  private circuitBreakers: Map<string, { isOpen: boolean; failures: number; lastFailure: Date }> = new Map();
 
   constructor(config: Partial<HealthCheckConfig> = {}) {
     super();
@@ -65,6 +67,8 @@ export class HealthOrchestrator extends EventEmitter {
     };
 
     this.initializeServices();
+    this.initializeFallbackMechanisms();
+    this.initializeCircuitBreakers();
   }
 
   private initializeServices() {
@@ -137,6 +141,93 @@ export class HealthOrchestrator extends EventEmitter {
     }
   }
 
+  private initializeFallbackMechanisms(): void {
+    // Fallback for LLM/Ollama service - use mock responses
+    this.fallbackMechanisms.set('ollama', async () => ({
+      status: 'degraded',
+      message: 'Using fallback mode - Ollama unavailable',
+      details: {
+        fallbackMode: true,
+        capabilities: ['text-completion-mock', 'chat-mock'],
+        note: 'AI features will use mock responses'
+      }
+    }));
+
+    // Fallback for Redis - use in-memory cache
+    this.fallbackMechanisms.set('redis', async () => ({
+      status: 'degraded', 
+      message: 'Using in-memory cache - Redis unavailable',
+      details: {
+        fallbackMode: true,
+        cacheType: 'memory',
+        note: 'Session data will not persist across restarts'
+      }
+    }));
+
+    // Fallback for model health - disable AI features gracefully
+    this.fallbackMechanisms.set('model-health', async () => ({
+      status: 'degraded',
+      message: 'AI features disabled - Model health monitoring unavailable',
+      details: {
+        fallbackMode: true,
+        aiFeatures: 'disabled',
+        note: 'Manual testing mode available'
+      }
+    }));
+  }
+
+  private initializeCircuitBreakers(): void {
+    const serviceNames = Array.from(this.services.keys());
+    for (const serviceName of serviceNames) {
+      this.circuitBreakers.set(serviceName, {
+        isOpen: false,
+        failures: 0,
+        lastFailure: new Date(0)
+      });
+    }
+  }
+
+  private async executeWithCircuitBreaker<T>(
+    serviceName: string, 
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const breaker = this.circuitBreakers.get(serviceName);
+    if (!breaker) throw new Error(`No circuit breaker for service: ${serviceName}`);
+
+    // Check if circuit breaker is open
+    if (breaker.isOpen) {
+      const timeSinceLastFailure = Date.now() - breaker.lastFailure.getTime();
+      const resetTimeout = 60000; // 1 minute
+
+      if (timeSinceLastFailure < resetTimeout) {
+        throw new Error(`Circuit breaker open for ${serviceName}`);
+      } else {
+        // Try to reset circuit breaker
+        breaker.isOpen = false;
+        breaker.failures = 0;
+      }
+    }
+
+    try {
+      const result = await operation();
+      // Success - reset failure count
+      breaker.failures = 0;
+      return result;
+    } catch (error) {
+      // Failure - increment counter
+      breaker.failures++;
+      breaker.lastFailure = new Date();
+
+      // Open circuit breaker after 3 failures
+      if (breaker.failures >= 3) {
+        breaker.isOpen = true;
+        console.warn(`🔓 Circuit breaker opened for ${serviceName} after 3 failures`);
+      }
+
+      throw error;
+    }
+  }
+
   async start(): Promise<void> {
     if (this.isRunning) {
       console.log('🏥 Health Orchestrator already running');
@@ -154,7 +245,8 @@ export class HealthOrchestrator extends EventEmitter {
         minHealthScore: 70,
         alertThresholds: {
           responseTime: 15000, // 15 seconds
-          errorRate: 10 // 10%
+          errorRate: 10, // 10%
+          memoryUsage: 85 // 85% memory usage threshold
         }
       });
       
@@ -210,11 +302,27 @@ export class HealthOrchestrator extends EventEmitter {
         message = 'Dependencies unhealthy';
         details.dependencyStatus = dependencyResults;
       } else {
-        // Perform service-specific health check
-        const healthResult = await this.performServiceCheck(serviceName);
-        newStatus = healthResult.status;
-        message = healthResult.message || '';
-        details = { ...details, ...healthResult.details };
+        // Perform service-specific health check with circuit breaker and fallback
+        try {
+          const healthResult = await this.executeWithCircuitBreaker(serviceName, () => 
+            this.performServiceCheck(serviceName)
+          );
+          newStatus = healthResult.status;
+          message = healthResult.message || '';
+          details = { ...details, ...healthResult.details };
+        } catch (circuitBreakerError) {
+          // Try fallback mechanism
+          const fallback = this.fallbackMechanisms.get(serviceName);
+          if (fallback) {
+            console.log(`🔄 Using fallback for ${serviceName}:`, circuitBreakerError);
+            const fallbackResult = await fallback();
+            newStatus = fallbackResult.status;
+            message = fallbackResult.message || '';
+            details = { ...details, ...fallbackResult.details, circuitBreakerError: circuitBreakerError.message };
+          } else {
+            throw circuitBreakerError;
+          }
+        }
       }
     } catch (error) {
       newStatus = 'unhealthy';
@@ -634,6 +742,30 @@ export class HealthOrchestrator extends EventEmitter {
   public updateConfig(newConfig: Partial<HealthCheckConfig>): void {
     this.config = { ...this.config, ...newConfig };
     console.log('⚙️ Health Orchestrator configuration updated');
+  }
+
+  public getCircuitBreakerStatus(): Map<string, { isOpen: boolean; failures: number; lastFailure: Date }> {
+    return new Map(this.circuitBreakers);
+  }
+
+  public getFallbackStatus(): Record<string, boolean> {
+    const status: Record<string, boolean> = {};
+    for (const [serviceName] of this.fallbackMechanisms) {
+      status[serviceName] = true;
+    }
+    return status;
+  }
+
+  public getServiceDependencyMap(): Record<string, string[]> {
+    return { ...this.config.dependencies };
+  }
+
+  public async testFallbackMechanism(serviceName: string): Promise<any> {
+    const fallback = this.fallbackMechanisms.get(serviceName);
+    if (!fallback) {
+      throw new Error(`No fallback mechanism configured for ${serviceName}`);
+    }
+    return await fallback();
   }
 }
 

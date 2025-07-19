@@ -1,5 +1,5 @@
 import request from 'supertest';
-import { expect } from 'chai';
+import assert from 'assert';
 import app from '../../server';
 import { TestQueueManager } from '../../services/testing/TestQueueManager';
 import { ResourceManager } from '../../services/testing/ResourceManager';
@@ -60,7 +60,7 @@ describe('Parallel Testing Infrastructure Integration Tests', () => {
       // All submissions should be accepted
       for (const response of responses) {
         expect(response.status).to.equal(200);
-        expect(response.body.success).to.be.true;
+        assert(response.body.success === true);
         expect(response.body.data).to.have.property('executionId');
         expect(response.body.data).to.have.property('status');
         expect(response.body.data.status).to.be.oneOf(['queued', 'running']);
@@ -104,7 +104,7 @@ describe('Parallel Testing Infrastructure Integration Tests', () => {
         .get('/api/test-execution/queue/status')
         .expect(200);
 
-      expect(queueStatusResponse.body.success).to.be.true;
+      assert(queueStatusResponse.body.success === true);
       expect(queueStatusResponse.body.data).to.have.property('running');
       expect(queueStatusResponse.body.data).to.have.property('queued');
       expect(queueStatusResponse.body.data.running).to.be.at.most(3);
@@ -144,7 +144,7 @@ describe('Parallel Testing Infrastructure Integration Tests', () => {
         .get('/api/test-execution/queue/list')
         .expect(200);
 
-      expect(queueResponse.body.success).to.be.true;
+      assert(queueResponse.body.success === true);
       expect(queueResponse.body.data).to.be.an('array');
       
       // Critical should be first, then high, then low
@@ -193,7 +193,7 @@ describe('Parallel Testing Infrastructure Integration Tests', () => {
         .get('/api/test-execution/resources/usage')
         .expect(200);
 
-      expect(resourceResponse.body.success).to.be.true;
+      assert(resourceResponse.body.success === true);
       expect(resourceResponse.body.data).to.have.property('cpu');
       expect(resourceResponse.body.data).to.have.property('memory');
       expect(resourceResponse.body.data).to.have.property('activeTests');
@@ -284,7 +284,7 @@ describe('Parallel Testing Infrastructure Integration Tests', () => {
         .get(`/api/test-execution/semaphore/${semaphoreId}/status`)
         .expect(200);
 
-      expect(statusResponse.body.success).to.be.true;
+      assert(statusResponse.body.success === true);
       expect(statusResponse.body.data).to.have.property('availablePermits');
       expect(statusResponse.body.data).to.have.property('queuedRequests');
       expect(statusResponse.body.data.availablePermits).to.be.at.most(3);
@@ -319,7 +319,7 @@ describe('Parallel Testing Infrastructure Integration Tests', () => {
         .get(`/api/test-execution/${executionId}/status`)
         .expect(200);
 
-      expect(statusResponse.body.success).to.be.true;
+      assert(statusResponse.body.success === true);
       expect(statusResponse.body.data.status).to.be.oneOf(['failed', 'completed']);
       
       if (statusResponse.body.data.status === 'failed') {
@@ -411,7 +411,7 @@ describe('Parallel Testing Infrastructure Integration Tests', () => {
         .get('/api/test-execution/performance/metrics')
         .expect(200);
 
-      expect(performanceResponse.body.success).to.be.true;
+      assert(performanceResponse.body.success === true);
       expect(performanceResponse.body.data).to.have.property('throughput');
       expect(performanceResponse.body.data).to.have.property('averageWaitTime');
       expect(performanceResponse.body.data).to.have.property('systemLoad');
@@ -447,7 +447,7 @@ describe('Parallel Testing Infrastructure Integration Tests', () => {
         .get('/api/analytics/parallel-execution')
         .expect(200);
 
-      expect(analyticsResponse.body.success).to.be.true;
+      assert(analyticsResponse.body.success === true);
       expect(analyticsResponse.body.data).to.have.property('totalParallelTests');
       expect(analyticsResponse.body.data).to.have.property('averageParallelism');
       expect(analyticsResponse.body.data).to.have.property('resourceEfficiency');

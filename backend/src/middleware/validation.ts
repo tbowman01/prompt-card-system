@@ -1,6 +1,28 @@
 import { Request, Response, NextFunction } from 'express';
 import Joi from 'joi';
 
+// Generic validation middleware function
+export function validation(schema: Joi.ObjectSchema) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const { error, value } = schema.validate(req.body);
+    
+    if (error) {
+      res.status(400).json({
+        success: false,
+        error: 'Validation error',
+        details: error.details.map(detail => ({
+          field: detail.path.join('.'),
+          message: detail.message
+        }))
+      });
+      return;
+    }
+    
+    req.body = value;
+    next();
+  };
+}
+
 // Validation schema for prompt cards
 const promptCardSchema = Joi.object({
   title: Joi.string().required().min(1).max(255),

@@ -1,5 +1,5 @@
 import request from 'supertest';
-import { expect } from 'chai';
+import assert from 'assert';
 import { io as Client, Socket } from 'socket.io-client';
 import app from '../../server';
 import { ProgressService } from '../../services/websocket/ProgressService';
@@ -29,7 +29,10 @@ describe('WebSocket Integration Tests', () => {
       transports: ['websocket']
     });
 
-    progressService = new ProgressService();
+    // Create mock Socket.IO server
+    const { Server } = require('socket.io');
+    const io = new Server(server);
+    progressService = new ProgressService(io);
     
     // Connect client
     return new Promise<void>((resolve) => {
@@ -413,7 +416,7 @@ describe('WebSocket Integration Tests', () => {
         setTimeout(resolve, 2000);
       });
 
-      expect(clientSocket.connected).to.be.true;
+      assert(clientSocket.connected === true);
     });
   });
 
@@ -442,7 +445,7 @@ describe('WebSocket Integration Tests', () => {
       // All clients should be connected
       expect(clients.length).to.equal(connections);
       for (const client of clients) {
-        expect(client.connected).to.be.true;
+        assert(client.connected === true);
       }
 
       // Broadcast message to all clients
@@ -500,7 +503,7 @@ describe('WebSocket Integration Tests', () => {
         setTimeout(resolve, 2000);
       });
 
-      expect(authError).to.be.true;
+      assert(authError === true);
       expect(unauthenticatedClient.connected).to.be.false;
       
       unauthenticatedClient.disconnect();
@@ -524,7 +527,7 @@ describe('WebSocket Integration Tests', () => {
         setTimeout(resolve, 1000);
       });
 
-      expect(unauthorizedAccess).to.be.true;
+      assert(unauthorizedAccess === true);
     });
   });
 });

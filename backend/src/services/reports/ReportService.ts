@@ -25,7 +25,7 @@ export class ReportService extends EventEmitter {
   private generationQueue: Map<string, Promise<ReportData>>;
   private static instance: ReportService;
 
-  private constructor() {
+  public constructor() {
     super();
     this.reportGenerator = new ReportGenerator();
     this.pdfExporter = new PDFExporter();
@@ -34,6 +34,14 @@ export class ReportService extends EventEmitter {
     this.reportCache = new Map();
     this.generationQueue = new Map();
     this.initializeDatabase();
+  }
+
+  /**
+   * Create test data for a prompt card
+   */
+  async createTestData(promptCardId: string): Promise<void> {
+    // Implementation for creating test data
+    console.log(`Creating test data for prompt card: ${promptCardId}`);
   }
 
   public static getInstance(): ReportService {

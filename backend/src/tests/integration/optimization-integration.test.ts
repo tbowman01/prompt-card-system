@@ -1,5 +1,5 @@
 import request from 'supertest';
-import { expect } from 'chai';
+import assert from 'assert';
 import app from '../../server';
 import { OptimizationEngine } from '../../services/optimization/OptimizationEngine';
 import { SecurityAnalyzer } from '../../services/optimization/SecurityAnalyzer';
@@ -35,7 +35,7 @@ describe('AI-Powered Optimization Integration Tests', () => {
         })
         .expect(200);
 
-      expect(analysisResponse.body.success).to.be.true;
+      assert(analysisResponse.body.success === true);
       const analysis = analysisResponse.body.data;
 
       // Step 2: Generate security-validated suggestions
@@ -56,7 +56,7 @@ describe('AI-Powered Optimization Integration Tests', () => {
         })
         .expect(200);
 
-      expect(suggestionsResponse.body.success).to.be.true;
+      assert(suggestionsResponse.body.success === true);
       const suggestions = suggestionsResponse.body.data;
 
       // Step 3: Validate security of all suggestions
@@ -75,7 +75,7 @@ describe('AI-Powered Optimization Integration Tests', () => {
           })
           .expect(200);
 
-        expect(securityResponse.body.success).to.be.true;
+        assert(securityResponse.body.success === true);
         expect(securityResponse.body.data).to.have.property('overallRisk');
         expect(securityResponse.body.data.overallRisk).to.be.at.most(0.3); // Low risk
       }
@@ -118,7 +118,7 @@ describe('AI-Powered Optimization Integration Tests', () => {
           })
           .expect(200);
 
-        expect(abTestResponse.body.success).to.be.true;
+        assert(abTestResponse.body.success === true);
         expect(abTestResponse.body.data).to.have.property('id');
       }
     });
@@ -145,7 +145,7 @@ describe('AI-Powered Optimization Integration Tests', () => {
         })
         .expect(200);
 
-      expect(tuningResponse.body.success).to.be.true;
+      assert(tuningResponse.body.success === true);
       expect(tuningResponse.body.data).to.have.property('id');
       expect(tuningResponse.body.data).to.have.property('status');
       expect(tuningResponse.body.data).to.have.property('estimatedCost');
@@ -171,8 +171,8 @@ describe('AI-Powered Optimization Integration Tests', () => {
           })
           .expect(200);
 
-        expect(response.body.success).to.be.true;
-        expect(response.body.data.detected).to.be.true;
+        assert(response.body.success === true);
+        assert(response.body.data.detected === true);
         expect(response.body.data.confidence).to.be.above(0.7);
       }
     });
@@ -191,7 +191,7 @@ describe('AI-Powered Optimization Integration Tests', () => {
         })
         .expect(200);
 
-      expect(response.body.success).to.be.true;
+      assert(response.body.success === true);
       expect(response.body.data).to.have.property('gdpr');
       expect(response.body.data).to.have.property('hipaa');
       expect(response.body.data).to.have.property('ccpa');
@@ -224,7 +224,7 @@ describe('AI-Powered Optimization Integration Tests', () => {
         })
         .expect(200);
 
-      expect(response.body.success).to.be.true;
+      assert(response.body.success === true);
       expect(response.body.data).to.be.an('array');
       expect(response.body.data.length).to.be.greaterThan(0);
 
@@ -251,7 +251,7 @@ describe('AI-Powered Optimization Integration Tests', () => {
         })
         .expect(200);
 
-      expect(response.body.success).to.be.true;
+      assert(response.body.success === true);
       expect(response.body.data).to.have.property('optimizedPrompt');
       expect(response.body.data).to.have.property('costReduction');
       expect(response.body.data).to.have.property('qualityScore');
@@ -273,7 +273,7 @@ describe('AI-Powered Optimization Integration Tests', () => {
         })
         .expect(200);
 
-      expect(response.body.success).to.be.true;
+      assert(response.body.success === true);
       expect(response.body.data).to.have.property('currentCost');
       expect(response.body.data).to.have.property('projectedCost');
       expect(response.body.data).to.have.property('recommendations');
@@ -293,7 +293,7 @@ describe('AI-Powered Optimization Integration Tests', () => {
         })
         .expect(200);
 
-      expect(response.body.success).to.be.true;
+      assert(response.body.success === true);
       expect(response.body.data).to.have.property('optimizedPrompt');
       expect(response.body.data).to.have.property('expectedResponseTime');
       expect(response.body.data).to.have.property('accuracyScore');
@@ -324,7 +324,7 @@ describe('AI-Powered Optimization Integration Tests', () => {
         })
         .expect(200);
 
-      expect(response.body.success).to.be.true;
+      assert(response.body.success === true);
       expect(response.body.data).to.have.property('results');
       expect(response.body.data).to.have.property('comparison');
       expect(response.body.data).to.have.property('recommendations');
@@ -381,7 +381,7 @@ describe('AI-Powered Optimization Integration Tests', () => {
       // All requests should succeed
       for (const response of responses) {
         expect(response.status).to.equal(200);
-        expect(response.body.success).to.be.true;
+        assert(response.body.success === true);
       }
     });
   });
@@ -404,7 +404,7 @@ describe('AI-Powered Optimization Integration Tests', () => {
         .get('/api/analytics/optimization-metrics')
         .expect(200);
 
-      expect(metricsResponse.body.success).to.be.true;
+      assert(metricsResponse.body.success === true);
       expect(metricsResponse.body.data).to.have.property('totalOptimizations');
       expect(metricsResponse.body.data).to.have.property('averageImprovement');
       expect(metricsResponse.body.data).to.have.property('securityIssuesFound');
