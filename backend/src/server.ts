@@ -8,6 +8,9 @@ import { Server as SocketIOServer } from 'socket.io';
 import { initializeDatabase } from './database/connection';
 import { llmService } from './services/llmService';
 import { healthRoutes } from './routes/health';
+import { enhancedHealthRoutes } from './routes/health-enhanced';
+import { healthOrchestratorRoutes } from './routes/health-orchestrator';
+import { alertRoutes } from './routes/alerts';
 import { promptCardRoutes } from './routes/promptCards';
 import { testCaseRoutes } from './routes/testCases';
 import { testExecutionRoutes } from './routes/testExecution';
@@ -18,10 +21,15 @@ import { analyticsRoutes } from './routes/analytics';
 import optimizationRoutes from './routes/optimization';
 import { reportRoutes } from './routes/reports';
 import performanceRoutes from './routes/performance';
+import trainingRoutes from './routes/training';
 import { initializeOptimizationServices } from './services/optimization';
 import { performanceMonitor } from './services/performance/PerformanceMonitor';
 import { ProgressService } from './services/websocket/ProgressService';
 import { errorHandler } from './middleware/errorHandler';
+import { healthOrchestrator } from './services/health/HealthOrchestrator';
+import { alertingSystem } from './services/health/AlertingSystem';
+import { modelTrainingEngine } from './services/training/ModelTrainingEngine';
+import { modelRegistry } from './services/training/ModelRegistry';
 
 dotenv.config();
 
@@ -67,8 +75,30 @@ const io = new SocketIOServer(server, {
 const progressService = new ProgressService(io);
 performanceMonitor.startMonitoring(5000); // Monitor every 5 seconds
 
+// Initialize health orchestrator
+healthOrchestrator.start().catch(error => {
+  console.error('Failed to start health orchestrator:', error);
+});
+
+// Initialize alerting system
+alertingSystem.initialize().catch(error => {
+  console.error('Failed to initialize alerting system:', error);
+});
+
+// Initialize training services
+modelTrainingEngine.initialize().catch(error => {
+  console.error('Failed to initialize model training engine:', error);
+});
+
+modelRegistry.initialize().catch(error => {
+  console.error('Failed to initialize model registry:', error);
+});
+
 // Routes
 app.use('/api/health', healthRoutes);
+app.use('/api/health/v2', enhancedHealthRoutes);
+app.use('/api/health/orchestrator', healthOrchestratorRoutes);
+app.use('/api/alerts', alertRoutes);
 app.use('/api/prompt-cards', promptCardRoutes);
 app.use('/api/test-cases', testCaseRoutes);
 app.use('/api/test-cases', testExecutionRoutes); // Test execution routes
@@ -79,9 +109,13 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/optimization', optimizationRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/performance', performanceRoutes);
+app.use('/api/training', trainingRoutes);
 
 // Error handling middleware
 app.use(errorHandler);
+
+// Store WebSocket instance for health checks
+app.set('io', io);
 
 // Start server
 server.listen(PORT, () => {
@@ -94,6 +128,10 @@ server.listen(PORT, () => {
   console.log(`AI-powered prompt optimization services active`);
   console.log(`Performance monitoring active`);
   console.log(`Performance API available at /api/performance`);
+  console.log(`Health orchestrator system active`);
+  console.log(`Health dashboard available at /api/health/orchestrator/summary`);
+  console.log(`Alerting system active`);
+  console.log(`Alerts API available at /api/alerts`);
 });
 
 export default app;
