@@ -183,4 +183,144 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ metrics }),
     }),
+
+  // Monitoring and Advanced Analytics
+  getSystemHealth: () => apiRequest('/monitoring/system-health'),
+  
+  getAlerts: (params?: { 
+    status?: string; 
+    severity?: string; 
+    category?: string; 
+    limit?: number; 
+    offset?: number; 
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.status) searchParams.set('status', params.status);
+    if (params?.severity) searchParams.set('severity', params.severity);
+    if (params?.category) searchParams.set('category', params.category);
+    if (params?.limit) searchParams.set('limit', params.limit.toString());
+    if (params?.offset) searchParams.set('offset', params.offset.toString());
+    
+    const query = searchParams.toString();
+    return apiRequest(`/monitoring/alerts${query ? `?${query}` : ''}`);
+  },
+
+  updateAlertStatus: (alertId: string, status: string) =>
+    apiRequest(`/monitoring/alerts/${alertId}/status`, {
+      method: 'PUT',
+      body: JSON.stringify({ status }),
+    }),
+
+  acknowledgeAlert: (alertId: string, acknowledgedBy?: string) =>
+    apiRequest(`/monitoring/alerts/${alertId}/acknowledge`, {
+      method: 'POST',
+      body: JSON.stringify({ acknowledgedBy }),
+    }),
+
+  resolveAlert: (alertId: string) =>
+    apiRequest(`/monitoring/alerts/${alertId}/resolve`, {
+      method: 'POST',
+    }),
+
+  getDistributedTraces: (params?: {
+    timeRange?: string;
+    service?: string;
+    operation?: string;
+    minDuration?: number;
+    maxDuration?: number;
+    status?: string;
+    limit?: number;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.timeRange) searchParams.set('timeRange', params.timeRange);
+    if (params?.service) searchParams.set('service', params.service);
+    if (params?.operation) searchParams.set('operation', params.operation);
+    if (params?.minDuration) searchParams.set('minDuration', params.minDuration.toString());
+    if (params?.maxDuration) searchParams.set('maxDuration', params.maxDuration.toString());
+    if (params?.status) searchParams.set('status', params.status);
+    if (params?.limit) searchParams.set('limit', params.limit.toString());
+    
+    const query = searchParams.toString();
+    return apiRequest(`/monitoring/traces${query ? `?${query}` : ''}`);
+  },
+
+  getTrace: (traceId: string) => apiRequest(`/monitoring/traces/${traceId}`),
+
+  getPerformanceData: (params?: {
+    timeRange?: string;
+    endpoint?: string;
+    method?: string;
+    groupBy?: string;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.timeRange) searchParams.set('timeRange', params.timeRange);
+    if (params?.endpoint) searchParams.set('endpoint', params.endpoint);
+    if (params?.method) searchParams.set('method', params.method);
+    if (params?.groupBy) searchParams.set('groupBy', params.groupBy);
+    
+    const query = searchParams.toString();
+    return apiRequest(`/monitoring/performance${query ? `?${query}` : ''}`);
+  },
+
+  getCustomMetrics: () => apiRequest('/monitoring/custom-metrics'),
+
+  createCustomMetric: (data: any) =>
+    apiRequest('/monitoring/custom-metrics', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateCustomMetric: (metricId: string, data: any) =>
+    apiRequest(`/monitoring/custom-metrics/${metricId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteCustomMetric: (metricId: string) =>
+    apiRequest(`/monitoring/custom-metrics/${metricId}`, {
+      method: 'DELETE',
+    }),
+
+  refreshCustomMetric: (metricId: string) =>
+    apiRequest(`/monitoring/custom-metrics/${metricId}/refresh`, {
+      method: 'POST',
+    }),
+
+  // KPI Management
+  getKpis: () => apiRequest('/monitoring/kpis'),
+
+  createKpi: (data: any) =>
+    apiRequest('/monitoring/kpis', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateKpi: (kpiId: string, data: any) =>
+    apiRequest(`/monitoring/kpis/${kpiId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteKpi: (kpiId: string) =>
+    apiRequest(`/monitoring/kpis/${kpiId}`, {
+      method: 'DELETE',
+    }),
+
+  // Dashboard Configuration
+  getDashboardConfig: () => apiRequest('/monitoring/dashboard/config'),
+
+  saveDashboardConfig: (config: any) =>
+    apiRequest('/monitoring/dashboard/config', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    }),
+
+  exportDashboardConfig: () => 
+    fetch(`${API_BASE_URL}/monitoring/dashboard/export`),
+
+  importDashboardConfig: (config: any) =>
+    apiRequest('/monitoring/dashboard/import', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    }),
 };
