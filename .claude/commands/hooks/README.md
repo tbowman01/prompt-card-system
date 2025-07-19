@@ -97,6 +97,35 @@ npx claude-flow hooks session-end --full-analysis --knowledge-consolidation --fu
 
 ## 🧠 Intelligent Hook Features
 
+### Automatic GitHub Issue Creation (NEW!)
+```bash
+# Automatically creates GitHub issues when using the Task tool
+# This hook is now configured in .claude/settings.json
+```
+- **Smart Task Detection** - Automatically detects substantial tasks (Agent, Research, Implement, Analyze, Create, Build, Design, Develop)
+- **GitHub Integration** - Creates issues with proper labels and assignment
+- **Rich Context** - Includes task description, session ID, and timestamp in issue body
+- **Non-Blocking** - Failures won't interrupt your workflow (errors are handled gracefully)
+
+**How to Enable:**
+Add this to your `.claude/settings.json` under the `hooks` section:
+```json
+{
+  "matcher": "Task",
+  "hooks": [{
+    "type": "command",
+    "command": "cat | jq -r 'if (.tool_input.description | test(\"^(Agent|Research|Implement|Analyze|Create|Build|Design|Develop)\")) then .tool_input.description else empty end' | xargs -I {} bash -c 'gh issue create --title \"Task: {}\" --body \"Automated task tracking\\n\\nTask: {}\\nSession: claude-flow-$(date +%s)\\nTimestamp: $(date)\\nAutomation: Claude Flow\" --label claude-flow,automated --assignee @me 2>/dev/null || true'"
+  }]
+}
+```
+
+**Benefits:**
+- Automatic task tracking in GitHub
+- No manual issue creation needed
+- Maintains project history
+- Easy to filter with labels
+- Self-assigns for accountability
+
 ### Automatic Optimization
 ```bash
 # Self-optimizing hooks
@@ -231,7 +260,31 @@ npx claude-flow hooks post-edit --chain-to-task --coordination-bridge --seamless
 
 ## 🔄 Hook Workflow Examples
 
-### 1. Development Workflow Integration
+### 1. Automatic GitHub Issue Creation Workflow
+```bash
+# When you use the Task tool in Claude Code:
+# Task("Research and implement authentication system")
+# 
+# The hook automatically:
+# 1. Detects this is a substantial task (starts with "Research")
+# 2. Creates a GitHub issue with title: "Task: Research and implement authentication system"
+# 3. Adds labels: claude-flow, automated
+# 4. Assigns to you (@me)
+# 5. Includes rich context in the issue body
+
+# Example issue created:
+# Title: Task: Research and implement authentication system
+# Body: Automated task tracking
+#       
+#       Task: Research and implement authentication system
+#       Session: claude-flow-1704123456
+#       Timestamp: Mon Jan 1 12:34:56 PST 2024
+#       Automation: Claude Flow
+# Labels: claude-flow, automated
+# Assignee: @me
+```
+
+### 2. Development Workflow Integration
 ```bash
 # Pre-development setup
 npx claude-flow hooks pre-task --development-setup --environment-prepare --agent-configure
@@ -240,7 +293,7 @@ npx claude-flow hooks pre-task --development-setup --environment-prepare --agent
 npx claude-flow hooks post-task --code-analysis --quality-assess --documentation-update
 ```
 
-### 2. Testing Workflow Integration
+### 3. Testing Workflow Integration
 ```bash
 # Pre-testing preparation
 npx claude-flow hooks pre-task --testing-setup --environment-validate --test-data-prepare
@@ -249,7 +302,7 @@ npx claude-flow hooks pre-task --testing-setup --environment-validate --test-dat
 npx claude-flow hooks post-task --test-analysis --coverage-report --quality-metrics
 ```
 
-### 3. Deployment Workflow Integration
+### 4. Deployment Workflow Integration
 ```bash
 # Pre-deployment checks
 npx claude-flow hooks pre-task --deployment-validate --security-check --performance-verify
