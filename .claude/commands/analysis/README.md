@@ -19,6 +19,9 @@ The analysis suite enables:
 - **[bottleneck-detect](./bottleneck-detect.md)** - Identify and resolve system performance bottlenecks
 - **[trend-analysis](./trend-analysis.md)** - Long-term performance trends and predictions
 
+### Productivity Analysis
+- **[productivity-metrics](./productivity-metrics.md)** - Code output, time savings, and developer productivity comparison
+
 ### Resource Analysis
 - **[token-usage](./token-usage.md)** - Token consumption analysis and optimization
 - **[cost-analysis](./cost-analysis.md)** - Cost tracking, budgeting, and optimization
@@ -39,6 +42,9 @@ npx claude-flow analysis bottleneck-detect --threshold 15 --fix
 
 # Check token efficiency
 npx claude-flow analysis token-usage --period 24h --optimize
+
+# Developer productivity metrics
+npx claude-flow analysis productivity-metrics --timeframe 1m --developer-baseline senior
 ```
 
 ### Comprehensive Analysis
