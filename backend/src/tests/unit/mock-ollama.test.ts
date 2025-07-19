@@ -1,0 +1,244 @@
+import { MockOllamaService, createMockOllamaService } from '../mocks/MockOllamaService';
+
+describe('MockOllamaService', () => {
+  let mockService: MockOllamaService;
+
+  beforeEach(() => {
+    mockService = new MockOllamaService();
+  });
+
+  describe('Service Initialization', () => {
+    it('should initialize with default settings', () => {
+      const stats = mockService.getStats();
+      expect(stats.online).toBe(true);
+      expect(stats.models).toContain('llama3');
+      expect(stats.failureRate).toBe(0);
+    });
+
+    it('should initialize with custom settings', () => {
+      const customService = new MockOllamaService({
+        isOnline: false,
+        models: ['custom-model'],
+        responseDelay: 500,
+        failureRate: 0.2
+      });
+      
+      const stats = customService.getStats();
+      expect(stats.online).toBe(false);
+      expect(stats.models).toEqual(['custom-model']);
+      expect(stats.responseDelay).toBe(500);
+      expect(stats.failureRate).toBe(0.2);
+    });
+  });
+
+  describe('Model Management', () => {
+    it('should list available models', async () => {
+      const result = await mockService.listModels();
+      expect(result.models).toBeInstanceOf(Array);
+      expect(result.models.length).toBeGreaterThan(0);
+      expect(result.models[0]).toHaveProperty('name');
+      expect(result.models[0]).toHaveProperty('digest');
+      expect(result.models[0]).toHaveProperty('size');
+    });
+
+    it('should check if model exists', async () => {
+      const exists = await mockService.checkModelExists('llama3');
+      expect(exists).toBe(true);
+      
+      const notExists = await mockService.checkModelExists('nonexistent');
+      expect(notExists).toBe(false);
+    });
+
+    it('should get model information', async () => {
+      const info = await mockService.getModelInfo('llama3');
+      expect(info).toHaveProperty('license');
+      expect(info).toHaveProperty('modelfile');
+      expect(info).toHaveProperty('parameters');
+      expect(info).toHaveProperty('details');
+    });
+
+    it('should pull new models', async () => {
+      await mockService.pullModel('new-model');
+      const exists = await mockService.checkModelExists('new-model');
+      expect(exists).toBe(true);
+    });
+
+    it('should delete models', async () => {
+      await mockService.pullModel('temp-model');
+      await mockService.deleteModel('temp-model');
+      const exists = await mockService.checkModelExists('temp-model');
+      expect(exists).toBe(false);
+    });
+  });
+
+  describe('Text Generation', () => {
+    it('should generate responses', async () => {
+      const response = await mockService.generate({
+        model: 'llama3',
+        prompt: 'Hello, how are you?'
+      });
+      
+      expect(response).toHaveProperty('model', 'llama3');
+      expect(response).toHaveProperty('response');
+      expect(response).toHaveProperty('done', true);
+      expect(response.response).toBeTruthy();
+    });
+
+    it('should handle different prompt patterns', async () => {
+      const codeResponse = await mockService.generate({
+        model: 'llama3',
+        prompt: 'Write a function that calculates factorial'
+      });
+      
+      expect(codeResponse.response).toMatch(/function|code/i);
+    });
+
+    it('should include performance metrics', async () => {
+      const response = await mockService.generate({
+        model: 'llama3',
+        prompt: 'Test prompt'
+      });
+      
+      expect(response).toHaveProperty('total_duration');
+      expect(response).toHaveProperty('prompt_eval_count');
+      expect(response).toHaveProperty('eval_count');
+    });
+  });
+
+  describe('Chat Interface', () => {
+    it('should handle chat messages', async () => {
+      const messages = [
+        { role: 'user', content: 'Hello' }
+      ];
+      
+      const responses = [];
+      for await (const chunk of mockService.chat({ model: 'llama3', messages })) {
+        responses.push(chunk);
+      }
+      
+      expect(responses.length).toBeGreaterThan(0);
+      const lastResponse = responses[responses.length - 1];
+      expect(lastResponse.done).toBe(true);
+    });
+
+    it('should stream responses progressively', async () => {
+      const messages = [
+        { role: 'user', content: 'Tell me a story about artificial intelligence' }
+      ];
+      
+      const responses = [];
+      for await (const chunk of mockService.chat({ model: 'llama3', messages })) {
+        responses.push(chunk);
+        if (responses.length > 5) break; // Don't test entire stream
+      }
+      
+      expect(responses.length).toBeGreaterThan(1);
+      responses.forEach(response => {
+        expect(response).toHaveProperty('model', 'llama3');
+        expect(response).toHaveProperty('response');
+      });
+    });
+  });
+
+  describe('Error Simulation', () => {
+    it('should simulate offline state', async () => {
+      mockService.setOnlineStatus(false);
+      
+      await expect(mockService.listModels()).rejects.toThrow('offline');
+      await expect(mockService.generate({
+        model: 'llama3',
+        prompt: 'test'
+      })).rejects.toThrow('offline');
+    });
+
+    it('should simulate failures based on failure rate', async () => {
+      mockService.setFailureRate(1); // 100% failure rate
+      
+      await expect(mockService.generate({
+        model: 'llama3',
+        prompt: 'test'
+      })).rejects.toThrow('simulated failure');
+    });
+
+    it('should handle invalid models', async () => {
+      await expect(mockService.generate({
+        model: 'nonexistent-model',
+        prompt: 'test'
+      })).rejects.toThrow('not found');
+    });
+  });
+
+  describe('Health Monitoring', () => {
+    it('should provide health status', async () => {
+      const health = await mockService.healthCheck();
+      expect(health).toHaveProperty('status');
+      expect(health).toHaveProperty('online');
+      expect(health).toHaveProperty('models');
+    });
+
+    it('should reflect offline status in health', async () => {
+      mockService.setOnlineStatus(false);
+      const health = await mockService.healthCheck();
+      expect(health.status).toBe('offline');
+      expect(health.online).toBe(false);
+    });
+  });
+
+  describe('Factory Functions', () => {
+    it('should create healthy service', () => {
+      const service = createMockOllamaService('healthy');
+      const stats = service.getStats();
+      expect(stats.online).toBe(true);
+      expect(stats.failureRate).toBe(0);
+    });
+
+    it('should create offline service', () => {
+      const service = createMockOllamaService('offline');
+      const stats = service.getStats();
+      expect(stats.online).toBe(false);
+    });
+
+    it('should create slow service', () => {
+      const service = createMockOllamaService('slow');
+      const stats = service.getStats();
+      expect(stats.responseDelay).toBeGreaterThan(1000);
+    });
+
+    it('should create unreliable service', () => {
+      const service = createMockOllamaService('unreliable');
+      const stats = service.getStats();
+      expect(stats.failureRate).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Performance Testing', () => {
+    it('should handle concurrent requests', async () => {
+      const promises = Array.from({ length: 5 }, () =>
+        mockService.generate({
+          model: 'llama3',
+          prompt: 'Concurrent test'
+        })
+      );
+      
+      const responses = await Promise.all(promises);
+      expect(responses).toHaveLength(5);
+      responses.forEach(response => {
+        expect(response).toHaveProperty('response');
+        expect(response.done).toBe(true);
+      });
+    });
+
+    it('should respect response delays', async () => {
+      mockService.setResponseDelay(100);
+      
+      const start = Date.now();
+      await mockService.generate({
+        model: 'llama3',
+        prompt: 'Delay test'
+      });
+      const duration = Date.now() - start;
+      
+      expect(duration).toBeGreaterThanOrEqual(90); // Allow some variance
+    });
+  });
+});

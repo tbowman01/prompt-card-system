@@ -1,4 +1,5 @@
 import request from 'supertest';
+import assert from 'assert';
 import { expect } from 'chai';
 import app from '../server';
 import { promptAnalyzer } from '../services/optimization/PromptAnalyzer';
@@ -19,7 +20,7 @@ describe('AI-Powered Prompt Optimization Services', () => {
         });
 
       expect(response.status).to.equal(200);
-      expect(response.body.success).to.be.true;
+      assert(response.body.success === true);
       expect(response.body.data).to.have.property('effectiveness');
       expect(response.body.data).to.have.property('patterns');
       expect(response.body.data).to.have.property('metrics');
@@ -41,7 +42,7 @@ describe('AI-Powered Prompt Optimization Services', () => {
         });
 
       expect(response.status).to.equal(200);
-      expect(response.body.success).to.be.true;
+      assert(response.body.success === true);
       expect(response.body.data).to.have.property('winner');
       expect(response.body.data).to.have.property('confidence');
       expect(response.body.data).to.have.property('metrics');
@@ -78,7 +79,7 @@ describe('AI-Powered Prompt Optimization Services', () => {
         });
 
       expect(response.status).to.equal(200);
-      expect(response.body.success).to.be.true;
+      assert(response.body.success === true);
       expect(response.body.data).to.be.an('array');
       if (response.body.data.length > 0) {
         expect(response.body.data[0]).to.have.property('optimizedPrompt');
@@ -131,7 +132,7 @@ describe('AI-Powered Prompt Optimization Services', () => {
         });
 
       expect(response.status).to.equal(200);
-      expect(response.body.success).to.be.true;
+      assert(response.body.success === true);
       expect(response.body.data).to.have.property('id');
       expect(response.body.data).to.have.property('status');
       expect(response.body.data.variants).to.have.length(2);
@@ -178,7 +179,7 @@ describe('AI-Powered Prompt Optimization Services', () => {
         });
 
       expect(response.status).to.equal(200);
-      expect(response.body.success).to.be.true;
+      assert(response.body.success === true);
       expect(response.body.data).to.have.property('id');
       expect(response.body.data).to.have.property('status');
     });
@@ -212,7 +213,7 @@ describe('AI-Powered Prompt Optimization Services', () => {
         });
 
       expect(response.status).to.equal(200);
-      expect(response.body.success).to.be.true;
+      assert(response.body.success === true);
       expect(response.body.data).to.have.property('threats');
       expect(response.body.data).to.have.property('overallRisk');
       expect(response.body.data).to.have.property('compliance');
@@ -228,7 +229,7 @@ describe('AI-Powered Prompt Optimization Services', () => {
         });
 
       expect(response.status).to.equal(200);
-      expect(response.body.success).to.be.true;
+      assert(response.body.success === true);
       expect(response.body.data).to.have.property('detected');
       expect(response.body.data).to.have.property('confidence');
     });
@@ -242,7 +243,7 @@ describe('AI-Powered Prompt Optimization Services', () => {
         });
 
       expect(response.status).to.equal(200);
-      expect(response.body.success).to.be.true;
+      assert(response.body.success === true);
       expect(response.body.data).to.be.an('array');
       if (response.body.data.length > 0) {
         expect(response.body.data[0]).to.have.property('technique');
@@ -258,7 +259,7 @@ describe('AI-Powered Prompt Optimization Services', () => {
         });
 
       expect(response.status).to.equal(200);
-      expect(response.body.success).to.be.true;
+      assert(response.body.success === true);
       expect(response.body.data).to.have.property('safe');
       expect(response.body.data).to.have.property('categories');
       expect(response.body.data).to.have.property('overallScore');
@@ -273,7 +274,7 @@ describe('AI-Powered Prompt Optimization Services', () => {
         });
 
       expect(response.status).to.equal(200);
-      expect(response.body.success).to.be.true;
+      assert(response.body.success === true);
       expect(response.body.data).to.have.property('gdpr');
       expect(response.body.data).to.have.property('hipaa');
       expect(response.body.data.gdpr).to.have.property('compliant');
@@ -289,7 +290,7 @@ describe('AI-Powered Prompt Optimization Services', () => {
         });
 
       expect(response.status).to.equal(200);
-      expect(response.body.success).to.be.true;
+      assert(response.body.success === true);
       expect(response.body.data).to.have.property('securePrompt');
       expect(response.body.data).to.have.property('modifications');
       expect(response.body.data).to.have.property('securityFeatures');
@@ -301,7 +302,7 @@ describe('AI-Powered Prompt Optimization Services', () => {
       const response = await request(app).get('/api/optimization/health');
 
       expect(response.status).to.equal(200);
-      expect(response.body.success).to.be.true;
+      assert(response.body.success === true);
       expect(response.body.services).to.have.property('promptAnalyzer');
       expect(response.body.services).to.have.property('optimizationEngine');
       expect(response.body.services).to.have.property('securityAnalyzer');

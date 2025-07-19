@@ -124,6 +124,30 @@ export class ResourceManager extends EventEmitter {
   }
 
   /**
+   * Set resource limits
+   */
+  setLimits(newLimits: Partial<ResourceLimits>): void {
+    this.limits = { ...this.limits, ...newLimits };
+    this.emit('limitsUpdated', this.limits);
+  }
+
+  /**
+   * Initialize the resource manager
+   */
+  async initialize(): Promise<void> {
+    await this.updateCurrentUsage();
+    console.log('ResourceManager initialized');
+  }
+
+  /**
+   * Cleanup and shutdown the resource manager
+   */
+  async cleanup(): Promise<void> {
+    this.destroy();
+    console.log('ResourceManager cleaned up');
+  }
+
+  /**
    * Get reserved resources summary
    */
   getReservedResourcesSummary(): {
