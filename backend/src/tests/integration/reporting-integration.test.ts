@@ -1,5 +1,5 @@
 import request from 'supertest';
-import { expect } from 'chai';
+import assert from 'assert';
 import app from '../../server';
 import { ReportService } from '../../services/reports/ReportService';
 import { ReportGenerator } from '../../services/reports/generators/ReportGenerator';
@@ -39,7 +39,7 @@ describe('Advanced Reporting System Integration Tests', () => {
         })
         .expect(200);
 
-      expect(response.body.success).to.be.true;
+      assert(response.body.success === true);
       expect(response.body.data).to.have.property('reportId');
       expect(response.body.data).to.have.property('status');
       expect(response.body.data.status).to.equal('completed');
@@ -57,7 +57,7 @@ describe('Advanced Reporting System Integration Tests', () => {
         })
         .expect(200);
 
-      expect(response.body.success).to.be.true;
+      assert(response.body.success === true);
       expect(response.body.data).to.have.property('reportId');
       expect(response.body.data).to.have.property('performanceMetrics');
       expect(response.body.data).to.have.property('recommendations');
@@ -75,7 +75,7 @@ describe('Advanced Reporting System Integration Tests', () => {
         })
         .expect(200);
 
-      expect(response.body.success).to.be.true;
+      assert(response.body.success === true);
       expect(response.body.data).to.have.property('reportId');
       expect(response.body.data).to.have.property('costAnalysis');
       expect(response.body.data).to.have.property('optimizationSuggestions');
@@ -110,7 +110,7 @@ describe('Advanced Reporting System Integration Tests', () => {
         })
         .expect(200);
 
-      expect(exportResponse.body.success).to.be.true;
+      assert(exportResponse.body.success === true);
       expect(exportResponse.body.data).to.have.property('downloadUrl');
       expect(exportResponse.body.data).to.have.property('fileName');
       expect(exportResponse.body.data.fileName).to.include('.pdf');
@@ -139,7 +139,7 @@ describe('Advanced Reporting System Integration Tests', () => {
         })
         .expect(200);
 
-      expect(exportResponse.body.success).to.be.true;
+      assert(exportResponse.body.success === true);
       expect(exportResponse.body.data).to.have.property('downloadUrl');
       expect(exportResponse.body.data).to.have.property('fileName');
       expect(exportResponse.body.data.fileName).to.include('.xlsx');
@@ -168,7 +168,7 @@ describe('Advanced Reporting System Integration Tests', () => {
         })
         .expect(200);
 
-      expect(exportResponse.body.success).to.be.true;
+      assert(exportResponse.body.success === true);
       expect(exportResponse.body.data).to.have.property('downloadUrl');
       expect(exportResponse.body.data).to.have.property('fileName');
       expect(exportResponse.body.data.fileName).to.include('.csv');
@@ -195,7 +195,7 @@ describe('Advanced Reporting System Integration Tests', () => {
         })
         .expect(200);
 
-      expect(response.body.success).to.be.true;
+      assert(response.body.success === true);
       expect(response.body.data).to.have.property('scheduleId');
       expect(response.body.data).to.have.property('nextExecution');
     });
@@ -223,7 +223,7 @@ describe('Advanced Reporting System Integration Tests', () => {
         .post(`/api/reports/schedule/${scheduleId}/execute`)
         .expect(200);
 
-      expect(executeResponse.body.success).to.be.true;
+      assert(executeResponse.body.success === true);
       expect(executeResponse.body.data).to.have.property('reportId');
       expect(executeResponse.body.data).to.have.property('executionTime');
     });
@@ -276,7 +276,7 @@ describe('Advanced Reporting System Integration Tests', () => {
         })
         .expect(200);
 
-      expect(reportResponse.body.success).to.be.true;
+      assert(reportResponse.body.success === true);
       expect(reportResponse.body.data).to.have.property('reportId');
     });
   });
@@ -350,7 +350,7 @@ describe('Advanced Reporting System Integration Tests', () => {
         })
         .expect(200);
 
-      expect(response.body.success).to.be.true;
+      assert(response.body.success === true);
       expect(response.body.data).to.have.property('reportId');
       
       // Verify the report was generated successfully

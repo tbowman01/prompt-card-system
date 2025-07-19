@@ -4,6 +4,30 @@ import { body, validationResult, param, query } from 'express-validator';
 import sanitizeHtml from 'sanitize-html';
 
 // Enhanced validation schema for prompt cards with security rules
+
+// Generic validation middleware function
+export function validation(schema: Joi.ObjectSchema) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const { error, value } = schema.validate(req.body);
+    
+    if (error) {
+      res.status(400).json({
+        success: false,
+        error: 'Validation error',
+        details: error.details.map(detail => ({
+          field: detail.path.join('.'),
+          message: detail.message
+        }))
+      });
+      return;
+    }
+    
+    req.body = value;
+    next();
+  };
+}
+
+// Validation schema for prompt cards
 const promptCardSchema = Joi.object({
   title: Joi.string()
     .required()

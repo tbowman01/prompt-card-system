@@ -909,6 +909,31 @@ export class TestQueueManager extends EventEmitter {
   }
   
   /**
+   * Initialize the test queue manager
+   */
+  async initialize(): Promise<void> {
+    // Ensure Redis connection and warm up the system
+    await this.preWarmConnections();
+    console.log('TestQueueManager initialized');
+  }
+
+  /**
+   * Cleanup the test queue manager
+   */
+  async cleanup(): Promise<void> {
+    await this.shutdown();
+    console.log('TestQueueManager cleaned up');
+  }
+
+  /**
+   * Set queue limit for concurrent executions
+   */
+  async setQueueLimit(limit: number): Promise<void> {
+    this.defaultConfiguration.max_concurrent_tests = limit;
+    console.log(`Queue limit set to ${limit}`);
+  }
+
+  /**
    * Graceful shutdown
    */
   async shutdown(): Promise<void> {
