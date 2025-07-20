@@ -177,7 +177,7 @@ export const structuredLoggingMiddleware = (req: Request, res: Response, next: N
 
   // Override res.end to capture response details
   const originalEnd = res.end;
-  res.end = function(chunk?: any, encoding?: any) {
+  res.end = function(chunk?: any, encoding?: any): any {
     const duration = Date.now() - startTime;
     const finalContext: LogContext = {
       ...baseContext as LogContext,

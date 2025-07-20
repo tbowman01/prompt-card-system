@@ -1,0 +1,196 @@
+7c089ea2f5d27a2bb3c2f56699dcd286
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+Object.defineProperty(exports, "promptCardRoutes", {
+    enumerable: true,
+    get: function() {
+        return router;
+    }
+});
+const _express = require("express");
+const _connection = require("../database/connection");
+const _validation = require("../middleware/validation");
+const router = (0, _express.Router)();
+// Get all prompt cards with pagination
+router.get('/', (req, res)=>{
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const offset = (page - 1) * limit;
+        const search = req.query.search;
+        // Build base query
+        let whereClause = '';
+        let params = [];
+        if (search) {
+            whereClause = 'WHERE pc.title LIKE ? OR pc.description LIKE ?';
+            params = [
+                `%${search}%`,
+                `%${search}%`
+            ];
+        }
+        // Get total count
+        const totalQuery = `
+      SELECT COUNT(*) as total 
+      FROM prompt_cards pc 
+      ${whereClause}
+    `;
+        const totalResult = _connection.db.prepare(totalQuery).get(...params);
+        const total = totalResult.total;
+        // Get paginated results
+        const dataQuery = `
+      SELECT 
+        pc.*,
+        COUNT(tc.id) as test_case_count
+      FROM prompt_cards pc
+      LEFT JOIN test_cases tc ON pc.id = tc.prompt_card_id
+      ${whereClause}
+      GROUP BY pc.id
+      ORDER BY pc.updated_at DESC
+      LIMIT ? OFFSET ?
+    `;
+        const cards = _connection.db.prepare(dataQuery).all(...params, limit, offset);
+        const totalPages = Math.ceil(total / limit);
+        return res.json({
+            success: true,
+            data: cards.map((card)=>({
+                    ...card,
+                    variables: JSON.parse(card.variables || '[]'),
+                    test_case_count: Number(card.test_case_count)
+                })),
+            pagination: {
+                page,
+                limit,
+                total,
+                totalPages,
+                hasNext: page < totalPages,
+                hasPrev: page > 1
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to fetch prompt cards'
+        });
+    }
+});
+// Get specific prompt card with test cases
+router.get('/:id', (req, res)=>{
+    try {
+        const { id } = req.params;
+        // Get prompt card
+        const card = _connection.db.prepare(`
+      SELECT * FROM prompt_cards WHERE id = ?
+    `).get(id);
+        if (!card) {
+            return res.status(404).json({
+                success: false,
+                error: 'Prompt card not found'
+            });
+        }
+        // Get test cases
+        const testCases = _connection.db.prepare(`
+      SELECT * FROM test_cases WHERE prompt_card_id = ? ORDER BY created_at DESC
+    `).all(id);
+        return res.json({
+            success: true,
+            data: {
+                ...card,
+                variables: JSON.parse(card.variables || '[]'),
+                test_cases: testCases.map((tc)=>({
+                        ...tc,
+                        input_variables: JSON.parse(tc.input_variables),
+                        assertions: JSON.parse(tc.assertions || '[]')
+                    }))
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to fetch prompt card'
+        });
+    }
+});
+// Create new prompt card
+router.post('/', _validation.validatePromptCard, (req, res)=>{
+    try {
+        const { title, description, prompt_template, variables } = req.body;
+        const result = _connection.db.prepare(`
+      INSERT INTO prompt_cards (title, description, prompt_template, variables)
+      VALUES (?, ?, ?, ?)
+    `).run(title, description, prompt_template, JSON.stringify(variables || []));
+        const newCard = _connection.db.prepare(`
+      SELECT * FROM prompt_cards WHERE id = ?
+    `).get(result.lastInsertRowid);
+        return res.status(201).json({
+            success: true,
+            data: {
+                ...newCard,
+                variables: JSON.parse(newCard.variables || '[]')
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to create prompt card'
+        });
+    }
+});
+// Update prompt card
+router.put('/:id', _validation.validatePromptCard, (req, res)=>{
+    try {
+        const { id } = req.params;
+        const { title, description, prompt_template, variables } = req.body;
+        const result = _connection.db.prepare(`
+      UPDATE prompt_cards 
+      SET title = ?, description = ?, prompt_template = ?, variables = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(title, description, prompt_template, JSON.stringify(variables || []), id);
+        if (result.changes === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Prompt card not found'
+            });
+        }
+        const updatedCard = _connection.db.prepare(`
+      SELECT * FROM prompt_cards WHERE id = ?
+    `).get(id);
+        return res.json({
+            success: true,
+            data: {
+                ...updatedCard,
+                variables: JSON.parse(updatedCard.variables || '[]')
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to update prompt card'
+        });
+    }
+});
+// Delete prompt card
+router.delete('/:id', (req, res)=>{
+    try {
+        const { id } = req.params;
+        const result = _connection.db.prepare(`
+      DELETE FROM prompt_cards WHERE id = ?
+    `).run(id);
+        if (result.changes === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Prompt card not found'
+            });
+        }
+        return res.json({
+            success: true,
+            message: 'Prompt card deleted successfully'
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to delete prompt card'
+        });
+    }
+});

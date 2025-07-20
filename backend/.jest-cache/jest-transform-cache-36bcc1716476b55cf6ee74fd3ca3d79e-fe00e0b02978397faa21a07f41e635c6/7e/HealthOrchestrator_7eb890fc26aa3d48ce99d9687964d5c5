@@ -1,0 +1,769 @@
+eb5e12053c5716005f9307af766e952b
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+function _export(target, all) {
+    for(var name in all)Object.defineProperty(target, name, {
+        enumerable: true,
+        get: Object.getOwnPropertyDescriptor(all, name).get
+    });
+}
+_export(exports, {
+    get HealthOrchestrator () {
+        return HealthOrchestrator;
+    },
+    get healthOrchestrator () {
+        return healthOrchestrator;
+    }
+});
+const _events = require("events");
+const _redis = require("redis");
+const _axios = /*#__PURE__*/ _interop_require_default(require("axios"));
+const _connection = require("../../database/connection");
+const _ModelHealthMonitor = require("../models/ModelHealthMonitor");
+function _define_property(obj, key, value) {
+    if (key in obj) {
+        Object.defineProperty(obj, key, {
+            value: value,
+            enumerable: true,
+            configurable: true,
+            writable: true
+        });
+    } else {
+        obj[key] = value;
+    }
+    return obj;
+}
+function _interop_require_default(obj) {
+    return obj && obj.__esModule ? obj : {
+        default: obj
+    };
+}
+class HealthOrchestrator extends _events.EventEmitter {
+    initializeServices() {
+        // Define all services to monitor
+        const servicesConfig = [
+            {
+                name: 'database',
+                criticalService: true,
+                dependencies: []
+            },
+            {
+                name: 'redis',
+                criticalService: true,
+                dependencies: []
+            },
+            {
+                name: 'ollama',
+                criticalService: true,
+                dependencies: []
+            },
+            {
+                name: 'frontend',
+                criticalService: true,
+                dependencies: [
+                    'backend'
+                ]
+            },
+            {
+                name: 'backend',
+                criticalService: true,
+                dependencies: [
+                    'database',
+                    'ollama',
+                    'redis'
+                ]
+            },
+            {
+                name: 'websocket',
+                criticalService: false,
+                dependencies: [
+                    'backend',
+                    'redis'
+                ]
+            },
+            {
+                name: 'model-health',
+                criticalService: false,
+                dependencies: [
+                    'ollama'
+                ]
+            },
+            {
+                name: 'prometheus',
+                criticalService: false,
+                dependencies: [
+                    'backend'
+                ]
+            },
+            {
+                name: 'grafana',
+                criticalService: false,
+                dependencies: [
+                    'prometheus'
+                ]
+            },
+            {
+                name: 'model-init',
+                criticalService: false,
+                dependencies: [
+                    'ollama'
+                ]
+            }
+        ];
+        // Initialize service health status
+        for (const serviceConfig of servicesConfig){
+            const service = {
+                name: serviceConfig.name,
+                status: 'offline',
+                lastCheck: new Date(0),
+                responseTime: 0,
+                dependencies: serviceConfig.dependencies,
+                criticalService: serviceConfig.criticalService
+            };
+            this.services.set(serviceConfig.name, service);
+        }
+    }
+    initializeFallbackMechanisms() {
+        // Fallback for LLM/Ollama service - use mock responses
+        this.fallbackMechanisms.set('ollama', async ()=>({
+                status: 'degraded',
+                message: 'Using fallback mode - Ollama unavailable',
+                details: {
+                    fallbackMode: true,
+                    capabilities: [
+                        'text-completion-mock',
+                        'chat-mock'
+                    ],
+                    note: 'AI features will use mock responses'
+                }
+            }));
+        // Fallback for Redis - use in-memory cache
+        this.fallbackMechanisms.set('redis', async ()=>({
+                status: 'degraded',
+                message: 'Using in-memory cache - Redis unavailable',
+                details: {
+                    fallbackMode: true,
+                    cacheType: 'memory',
+                    note: 'Session data will not persist across restarts'
+                }
+            }));
+        // Fallback for model health - disable AI features gracefully
+        this.fallbackMechanisms.set('model-health', async ()=>({
+                status: 'degraded',
+                message: 'AI features disabled - Model health monitoring unavailable',
+                details: {
+                    fallbackMode: true,
+                    aiFeatures: 'disabled',
+                    note: 'Manual testing mode available'
+                }
+            }));
+    }
+    initializeCircuitBreakers() {
+        const serviceNames = Array.from(this.services.keys());
+        for (const serviceName of serviceNames){
+            this.circuitBreakers.set(serviceName, {
+                isOpen: false,
+                failures: 0,
+                lastFailure: new Date(0)
+            });
+        }
+    }
+    async executeWithCircuitBreaker(serviceName, operation) {
+        const breaker = this.circuitBreakers.get(serviceName);
+        if (!breaker) throw new Error(`No circuit breaker for service: ${serviceName}`);
+        // Check if circuit breaker is open
+        if (breaker.isOpen) {
+            const timeSinceLastFailure = Date.now() - breaker.lastFailure.getTime();
+            const resetTimeout = 60000; // 1 minute
+            if (timeSinceLastFailure < resetTimeout) {
+                throw new Error(`Circuit breaker open for ${serviceName}`);
+            } else {
+                // Try to reset circuit breaker
+                breaker.isOpen = false;
+                breaker.failures = 0;
+            }
+        }
+        try {
+            const result = await operation();
+            // Success - reset failure count
+            breaker.failures = 0;
+            return result;
+        } catch (error) {
+            // Failure - increment counter
+            breaker.failures++;
+            breaker.lastFailure = new Date();
+            // Open circuit breaker after 3 failures
+            if (breaker.failures >= 3) {
+                breaker.isOpen = true;
+                console.warn(`🔓 Circuit breaker opened for ${serviceName} after 3 failures`);
+            }
+            throw error;
+        }
+    }
+    async start() {
+        if (this.isRunning) {
+            console.log('🏥 Health Orchestrator already running');
+            return;
+        }
+        console.log('🏥 Starting Health Orchestrator...');
+        this.isRunning = true;
+        // Initialize model monitor
+        try {
+            this.modelMonitor = new _ModelHealthMonitor.ModelHealthMonitor({
+                healthCheckInterval: 60000,
+                maxResponseTime: 30000,
+                minHealthScore: 70,
+                alertThresholds: {
+                    responseTime: 15000,
+                    errorRate: 10,
+                    memoryUsage: 85 // 85% memory usage threshold
+                }
+            });
+            await this.modelMonitor.initialize();
+            console.log('🤖 Model Health Monitor initialized');
+        } catch (error) {
+            console.error('❌ Failed to initialize Model Health Monitor:', error);
+        }
+        // Start monitoring all services
+        for (const serviceName of this.services.keys()){
+            this.startServiceMonitoring(serviceName);
+        }
+        // Perform initial full health check
+        await this.performFullHealthCheck();
+        // Start periodic full system health checks
+        const fullCheckInterval = setInterval(()=>{
+            this.performFullHealthCheck();
+        }, this.config.checkInterval * 2); // Less frequent full checks
+        this.checkIntervals.set('__full_check__', fullCheckInterval);
+        console.log('✅ Health Orchestrator started successfully');
+        this.emit('started', {
+            servicesCount: this.services.size
+        });
+    }
+    startServiceMonitoring(serviceName) {
+        const interval = setInterval(async ()=>{
+            await this.checkServiceHealth(serviceName);
+        }, this.config.checkInterval);
+        this.checkIntervals.set(serviceName, interval);
+    }
+    async checkServiceHealth(serviceName) {
+        const service = this.services.get(serviceName);
+        if (!service) return;
+        const startTime = Date.now();
+        let newStatus = 'offline';
+        let message = '';
+        let details = {};
+        try {
+            // Check dependencies first
+            const dependencyResults = await this.checkDependencies(serviceName);
+            const dependenciesHealthy = dependencyResults.every((dep)=>dep.healthy);
+            if (!dependenciesHealthy) {
+                newStatus = 'degraded';
+                message = 'Dependencies unhealthy';
+                details.dependencyStatus = dependencyResults;
+            } else {
+                // Perform service-specific health check with circuit breaker and fallback
+                try {
+                    const healthResult = await this.executeWithCircuitBreaker(serviceName, ()=>this.performServiceCheck(serviceName));
+                    newStatus = healthResult.status;
+                    message = healthResult.message || '';
+                    details = {
+                        ...details,
+                        ...healthResult.details
+                    };
+                } catch (circuitBreakerError) {
+                    // Try fallback mechanism
+                    const fallback = this.fallbackMechanisms.get(serviceName);
+                    if (fallback) {
+                        console.log(`🔄 Using fallback for ${serviceName}:`, circuitBreakerError);
+                        const fallbackResult = await fallback();
+                        newStatus = fallbackResult.status;
+                        message = fallbackResult.message || '';
+                        details = {
+                            ...details,
+                            ...fallbackResult.details,
+                            circuitBreakerError: circuitBreakerError.message
+                        };
+                    } else {
+                        throw circuitBreakerError;
+                    }
+                }
+            }
+        } catch (error) {
+            newStatus = 'unhealthy';
+            message = error instanceof Error ? error.message : 'Health check failed';
+            details.error = message;
+        }
+        const responseTime = Date.now() - startTime;
+        // Update service status
+        const updatedService = {
+            ...service,
+            status: newStatus,
+            lastCheck: new Date(),
+            responseTime,
+            message,
+            details
+        };
+        const previousStatus = service.status;
+        this.services.set(serviceName, updatedService);
+        // Emit events for status changes
+        if (previousStatus !== newStatus) {
+            this.emit('serviceStatusChanged', {
+                serviceName,
+                previousStatus,
+                newStatus,
+                responseTime,
+                message
+            });
+            // Emit critical alerts
+            if (service.criticalService && newStatus === 'unhealthy') {
+                this.emit('criticalServiceDown', {
+                    serviceName,
+                    message,
+                    details,
+                    timestamp: new Date()
+                });
+            }
+        }
+    }
+    async checkDependencies(serviceName) {
+        const dependencies = this.config.dependencies[serviceName] || [];
+        const results = [];
+        for (const depName of dependencies){
+            const depService = this.services.get(depName);
+            const healthy = depService ? [
+                'healthy',
+                'degraded'
+            ].includes(depService.status) : false;
+            results.push({
+                name: depName,
+                healthy
+            });
+        }
+        return results;
+    }
+    async performServiceCheck(serviceName) {
+        switch(serviceName){
+            case 'database':
+                return this.checkDatabase();
+            case 'redis':
+                return this.checkRedis();
+            case 'ollama':
+                return this.checkOllama();
+            case 'frontend':
+                return this.checkFrontend();
+            case 'backend':
+                return this.checkBackend();
+            case 'websocket':
+                return this.checkWebSocket();
+            case 'model-health':
+                return this.checkModelHealth();
+            case 'prometheus':
+                return this.checkPrometheus();
+            case 'grafana':
+                return this.checkGrafana();
+            case 'model-init':
+                return this.checkModelInit();
+            default:
+                return {
+                    status: 'unhealthy',
+                    message: `Unknown service: ${serviceName}`
+                };
+        }
+    }
+    async checkDatabase() {
+        try {
+            const result = _connection.db.prepare('SELECT 1 as test').get();
+            const stats = {
+                promptCards: _connection.db.prepare('SELECT COUNT(*) as count FROM prompt_cards').get(),
+                testCases: _connection.db.prepare('SELECT COUNT(*) as count FROM test_cases').get()
+            };
+            return {
+                status: result?.test === 1 ? 'healthy' : 'unhealthy',
+                message: 'Database connection successful',
+                details: {
+                    stats,
+                    path: process.env.DATABASE_PATH
+                }
+            };
+        } catch (error) {
+            return {
+                status: 'unhealthy',
+                message: `Database check failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+            };
+        }
+    }
+    async checkRedis() {
+        const redisUrl = process.env.REDIS_URL || 'redis://redis:6379';
+        try {
+            const client = (0, _redis.createClient)({
+                url: redisUrl
+            });
+            await client.connect();
+            const result = await client.ping();
+            await client.disconnect();
+            return {
+                status: result === 'PONG' ? 'healthy' : 'unhealthy',
+                message: 'Redis connection successful',
+                details: {
+                    url: redisUrl,
+                    ping: result
+                }
+            };
+        } catch (error) {
+            return {
+                status: 'unhealthy',
+                message: `Redis check failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                details: {
+                    url: redisUrl
+                }
+            };
+        }
+    }
+    async checkOllama() {
+        const ollamaUrl = process.env.OLLAMA_BASE_URL || 'http://ollama:11434';
+        try {
+            const response = await _axios.default.get(`${ollamaUrl}/api/version`, {
+                timeout: this.config.timeout
+            });
+            const modelsResponse = await _axios.default.get(`${ollamaUrl}/api/tags`, {
+                timeout: this.config.timeout
+            });
+            const models = modelsResponse.data.models || [];
+            return {
+                status: models.length > 0 ? 'healthy' : 'degraded',
+                message: models.length > 0 ? 'Ollama operational with models' : 'Ollama operational but no models',
+                details: {
+                    url: ollamaUrl,
+                    version: response.data.version,
+                    modelCount: models.length,
+                    models: models.map((m)=>m.name)
+                }
+            };
+        } catch (error) {
+            return {
+                status: 'unhealthy',
+                message: `Ollama check failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                details: {
+                    url: ollamaUrl
+                }
+            };
+        }
+    }
+    async checkFrontend() {
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+        try {
+            const response = await _axios.default.get(`${frontendUrl}/api/health`, {
+                timeout: this.config.timeout
+            });
+            return {
+                status: response.status === 200 ? 'healthy' : 'degraded',
+                message: 'Frontend health check successful',
+                details: {
+                    url: frontendUrl,
+                    statusCode: response.status,
+                    frontendStatus: response.data?.status
+                }
+            };
+        } catch (error) {
+            return {
+                status: 'unhealthy',
+                message: `Frontend check failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                details: {
+                    url: frontendUrl
+                }
+            };
+        }
+    }
+    async checkBackend() {
+        const backendUrl = process.env.BACKEND_URL || 'http://localhost:3001';
+        try {
+            const response = await _axios.default.get(`${backendUrl}/api/health/v2`, {
+                timeout: this.config.timeout
+            });
+            return {
+                status: response.data?.status === 'healthy' ? 'healthy' : 'degraded',
+                message: 'Backend health check successful',
+                details: {
+                    url: backendUrl,
+                    statusCode: response.status,
+                    backendStatus: response.data?.status,
+                    services: response.data?.services
+                }
+            };
+        } catch (error) {
+            return {
+                status: 'unhealthy',
+                message: `Backend check failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                details: {
+                    url: backendUrl
+                }
+            };
+        }
+    }
+    async checkWebSocket() {
+        // WebSocket health is checked via backend health endpoint
+        // This is a simplified check - in production you might want to test actual WebSocket connection
+        return {
+            status: 'healthy',
+            message: 'WebSocket service assumed healthy (checked via backend)',
+            details: {
+                note: 'Indirect check via backend service'
+            }
+        };
+    }
+    async checkModelHealth() {
+        if (!this.modelMonitor) {
+            return {
+                status: 'offline',
+                message: 'Model health monitor not initialized'
+            };
+        }
+        try {
+            const monitorStatus = this.modelMonitor.getStatus();
+            const healthyModels = this.modelMonitor.getHealthyModels();
+            const unhealthyModels = this.modelMonitor.getUnhealthyModels();
+            let status = 'healthy';
+            if (unhealthyModels.length > healthyModels.length) {
+                status = 'degraded';
+            }
+            if (healthyModels.length === 0 && unhealthyModels.length > 0) {
+                status = 'unhealthy';
+            }
+            return {
+                status,
+                message: `${healthyModels.length} healthy models, ${unhealthyModels.length} unhealthy`,
+                details: {
+                    ...monitorStatus,
+                    healthyModels,
+                    unhealthyModels
+                }
+            };
+        } catch (error) {
+            return {
+                status: 'unhealthy',
+                message: `Model health check failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+            };
+        }
+    }
+    async checkPrometheus() {
+        const prometheusUrl = process.env.PROMETHEUS_URL || 'http://localhost:9090';
+        try {
+            const response = await _axios.default.get(`${prometheusUrl}/-/healthy`, {
+                timeout: this.config.timeout
+            });
+            return {
+                status: response.status === 200 ? 'healthy' : 'degraded',
+                message: 'Prometheus health check successful',
+                details: {
+                    url: prometheusUrl,
+                    statusCode: response.status
+                }
+            };
+        } catch (error) {
+            return {
+                status: 'offline',
+                message: `Prometheus check failed: ${error instanceof Error ? error.message : 'Service not running'}`,
+                details: {
+                    url: prometheusUrl
+                }
+            };
+        }
+    }
+    async checkGrafana() {
+        const grafanaUrl = process.env.GRAFANA_URL || 'http://localhost:3002';
+        try {
+            const response = await _axios.default.get(`${grafanaUrl}/api/health`, {
+                timeout: this.config.timeout
+            });
+            return {
+                status: response.status === 200 ? 'healthy' : 'degraded',
+                message: 'Grafana health check successful',
+                details: {
+                    url: grafanaUrl,
+                    statusCode: response.status
+                }
+            };
+        } catch (error) {
+            return {
+                status: 'offline',
+                message: `Grafana check failed: ${error instanceof Error ? error.message : 'Service not running'}`,
+                details: {
+                    url: grafanaUrl
+                }
+            };
+        }
+    }
+    async checkModelInit() {
+        // Model init is a one-time service that downloads models
+        // Check if models exist to infer if init was successful
+        try {
+            const modelsResponse = await _axios.default.get(`${process.env.OLLAMA_BASE_URL || 'http://ollama:11434'}/api/tags`);
+            const models = modelsResponse.data.models || [];
+            return {
+                status: models.length > 0 ? 'healthy' : 'degraded',
+                message: models.length > 0 ? 'Models initialized successfully' : 'No models found',
+                details: {
+                    modelCount: models.length,
+                    models: models.map((m)=>m.name)
+                }
+            };
+        } catch (error) {
+            return {
+                status: 'unhealthy',
+                message: `Model init check failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+            };
+        }
+    }
+    async performFullHealthCheck() {
+        console.log('🔍 Performing full system health check...');
+        // Check all services in parallel
+        const checkPromises = Array.from(this.services.keys()).map((serviceName)=>this.checkServiceHealth(serviceName));
+        await Promise.allSettled(checkPromises);
+        this.lastFullCheck = new Date();
+        const systemHealth = this.getSystemHealth();
+        this.emit('fullHealthCheckComplete', {
+            systemHealth,
+            timestamp: this.lastFullCheck
+        });
+        console.log(`✅ Full health check complete: ${systemHealth.healthyServices}/${systemHealth.totalServices} services healthy`);
+    }
+    getSystemHealth() {
+        const services = new Map(this.services);
+        const totalServices = services.size;
+        let healthyServices = 0;
+        let degradedServices = 0;
+        let unhealthyServices = 0;
+        let offlineServices = 0;
+        for (const service of services.values()){
+            switch(service.status){
+                case 'healthy':
+                    healthyServices++;
+                    break;
+                case 'degraded':
+                    degradedServices++;
+                    break;
+                case 'unhealthy':
+                    unhealthyServices++;
+                    break;
+                case 'offline':
+                    offlineServices++;
+                    break;
+            }
+        }
+        // Determine overall status
+        let overallStatus = 'healthy';
+        // Check critical services
+        const criticalServices = Array.from(services.values()).filter((s)=>s.criticalService);
+        const criticalUnhealthy = criticalServices.filter((s)=>s.status === 'unhealthy' || s.status === 'offline');
+        const criticalDegraded = criticalServices.filter((s)=>s.status === 'degraded');
+        if (criticalUnhealthy.length > 0) {
+            overallStatus = 'unhealthy';
+        } else if (criticalDegraded.length > 0 || unhealthyServices > 0) {
+            overallStatus = 'degraded';
+        }
+        return {
+            overallStatus,
+            services,
+            lastFullCheck: this.lastFullCheck,
+            totalServices,
+            healthyServices,
+            degradedServices,
+            unhealthyServices,
+            offlineServices
+        };
+    }
+    getServiceHealth(serviceName) {
+        return this.services.get(serviceName);
+    }
+    async stop() {
+        if (!this.isRunning) return;
+        console.log('🔄 Stopping Health Orchestrator...');
+        this.isRunning = false;
+        // Clear all intervals
+        for (const interval of this.checkIntervals.values()){
+            clearInterval(interval);
+        }
+        this.checkIntervals.clear();
+        // Shutdown model monitor
+        if (this.modelMonitor) {
+            await this.modelMonitor.shutdown();
+        }
+        console.log('✅ Health Orchestrator stopped');
+        this.emit('stopped');
+    }
+    updateConfig(newConfig) {
+        this.config = {
+            ...this.config,
+            ...newConfig
+        };
+        console.log('⚙️ Health Orchestrator configuration updated');
+    }
+    getCircuitBreakerStatus() {
+        return new Map(this.circuitBreakers);
+    }
+    getFallbackStatus() {
+        const status = {};
+        for (const [serviceName] of this.fallbackMechanisms){
+            status[serviceName] = true;
+        }
+        return status;
+    }
+    getServiceDependencyMap() {
+        return {
+            ...this.config.dependencies
+        };
+    }
+    async testFallbackMechanism(serviceName) {
+        const fallback = this.fallbackMechanisms.get(serviceName);
+        if (!fallback) {
+            throw new Error(`No fallback mechanism configured for ${serviceName}`);
+        }
+        return await fallback();
+    }
+    constructor(config = {}){
+        super(), _define_property(this, "services", new Map()), _define_property(this, "checkIntervals", new Map()), _define_property(this, "config", void 0), _define_property(this, "isRunning", false), _define_property(this, "modelMonitor", void 0), _define_property(this, "lastFullCheck", new Date(0)), _define_property(this, "fallbackMechanisms", new Map()), _define_property(this, "circuitBreakers", new Map());
+        this.config = {
+            checkInterval: 30000,
+            timeout: 5000,
+            retries: 3,
+            retryDelay: 1000,
+            criticalServices: [
+                'database',
+                'ollama',
+                'frontend',
+                'backend'
+            ],
+            dependencies: {
+                'backend': [
+                    'database',
+                    'ollama',
+                    'redis'
+                ],
+                'frontend': [
+                    'backend'
+                ],
+                'model-health': [
+                    'ollama'
+                ],
+                'websocket': [
+                    'backend',
+                    'redis'
+                ],
+                'prometheus': [
+                    'backend'
+                ],
+                'grafana': [
+                    'prometheus'
+                ]
+            },
+            ...config
+        };
+        this.initializeServices();
+        this.initializeFallbackMechanisms();
+        this.initializeCircuitBreakers();
+    }
+}
+const healthOrchestrator = new HealthOrchestrator();

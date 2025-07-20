@@ -175,9 +175,9 @@ loadTestScheduler.initialize().catch(error => {
   console.error('Failed to initialize load test scheduler:', error);
 });
 
-performanceRegressionDetector.startMonitoring(15).catch?.(error => {
+performanceRegressionDetector.startMonitoring(15).catch((error: any) => {
   console.error('Failed to start regression monitoring:', error);
-}) || performanceRegressionDetector.startMonitoring(15);
+});
 
 // Initialize security monitoring systems
 console.log('Initializing security monitoring systems...');
