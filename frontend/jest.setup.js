@@ -1,5 +1,20 @@
 import '@testing-library/jest-dom'
 
+// Polyfills for Node.js environment
+import { TextEncoder, TextDecoder } from 'util';
+global.TextEncoder = TextEncoder;
+global.TextDecoder = TextDecoder;
+
+// Extend Jest globally for TypeScript
+global.jest = jest;
+global.expect = expect;
+global.describe = describe;
+global.it = it;
+global.beforeEach = beforeEach;
+global.afterEach = afterEach;
+global.beforeAll = beforeAll;
+global.afterAll = afterAll;
+
 // TODO: Set up MSW for API mocking when needed
 // require('./src/__tests__/setup/msw')
 

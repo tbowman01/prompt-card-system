@@ -176,7 +176,7 @@ export const db: any = {
   transaction: (operations: (db: Database.Database) => any) => {
     return connectionPool.withConnection((conn) => {
       const transaction = conn.transaction(operations);
-      return transaction();
+      return transaction(conn);
     });
   },
   getStats: () => connectionPool.getStats()
