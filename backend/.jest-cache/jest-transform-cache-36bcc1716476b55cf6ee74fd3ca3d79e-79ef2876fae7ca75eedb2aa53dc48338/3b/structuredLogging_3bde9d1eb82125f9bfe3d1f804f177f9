@@ -1,0 +1,262 @@
+e8dac38e6e7a84f3ef505cc158d2ed66
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+function _export(target, all) {
+    for(var name in all)Object.defineProperty(target, name, {
+        enumerable: true,
+        get: Object.getOwnPropertyDescriptor(all, name).get
+    });
+}
+_export(exports, {
+    get logSecurityEvent () {
+        return logSecurityEvent;
+    },
+    get performanceLoggingMiddleware () {
+        return performanceLoggingMiddleware;
+    },
+    get structuredLogger () {
+        return structuredLogger;
+    },
+    get structuredLoggingMiddleware () {
+        return structuredLoggingMiddleware;
+    }
+});
+const _crypto = require("crypto");
+function _define_property(obj, key, value) {
+    if (key in obj) {
+        Object.defineProperty(obj, key, {
+            value: value,
+            enumerable: true,
+            configurable: true,
+            writable: true
+        });
+    } else {
+        obj[key] = value;
+    }
+    return obj;
+}
+class StructuredLogger {
+    static getInstance() {
+        if (!StructuredLogger.instance) {
+            StructuredLogger.instance = new StructuredLogger();
+        }
+        return StructuredLogger.instance;
+    }
+    log(level, context, message) {
+        const logEntry = {
+            level,
+            message,
+            ...context,
+            bufferTimestamp: new Date().toISOString()
+        };
+        // Enhanced console logging with structured format
+        const structuredLog = {
+            '@timestamp': context.timestamp,
+            '@version': '1',
+            level,
+            message,
+            correlation_id: context.correlationId,
+            request_id: context.requestId,
+            user: {
+                id: context.userId,
+                role: context.userRole
+            },
+            request: {
+                method: context.method,
+                url: context.url,
+                ip: context.ip,
+                user_agent: context.userAgent,
+                duration_ms: context.duration,
+                status_code: context.statusCode
+            },
+            security: context.securityContext,
+            error_code: context.errorCode,
+            metadata: context.metadata
+        };
+        // Color-coded console output for development
+        if (process.env.NODE_ENV !== 'production') {
+            const colors = {
+                info: '\x1b[36m',
+                warn: '\x1b[33m',
+                error: '\x1b[31m',
+                debug: '\x1b[35m',
+                reset: '\x1b[0m'
+            };
+            console.log(`${colors[level]}[${level.toUpperCase()}]${colors.reset} ` + `${context.timestamp} ` + `[${context.correlationId}] ` + `${context.method} ${context.url} ` + `${context.statusCode || 'PENDING'} ` + `${context.duration ? `${context.duration}ms` : ''} ` + `- ${message}`);
+        }
+        // Structured JSON logging for production
+        if (process.env.NODE_ENV === 'production') {
+            console.log(JSON.stringify(structuredLog));
+        }
+        // Add to buffer for batch processing
+        this.logBuffer.push(context);
+        // Flush if buffer is full
+        if (this.logBuffer.length >= this.MAX_BUFFER_SIZE) {
+            this.flushLogs();
+        }
+    }
+    flushLogs() {
+        if (this.logBuffer.length === 0) return;
+        // In production, this would send to centralized logging system
+        // For now, we'll just clear the buffer
+        this.logBuffer = [];
+    }
+    getMetrics() {
+        const logs = this.logBuffer;
+        const errorCount = logs.filter((log)=>log.statusCode && log.statusCode >= 400).length;
+        const responseTimes = logs.filter((log)=>log.duration).map((log)=>log.duration);
+        const averageResponseTime = responseTimes.length > 0 ? responseTimes.reduce((sum, time)=>sum + time, 0) / responseTimes.length : 0;
+        return {
+            totalLogs: logs.length,
+            errorCount,
+            averageResponseTime: Math.round(averageResponseTime)
+        };
+    }
+    constructor(){
+        _define_property(this, "logBuffer", []);
+        _define_property(this, "MAX_BUFFER_SIZE", 100);
+        _define_property(this, "FLUSH_INTERVAL", 10000); // 10 seconds
+        // Flush logs periodically
+        setInterval(()=>this.flushLogs(), this.FLUSH_INTERVAL);
+    }
+}
+_define_property(StructuredLogger, "instance", void 0);
+const structuredLogger = StructuredLogger.getInstance();
+const structuredLoggingMiddleware = (req, res, next)=>{
+    const startTime = Date.now();
+    const correlationId = req.headers['x-correlation-id'] || (0, _crypto.randomBytes)(8).toString('hex');
+    const requestId = req.headers['x-request-id'] || (0, _crypto.randomBytes)(8).toString('hex');
+    // Add correlation ID to request for downstream use
+    req.headers['x-correlation-id'] = correlationId;
+    req.headers['x-request-id'] = requestId;
+    // Add correlation ID to response headers
+    res.setHeader('x-correlation-id', correlationId);
+    res.setHeader('x-request-id', requestId);
+    // Create base log context
+    const baseContext = {
+        correlationId,
+        requestId,
+        userId: req.user?.id,
+        userRole: req.user?.role,
+        ip: req.ip || req.connection.remoteAddress || 'unknown',
+        userAgent: req.headers['user-agent'] || 'unknown',
+        method: req.method,
+        url: req.url,
+        timestamp: new Date().toISOString(),
+        securityContext: {
+            authMethod: req.headers.authorization ? 'Bearer' : 'none',
+            suspicious: false,
+            fingerprint: generateFingerprint(req)
+        }
+    };
+    // Log request start
+    structuredLogger.log('info', baseContext, `Request started: ${req.method} ${req.url}`);
+    // Override res.end to capture response details
+    const originalEnd = res.end;
+    res.end = function(chunk, encoding) {
+        const duration = Date.now() - startTime;
+        const finalContext = {
+            ...baseContext,
+            duration,
+            statusCode: res.statusCode
+        };
+        // Determine log level based on status code
+        let level = 'info';
+        let message = `Request completed: ${req.method} ${req.url} ${res.statusCode} (${duration}ms)`;
+        if (res.statusCode >= 500) {
+            level = 'error';
+            finalContext.errorCode = 'SERVER_ERROR';
+        } else if (res.statusCode >= 400) {
+            level = 'warn';
+            finalContext.errorCode = 'CLIENT_ERROR';
+        }
+        // Add security context for suspicious activity
+        if (res.statusCode === 429) {
+            finalContext.securityContext.suspicious = true;
+            finalContext.errorCode = 'RATE_LIMIT_EXCEEDED';
+            level = 'warn';
+        } else if (res.statusCode === 401 || res.statusCode === 403) {
+            finalContext.securityContext.suspicious = true;
+            finalContext.errorCode = res.statusCode === 401 ? 'UNAUTHORIZED' : 'FORBIDDEN';
+            level = 'warn';
+        }
+        structuredLogger.log(level, finalContext, message);
+        originalEnd.call(this, chunk, encoding);
+    };
+    next();
+};
+// Generate a simple fingerprint for request tracking
+function generateFingerprint(req) {
+    const components = [
+        req.headers['user-agent'] || '',
+        req.headers['accept-language'] || '',
+        req.headers['accept-encoding'] || '',
+        req.ip || ''
+    ];
+    // Simple hash of combined components
+    return Buffer.from(components.join('|')).toString('base64').substring(0, 12);
+}
+const logSecurityEvent = (eventType, req, details = {})=>{
+    const context = {
+        correlationId: req.headers['x-correlation-id'] || 'unknown',
+        requestId: req.headers['x-request-id'] || 'unknown',
+        userId: req.user?.id,
+        userRole: req.user?.role,
+        ip: req.ip || 'unknown',
+        userAgent: req.headers['user-agent'] || 'unknown',
+        method: req.method,
+        url: req.url,
+        timestamp: new Date().toISOString(),
+        securityContext: {
+            authMethod: req.headers.authorization ? 'Bearer' : 'none',
+            suspicious: true,
+            fingerprint: generateFingerprint(req)
+        },
+        metadata: {
+            eventType,
+            ...details
+        }
+    };
+    structuredLogger.log('warn', context, `Security event: ${eventType}`);
+};
+const performanceLoggingMiddleware = (req, res, next)=>{
+    const startTime = process.hrtime.bigint();
+    const startMemory = process.memoryUsage();
+    res.on('finish', ()=>{
+        const endTime = process.hrtime.bigint();
+        const endMemory = process.memoryUsage();
+        const duration = Number(endTime - startTime) / 1000000; // Convert to milliseconds
+        const performanceData = {
+            correlationId: req.headers['x-correlation-id'],
+            requestId: req.headers['x-request-id'],
+            method: req.method,
+            url: req.url,
+            statusCode: res.statusCode,
+            duration,
+            memory: {
+                heapUsed: endMemory.heapUsed - startMemory.heapUsed,
+                heapTotal: endMemory.heapTotal - startMemory.heapTotal,
+                external: endMemory.external - startMemory.external
+            }
+        };
+        // Log performance warning for slow requests
+        if (duration > 1000) {
+            const context = {
+                correlationId: performanceData.correlationId || 'unknown',
+                requestId: performanceData.requestId || 'unknown',
+                ip: req.ip || 'unknown',
+                userAgent: req.headers['user-agent'] || 'unknown',
+                method: req.method,
+                url: req.url,
+                timestamp: new Date().toISOString(),
+                duration,
+                statusCode: res.statusCode,
+                metadata: performanceData
+            };
+            structuredLogger.log('warn', context, `Slow request detected: ${duration}ms`);
+        }
+    });
+    next();
+};

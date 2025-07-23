@@ -1,0 +1,259 @@
+356712fd0008551d35fe299a6deaba46
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+Object.defineProperty(exports, "ResourceManager", {
+    enumerable: true,
+    get: function() {
+        return ResourceManager;
+    }
+});
+const _os = /*#__PURE__*/ _interop_require_wildcard(require("os"));
+const _events = require("events");
+function _define_property(obj, key, value) {
+    if (key in obj) {
+        Object.defineProperty(obj, key, {
+            value: value,
+            enumerable: true,
+            configurable: true,
+            writable: true
+        });
+    } else {
+        obj[key] = value;
+    }
+    return obj;
+}
+function _getRequireWildcardCache(nodeInterop) {
+    if (typeof WeakMap !== "function") return null;
+    var cacheBabelInterop = new WeakMap();
+    var cacheNodeInterop = new WeakMap();
+    return (_getRequireWildcardCache = function(nodeInterop) {
+        return nodeInterop ? cacheNodeInterop : cacheBabelInterop;
+    })(nodeInterop);
+}
+function _interop_require_wildcard(obj, nodeInterop) {
+    if (!nodeInterop && obj && obj.__esModule) {
+        return obj;
+    }
+    if (obj === null || typeof obj !== "object" && typeof obj !== "function") {
+        return {
+            default: obj
+        };
+    }
+    var cache = _getRequireWildcardCache(nodeInterop);
+    if (cache && cache.has(obj)) {
+        return cache.get(obj);
+    }
+    var newObj = {
+        __proto__: null
+    };
+    var hasPropertyDescriptor = Object.defineProperty && Object.getOwnPropertyDescriptor;
+    for(var key in obj){
+        if (key !== "default" && Object.prototype.hasOwnProperty.call(obj, key)) {
+            var desc = hasPropertyDescriptor ? Object.getOwnPropertyDescriptor(obj, key) : null;
+            if (desc && (desc.get || desc.set)) {
+                Object.defineProperty(newObj, key, desc);
+            } else {
+                newObj[key] = obj[key];
+            }
+        }
+    }
+    newObj.default = obj;
+    if (cache) {
+        cache.set(obj, newObj);
+    }
+    return newObj;
+}
+class ResourceManager extends _events.EventEmitter {
+    /**
+   * Check if resources are available for the given requirement
+   */ async checkResourceAvailability(requirement) {
+        await this.updateCurrentUsage();
+        // Calculate projected usage
+        const projectedCpu = this.currentUsage.cpu_percent + requirement.cpu_percent;
+        const projectedMemory = this.currentUsage.memory_mb + requirement.memory_mb;
+        const projectedTests = this.currentUsage.active_tests + requirement.concurrent_tests;
+        // Check against limits
+        const cpuOk = projectedCpu <= this.limits.max_cpu_percent;
+        const memoryOk = projectedMemory <= this.limits.max_memory_mb;
+        const testsOk = projectedTests <= this.limits.max_concurrent_tests;
+        // Priority-based overrides
+        if (requirement.priority === 'critical') {
+            // Critical tasks can use emergency thresholds
+            const emergencyCpuOk = projectedCpu <= this.limits.emergency_threshold_cpu;
+            const emergencyMemoryOk = projectedMemory <= this.limits.emergency_threshold_memory;
+            return emergencyCpuOk && emergencyMemoryOk;
+        }
+        return cpuOk && memoryOk && testsOk;
+    }
+    /**
+   * Reserve resources for a specific task
+   */ async reserveResources(taskId, requirement) {
+        const isAvailable = await this.checkResourceAvailability(requirement);
+        if (!isAvailable) {
+            throw new Error(`Insufficient resources for task ${taskId}`);
+        }
+        this.reservedResources.set(taskId, requirement);
+        this.emit('resourcesReserved', {
+            taskId,
+            requirement
+        });
+    }
+    /**
+   * Release resources for a specific task
+   */ async releaseResources(taskId) {
+        const requirement = this.reservedResources.get(taskId);
+        if (requirement) {
+            this.reservedResources.delete(taskId);
+            this.emit('resourcesReleased', {
+                taskId,
+                requirement
+            });
+        }
+    }
+    /**
+   * Get current resource usage
+   */ getCurrentUsage() {
+        return {
+            ...this.currentUsage
+        };
+    }
+    /**
+   * Get resource limits
+   */ getLimits() {
+        return {
+            ...this.limits
+        };
+    }
+    /**
+   * Set resource limits
+   */ setLimits(newLimits) {
+        this.limits = {
+            ...this.limits,
+            ...newLimits
+        };
+        this.emit('limitsUpdated', this.limits);
+    }
+    /**
+   * Initialize the resource manager
+   */ async initialize() {
+        await this.updateCurrentUsage();
+        console.log('ResourceManager initialized');
+    }
+    /**
+   * Cleanup and shutdown the resource manager
+   */ async cleanup() {
+        this.destroy();
+        console.log('ResourceManager cleaned up');
+    }
+    /**
+   * Get reserved resources summary
+   */ getReservedResourcesSummary() {
+        let totalCpu = 0;
+        let totalMemory = 0;
+        let totalTests = 0;
+        for (const requirement of this.reservedResources.values()){
+            totalCpu += requirement.cpu_percent;
+            totalMemory += requirement.memory_mb;
+            totalTests += requirement.concurrent_tests;
+        }
+        return {
+            total_reserved_cpu: totalCpu,
+            total_reserved_memory: totalMemory,
+            total_reserved_tests: totalTests,
+            active_reservations: this.reservedResources.size
+        };
+    }
+    /**
+   * Check if system is under stress
+   */ isSystemUnderStress() {
+        const cpuStress = this.currentUsage.cpu_percent > this.limits.max_cpu_percent * 0.8;
+        const memoryStress = this.currentUsage.memory_mb > this.limits.max_memory_mb * 0.8;
+        const loadStress = this.currentUsage.load_average[0] > _os.cpus().length * 0.8;
+        return cpuStress || memoryStress || loadStress;
+    }
+    /**
+   * Get optimal concurrency level based on current resources
+   */ getOptimalConcurrency() {
+        const cpuBasedConcurrency = Math.max(1, Math.floor((this.limits.max_cpu_percent - this.currentUsage.cpu_percent) / 15));
+        const memoryBasedConcurrency = Math.max(1, Math.floor((this.limits.max_memory_mb - this.currentUsage.memory_mb) / 100));
+        return Math.min(cpuBasedConcurrency, memoryBasedConcurrency, this.limits.max_concurrent_tests);
+    }
+    /**
+   * Update current resource usage
+   */ async updateCurrentUsage() {
+        return new Promise((resolve)=>{
+            // Use a simple CPU usage calculation
+            const memUsage = process.memoryUsage();
+            const loadAvg = _os.loadavg();
+            // Estimate CPU usage from load average
+            const cpuCount = _os.cpus().length;
+            const estimatedCpu = Math.min(100, loadAvg[0] / cpuCount * 100);
+            this.currentUsage = {
+                cpu_percent: estimatedCpu,
+                memory_mb: Math.floor(memUsage.rss / 1024 / 1024),
+                memory_total_mb: Math.floor(_os.totalmem() / 1024 / 1024),
+                active_tests: this.reservedResources.size,
+                queue_length: 0,
+                load_average: loadAvg,
+                timestamp: new Date()
+            };
+            resolve();
+        });
+    }
+    /**
+   * Start monitoring system resources
+   */ startMonitoring() {
+        this.monitoringInterval = setInterval(async ()=>{
+            await this.updateCurrentUsage();
+            // Emit events for significant changes
+            if (this.isSystemUnderStress()) {
+                this.emit('systemStress', this.currentUsage);
+            }
+            // Check for resource violations
+            if (this.currentUsage.cpu_percent > this.limits.emergency_threshold_cpu) {
+                this.emit('emergencyThreshold', {
+                    type: 'cpu',
+                    usage: this.currentUsage
+                });
+            }
+            if (this.currentUsage.memory_mb > this.limits.emergency_threshold_memory) {
+                this.emit('emergencyThreshold', {
+                    type: 'memory',
+                    usage: this.currentUsage
+                });
+            }
+            this.emit('resourcesUpdated', this.currentUsage);
+        }, 5000); // Update every 5 seconds
+    }
+    /**
+   * Stop monitoring and cleanup
+   */ destroy() {
+        if (this.monitoringInterval) {
+            clearInterval(this.monitoringInterval);
+        }
+        this.removeAllListeners();
+    }
+    constructor(limits){
+        super(), _define_property(this, "reservedResources", new Map()), _define_property(this, "currentUsage", void 0), _define_property(this, "limits", void 0), _define_property(this, "monitoringInterval", void 0);
+        this.limits = {
+            max_cpu_percent: 80,
+            max_memory_mb: Math.floor(_os.totalmem() / 1024 / 1024 * 0.8),
+            max_concurrent_tests: 10,
+            emergency_threshold_cpu: 90,
+            emergency_threshold_memory: Math.floor(_os.totalmem() / 1024 / 1024 * 0.9),
+            ...limits
+        };
+        this.currentUsage = {
+            cpu_percent: 0,
+            memory_mb: 0,
+            memory_total_mb: Math.floor(_os.totalmem() / 1024 / 1024),
+            active_tests: 0,
+            queue_length: 0,
+            load_average: _os.loadavg(),
+            timestamp: new Date()
+        };
+        this.startMonitoring();
+    }
+}

@@ -1,0 +1,162 @@
+7f036ae07cf8221a6a46b298d3dd2535
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+const _supertest = /*#__PURE__*/ _interop_require_default(require("supertest"));
+const _assert = /*#__PURE__*/ _interop_require_default(require("assert"));
+const _server = /*#__PURE__*/ _interop_require_default(require("../../server"));
+const _EventStore = require("../../services/analytics/EventStore");
+const _AnalyticsEngine = require("../../services/analytics/AnalyticsEngine");
+function _interop_require_default(obj) {
+    return obj && obj.__esModule ? obj : {
+        default: obj
+    };
+}
+describe('Analytics Dashboard Integration Tests', ()=>{
+    let eventStore;
+    let analyticsEngine;
+    const testCardId = 'test-card-analytics-123';
+    const testSessionId = 'test-session-analytics-456';
+    beforeEach(async ()=>{
+        eventStore = new _EventStore.EventStore();
+        analyticsEngine = new _AnalyticsEngine.AnalyticsEngine(eventStore);
+        // Initialize analytics with test data
+        await eventStore.recordEvent({
+            event_type: 'test_execution_start',
+            entity_id: testCardId,
+            entity_type: 'prompt_card',
+            data: {
+                testSessionId,
+                cardId: testCardId
+            },
+            timestamp: new Date(),
+            metadata: {
+                testType: 'integration',
+                userAgent: 'test-runner'
+            }
+        });
+    });
+    describe('Frontend-Backend Analytics Communication', ()=>{
+        it('should handle analytics data retrieval for dashboard', async ()=>{
+            const response = await (0, _supertest.default)(_server.default).get(`/api/analytics/dashboard/${testCardId}`).expect(200);
+            (0, _assert.default)(response.body.success === true);
+            expect(response.body.data).to.have.property('metrics');
+            expect(response.body.data).to.have.property('performance');
+            expect(response.body.data).to.have.property('costAnalysis');
+            expect(response.body.data).to.have.property('timeSeriesData');
+        });
+        it('should handle real-time analytics updates', async ()=>{
+            // Record multiple events
+            await eventStore.recordEvent({
+                event_type: 'test_execution_complete',
+                entity_id: testCardId,
+                entity_type: 'prompt_card',
+                data: {
+                    testSessionId,
+                    cardId: testCardId,
+                    duration: 1500,
+                    success: true,
+                    tokensUsed: 250,
+                    cost: 0.025
+                },
+                timestamp: new Date()
+            });
+            await eventStore.recordEvent({
+                event_type: 'test_execution_complete',
+                entity_id: testCardId,
+                entity_type: 'prompt_card',
+                data: {
+                    testSessionId: testSessionId + '-2',
+                    cardId: testCardId,
+                    duration: 2000,
+                    success: false,
+                    tokensUsed: 300,
+                    cost: 0.030
+                },
+                timestamp: new Date()
+            });
+            // Test real-time metrics endpoint
+            const response = await (0, _supertest.default)(_server.default).get(`/api/analytics/metrics/real-time/${testCardId}`).expect(200);
+            (0, _assert.default)(response.body.success === true);
+            expect(response.body.data).to.have.property('activeTests');
+            expect(response.body.data).to.have.property('recentCompletions');
+            expect(response.body.data).to.have.property('averageExecutionTime');
+        });
+    });
+    describe('Performance Analytics', ()=>{
+        it('should calculate and store performance metrics correctly', async ()=>{
+            // Record test execution with performance data
+            await eventStore.recordEvent({
+                event_type: 'test_execution_complete',
+                entity_id: testCardId,
+                entity_type: 'prompt_card',
+                data: {
+                    testSessionId,
+                    cardId: testCardId,
+                    duration: 1500,
+                    success: true,
+                    tokensUsed: 250,
+                    cost: 0.025,
+                    model: 'gpt-4'
+                },
+                timestamp: new Date(),
+                metadata: {
+                    promptLength: 120,
+                    responseLength: 85,
+                    cacheHit: false
+                }
+            });
+            // Get performance metrics
+            const response = await (0, _supertest.default)(_server.default).get(`/api/analytics/performance/${testCardId}`).expect(200);
+            (0, _assert.default)(response.body.success === true);
+            expect(response.body.data).to.have.property('averageExecutionTime');
+            expect(response.body.data).to.have.property('successRate');
+            expect(response.body.data).to.have.property('tokenUsageStats');
+            expect(response.body.data.averageExecutionTime).to.be.a('number');
+            expect(response.body.data.successRate).to.be.within(0, 1);
+        });
+    });
+    describe('Cost Analytics', ()=>{
+        it('should track costs across multiple models correctly', async ()=>{
+            const executions = [
+                {
+                    model: 'gpt-4',
+                    tokens: 250,
+                    cost: 0.025
+                },
+                {
+                    model: 'gpt-3.5-turbo',
+                    tokens: 300,
+                    cost: 0.015
+                },
+                {
+                    model: 'claude-2',
+                    tokens: 200,
+                    cost: 0.020
+                }
+            ];
+            for (const exec of executions){
+                await eventStore.recordEvent({
+                    event_type: 'test_execution_complete',
+                    entity_id: testCardId,
+                    entity_type: 'prompt_card',
+                    data: {
+                        testSessionId: `cost-${exec.tokens}`,
+                        cardId: testCardId,
+                        tokensUsed: exec.tokens,
+                        cost: exec.cost,
+                        model: exec.model
+                    },
+                    timestamp: new Date()
+                });
+            }
+            // Get cost analytics
+            const response = await (0, _supertest.default)(_server.default).get(`/api/analytics/costs/${testCardId}`).expect(200);
+            (0, _assert.default)(response.body.success === true);
+            expect(response.body.data).to.have.property('totalCost');
+            expect(response.body.data).to.have.property('costBreakdown');
+            expect(response.body.data.totalCost).to.be.approximately(0.060, 0.001);
+        });
+    });
+});

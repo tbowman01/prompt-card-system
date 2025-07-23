@@ -1,0 +1,165 @@
+2966a783ab89ae58773209aba819e32f
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+function _export(target, all) {
+    for(var name in all)Object.defineProperty(target, name, {
+        enumerable: true,
+        get: Object.getOwnPropertyDescriptor(all, name).get
+    });
+}
+_export(exports, {
+    get handleValidationErrors () {
+        return handleValidationErrors;
+    },
+    get limitRequestSize () {
+        return limitRequestSize;
+    },
+    get promptCardValidation () {
+        return promptCardValidation;
+    },
+    get sanitizeInput () {
+        return sanitizeInput;
+    },
+    get sanitizeRequestBody () {
+        return sanitizeRequestBody;
+    },
+    get testCaseValidation () {
+        return testCaseValidation;
+    },
+    get validateEmail () {
+        return validateEmail;
+    },
+    get validatePromptCard () {
+        return validatePromptCard;
+    },
+    get validateRequest () {
+        return validateRequest;
+    },
+    get validateUrl () {
+        return validateUrl;
+    },
+    get validation () {
+        return validation;
+    }
+});
+const _joi = /*#__PURE__*/ _interop_require_default(require("joi"));
+const _expressvalidator = require("express-validator");
+const _sanitizehtml = /*#__PURE__*/ _interop_require_default(require("sanitize-html"));
+const _validator = /*#__PURE__*/ _interop_require_default(require("validator"));
+function _interop_require_default(obj) {
+    return obj && obj.__esModule ? obj : {
+        default: obj
+    };
+}
+function validation(schema) {
+    return (req, res, next)=>{
+        const { error, value } = schema.validate(req.body);
+        if (error) {
+            res.status(400).json({
+                error: 'Validation failed',
+                details: error.details.map((detail)=>({
+                        field: detail.path.join('.'),
+                        message: detail.message
+                    }))
+            });
+            return;
+        }
+        req.body = value;
+        next();
+    };
+}
+function validateRequest(schema) {
+    return validation(schema);
+}
+const promptCardValidation = _joi.default.object({
+    title: _joi.default.string().min(1).max(200).required().trim(),
+    prompt_template: _joi.default.string().min(1).max(5000).required(),
+    variables: _joi.default.array().items(_joi.default.string()).default([]),
+    category_id: _joi.default.number().integer().positive().optional(),
+    tags: _joi.default.array().items(_joi.default.string().max(50)).default([]),
+    description: _joi.default.string().max(1000).optional().allow(''),
+    is_active: _joi.default.boolean().default(true)
+});
+const testCaseValidation = _joi.default.object({
+    prompt_card_id: _joi.default.number().integer().positive().required(),
+    input_variables: _joi.default.object().required(),
+    expected_output: _joi.default.string().required(),
+    assertion_type: _joi.default.string().valid('contains', 'equals', 'regex', 'length', 'custom').required(),
+    assertion_value: _joi.default.string().required(),
+    description: _joi.default.string().max(500).optional().allow('')
+});
+function sanitizeInput(input) {
+    return (0, _sanitizehtml.default)(input, {
+        allowedTags: [],
+        allowedAttributes: {}
+    });
+}
+function validateEmail(email) {
+    return _validator.default.isEmail(email);
+}
+function validateUrl(url) {
+    return _validator.default.isURL(url);
+}
+function sanitizeRequestBody(req, res, next) {
+    if (req.body && typeof req.body === 'object') {
+        req.body = sanitizeObjectInputs(req.body);
+    }
+    next();
+}
+function handleValidationErrors(req, res, next) {
+    const errors = (0, _expressvalidator.validationResult)(req);
+    if (!errors.isEmpty()) {
+        res.status(400).json({
+            error: 'Validation failed',
+            details: errors.array()
+        });
+        return;
+    }
+    next();
+}
+function limitRequestSize(limit) {
+    return (req, res, next)=>{
+        const contentLength = parseInt(req.get('content-length') || '0');
+        if (contentLength > limit) {
+            res.status(413).json({
+                error: 'Request entity too large',
+                maxSize: limit,
+                actualSize: contentLength
+            });
+            return;
+        }
+        next();
+    };
+}
+function validatePromptCard(req, res, next) {
+    const { error, value } = promptCardValidation.validate(req.body);
+    if (error) {
+        res.status(400).json({
+            error: 'Validation failed',
+            details: error.details.map((detail)=>({
+                    field: detail.path.join('.'),
+                    message: detail.message
+                }))
+        });
+        return;
+    }
+    req.body = value;
+    next();
+}
+// Helper function to sanitize object inputs recursively
+function sanitizeObjectInputs(obj) {
+    if (typeof obj === 'string') {
+        return sanitizeInput(obj);
+    } else if (Array.isArray(obj)) {
+        return obj.map((item)=>sanitizeObjectInputs(item));
+    } else if (obj && typeof obj === 'object') {
+        const sanitized = {};
+        for (const [key, value] of Object.entries(obj)){
+            sanitized[key] = sanitizeObjectInputs(value);
+        }
+        return sanitized;
+    }
+    return obj;
+}

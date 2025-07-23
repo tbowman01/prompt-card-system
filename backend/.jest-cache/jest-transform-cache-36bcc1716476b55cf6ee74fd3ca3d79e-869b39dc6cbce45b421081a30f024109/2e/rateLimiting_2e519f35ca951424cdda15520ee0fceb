@@ -1,0 +1,258 @@
+77671df8741e5d902c1588580eb13944
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+function _export(target, all) {
+    for(var name in all)Object.defineProperty(target, name, {
+        enumerable: true,
+        get: Object.getOwnPropertyDescriptor(all, name).get
+    });
+}
+_export(exports, {
+    get apiRateLimit () {
+        return apiRateLimit;
+    },
+    get authRateLimit () {
+        return authRateLimit;
+    },
+    get dynamicRateLimit () {
+        return dynamicRateLimit;
+    },
+    get endpointRateLimits () {
+        return endpointRateLimits;
+    },
+    get generalRateLimit () {
+        return generalRateLimit;
+    },
+    get getRateLimitStats () {
+        return getRateLimitStats;
+    },
+    get heavyOperationRateLimit () {
+        return heavyOperationRateLimit;
+    },
+    get speedLimiter () {
+        return speedLimiter;
+    },
+    get testExecutionRateLimit () {
+        return testExecutionRateLimit;
+    },
+    get uploadRateLimit () {
+        return uploadRateLimit;
+    }
+});
+const _expressratelimit = /*#__PURE__*/ _interop_require_default(require("express-rate-limit"));
+const _expressslowdown = /*#__PURE__*/ _interop_require_default(require("express-slow-down"));
+const _structuredLogging = require("./structuredLogging");
+function _interop_require_default(obj) {
+    return obj && obj.__esModule ? obj : {
+        default: obj
+    };
+}
+// Rate limit violation tracking
+const rateLimitViolations = new Map();
+// Enhanced rate limit handler with security logging
+const createRateLimitHandler = (limitType, limit, windowMs)=>{
+    return (req, res)=>{
+        const clientId = req.ip || 'unknown';
+        const now = new Date();
+        // Track violations
+        const violations = rateLimitViolations.get(clientId) || {
+            count: 0,
+            lastViolation: new Date(0)
+        };
+        violations.count += 1;
+        violations.lastViolation = now;
+        rateLimitViolations.set(clientId, violations);
+        // Log security event
+        (0, _structuredLogging.logSecurityEvent)('rate_limit', req, {
+            limitType,
+            limit,
+            windowMs,
+            violationCount: violations.count,
+            userAgent: req.headers['user-agent'],
+            path: req.path
+        });
+        // Enhanced response with security headers
+        res.status(429).json({
+            success: false,
+            error: 'Rate limit exceeded',
+            type: limitType,
+            limit,
+            windowMs,
+            retryAfter: Math.round(windowMs / 1000),
+            ip: req.ip,
+            path: req.path,
+            violationCount: violations.count,
+            timestamp: now.toISOString()
+        });
+    };
+};
+const generalRateLimit = (0, _expressratelimit.default)({
+    windowMs: 15 * 60 * 1000,
+    max: 100,
+    message: {
+        success: false,
+        error: 'Too many requests from this IP, please try again later.',
+        retryAfter: 15 * 60 // seconds
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+    // store: new RedisStore({
+    //   sendCommand: (...args: string[]) => redis.call(...args),
+    // }),
+    handler: createRateLimitHandler('general', 100, 15 * 60 * 1000)
+});
+const authRateLimit = (0, _expressratelimit.default)({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    message: {
+        success: false,
+        error: 'Too many authentication attempts, please try again later.',
+        retryAfter: 15 * 60
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+    skipSuccessfulRequests: true,
+    handler: createRateLimitHandler('authentication', 5, 15 * 60 * 1000)
+});
+const apiRateLimit = (0, _expressratelimit.default)({
+    windowMs: 1 * 60 * 1000,
+    max: 50,
+    message: {
+        success: false,
+        error: 'API rate limit exceeded',
+        retryAfter: 60
+    },
+    standardHeaders: true,
+    legacyHeaders: false
+});
+const testExecutionRateLimit = (0, _expressratelimit.default)({
+    windowMs: 5 * 60 * 1000,
+    max: 20,
+    message: {
+        success: false,
+        error: 'Test execution rate limit exceeded',
+        retryAfter: 5 * 60
+    },
+    standardHeaders: true,
+    legacyHeaders: false
+});
+const speedLimiter = (0, _expressslowdown.default)({
+    windowMs: 15 * 60 * 1000,
+    delayAfter: 50,
+    delayMs: (used)=>{
+        return (used - 50) * 500; // Add 500ms delay for each request after delayAfter
+    },
+    maxDelayMs: 10000,
+    skipFailedRequests: false,
+    skipSuccessfulRequests: false
+});
+const heavyOperationRateLimit = (0, _expressratelimit.default)({
+    windowMs: 60 * 60 * 1000,
+    max: 10,
+    message: {
+        success: false,
+        error: 'Heavy operation rate limit exceeded',
+        retryAfter: 60 * 60
+    },
+    standardHeaders: true,
+    legacyHeaders: false
+});
+const uploadRateLimit = (0, _expressratelimit.default)({
+    windowMs: 60 * 60 * 1000,
+    max: 20,
+    message: {
+        success: false,
+        error: 'Upload rate limit exceeded',
+        retryAfter: 60 * 60
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: createRateLimitHandler('upload', 20, 60 * 60 * 1000)
+});
+const endpointRateLimits = {
+    // Critical security endpoints
+    '/api/auth/login': (0, _expressratelimit.default)({
+        windowMs: 15 * 60 * 1000,
+        max: 3,
+        handler: createRateLimitHandler('login', 3, 15 * 60 * 1000)
+    }),
+    '/api/auth/register': (0, _expressratelimit.default)({
+        windowMs: 60 * 60 * 1000,
+        max: 3,
+        handler: createRateLimitHandler('register', 3, 60 * 60 * 1000)
+    }),
+    '/api/auth/refresh': (0, _expressratelimit.default)({
+        windowMs: 5 * 60 * 1000,
+        max: 10,
+        handler: createRateLimitHandler('refresh', 10, 5 * 60 * 1000)
+    }),
+    // API endpoints
+    '/api/prompt-cards': (0, _expressratelimit.default)({
+        windowMs: 1 * 60 * 1000,
+        max: 30,
+        handler: createRateLimitHandler('prompt-cards', 30, 1 * 60 * 1000)
+    }),
+    '/api/test-execution': (0, _expressratelimit.default)({
+        windowMs: 5 * 60 * 1000,
+        max: 15,
+        handler: createRateLimitHandler('test-execution', 15, 5 * 60 * 1000)
+    }),
+    '/api/analytics': (0, _expressratelimit.default)({
+        windowMs: 1 * 60 * 1000,
+        max: 25,
+        handler: createRateLimitHandler('analytics', 25, 1 * 60 * 1000)
+    }),
+    '/api/security': (0, _expressratelimit.default)({
+        windowMs: 5 * 60 * 1000,
+        max: 10,
+        handler: createRateLimitHandler('security', 10, 5 * 60 * 1000)
+    })
+};
+const dynamicRateLimit = (req, res, next)=>{
+    const clientId = req.ip || 'unknown';
+    const violations = rateLimitViolations.get(clientId);
+    // If client has multiple violations, apply stricter limits
+    if (violations && violations.count > 5) {
+        const timeSinceLastViolation = Date.now() - violations.lastViolation.getTime();
+        // If recent violations, block temporarily
+        if (timeSinceLastViolation < 60 * 60 * 1000) {
+            (0, _structuredLogging.logSecurityEvent)('suspicious_activity', req, {
+                reason: 'Multiple rate limit violations',
+                violationCount: violations.count,
+                action: 'temporary_block'
+            });
+            res.status(429).json({
+                success: false,
+                error: 'Temporary block due to suspicious activity',
+                retryAfter: 3600,
+                violationCount: violations.count
+            });
+            return;
+        }
+    }
+    next();
+};
+// Cleanup expired violation records
+setInterval(()=>{
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    for (const [clientId, violations] of rateLimitViolations.entries()){
+        if (violations.lastViolation < oneHourAgo) {
+            rateLimitViolations.delete(clientId);
+        }
+    }
+}, 60 * 60 * 1000); // Clean up every hour
+const getRateLimitStats = ()=>{
+    const totalViolations = Array.from(rateLimitViolations.values()).reduce((sum, violations)=>sum + violations.count, 0);
+    const uniqueClients = rateLimitViolations.size;
+    const topViolators = Array.from(rateLimitViolations.entries()).map(([clientId, violations])=>({
+            clientId,
+            ...violations
+        })).sort((a, b)=>b.count - a.count).slice(0, 10);
+    return {
+        totalViolations,
+        uniqueClients,
+        topViolators
+    };
+};
