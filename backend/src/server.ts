@@ -45,6 +45,7 @@ import trainingRoutes from './routes/training';
 import { authRoutes } from './routes/auth';
 import loadTestingRoutes from './routes/loadTesting';
 import { securityRoutes } from './routes/security';
+import { samplePromptRoutes } from './routes/samplePrompts';
 import { initializeOptimizationServices } from './services/optimization';
 import { performanceMonitor } from './services/performance/PerformanceMonitor';
 import { loadTestScheduler } from './services/performance/LoadTestScheduler';
@@ -235,6 +236,7 @@ app.use('/api/performance', apiRateLimit, performanceRoutes);
 app.use('/api/training', heavyOperationRateLimit, trainingRoutes); // Heavy operations
 app.use('/api/load-testing', loadTestingRoutes);
 app.use('/api/security', securityRoutes);
+app.use('/api/sample-prompts', apiRateLimit, samplePromptRoutes);
 
 // Error handling middleware
 app.use(errorHandler);

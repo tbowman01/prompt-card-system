@@ -3,6 +3,13 @@ module.exports = {
   preset: undefined, // Remove ts-jest preset for SWC
   testEnvironment: 'node',
   roots: ['<rootDir>/src'],
+  // Fix coverage paths
+  coveragePathIgnorePatterns: [
+    '/node_modules/',
+    '<rootDir>/dist/',
+    '<rootDir>/coverage/',
+    '<rootDir>/.jest-cache/'
+  ],
   testMatch: ['**/__tests__/**/*.ts', '**/?(*.)+(spec|test).ts'],
   transform: {
     '^.+\\.(t|j)sx?$': ['@swc/jest', {
@@ -19,7 +26,7 @@ module.exports = {
       module: {
         type: 'commonjs'
       },
-      sourceMaps: true
+      sourceMaps: 'inline' // Changed from true to inline for better coverage support
     }]
   },
   setupFilesAfterEnv: ['<rootDir>/src/tests/setup.ts'],
@@ -29,8 +36,12 @@ module.exports = {
     '!src/**/*.d.ts',
     '!src/tests/**',
     '!src/**/*.test.ts',
-    '!src/**/*.spec.ts'
+    '!src/**/*.spec.ts',
+    '!src/**/index.ts' // Exclude index files that might be just exports
   ],
+  // Ensure coverage is collected from all files, not just tested ones
+  collectCoverage: false, // Set to false by default, enabled via --coverage flag
+  coverageProvider: 'v8', // Use V8 coverage provider for better accuracy with SWC
   testTimeout: 30000, // Speed Optimizer: Reduced from 120s to 30s for faster feedback
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1'

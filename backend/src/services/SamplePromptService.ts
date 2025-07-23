@@ -1,0 +1,466 @@
+import { db } from '../database/connection';
+import { PromptCard, CreatePromptCardRequest } from '../types/promptCard';
+
+export interface SamplePrompt {
+  title: string;
+  description: string;
+  prompt_template: string;
+  variables: string[];
+  category: string;
+  tags: string[];
+}
+
+export class SamplePromptService {
+  private static instance: SamplePromptService;
+  private initialized = false;
+
+  public static getInstance(): SamplePromptService {
+    if (!SamplePromptService.instance) {
+      SamplePromptService.instance = new SamplePromptService();
+    }
+    return SamplePromptService.instance;
+  }
+
+  /**
+   * Get all predefined sample prompts
+   */
+  public getSamplePrompts(): SamplePrompt[] {
+    return [
+      {
+        title: "Creative Story Generator",
+        description: "Generate engaging creative stories based on specified genre, characters, and setting. Perfect for creative writing, content creation, and storytelling exercises.",
+        prompt_template: `Write a {{genre}} story that takes place in {{setting}}. The main character is {{character_name}}, who is {{character_description}}. 
+
+The story should:
+- Be approximately {{word_count}} words long
+- Include the theme of {{theme}}
+- Have a clear beginning, middle, and end
+- Be appropriate for {{target_audience}}
+
+Style: {{writing_style}}
+
+Create an engaging narrative that captures the reader's attention from the first sentence.`,
+        variables: ["genre", "setting", "character_name", "character_description", "word_count", "theme", "target_audience", "writing_style"],
+        category: "creative",
+        tags: ["creative writing", "storytelling", "narrative", "fiction"]
+      },
+      {
+        title: "Technical Documentation Assistant",
+        description: "Create comprehensive technical documentation for software projects, APIs, and systems. Ideal for developers, technical writers, and project managers.",
+        prompt_template: `Create technical documentation for {{project_name}}.
+
+Project Type: {{project_type}}
+Technology Stack: {{tech_stack}}
+Target Audience: {{audience_level}}
+
+Please include the following sections:
+
+1. **Overview**
+   - Brief description of {{project_name}}
+   - Key features and capabilities
+   - Use cases and benefits
+
+2. **Getting Started**
+   - Prerequisites and requirements
+   - Installation instructions
+   - Basic setup and configuration
+
+3. **{{documentation_focus}}**
+   - Detailed implementation guide
+   - Code examples and best practices
+   - Common patterns and conventions
+
+4. **API Reference** (if applicable)
+   - Endpoint documentation
+   - Request/response examples
+   - Error handling and status codes
+
+5. **Troubleshooting**
+   - Common issues and solutions
+   - Debugging tips
+   - FAQ section
+
+Format: Use clear markdown formatting with code blocks, tables, and examples where appropriate.
+Tone: {{tone}} and suitable for {{audience_level}} developers.`,
+        variables: ["project_name", "project_type", "tech_stack", "audience_level", "documentation_focus", "tone"],
+        category: "technical",
+        tags: ["documentation", "technical writing", "API", "software", "development"]
+      },
+      {
+        title: "Data Analysis Query Builder",
+        description: "Generate comprehensive data analysis queries and insights for business intelligence, research, and decision-making processes.",
+        prompt_template: `Perform a data analysis on {{dataset_name}} with the following specifications:
+
+**Analysis Objective:** {{analysis_goal}}
+**Data Source:** {{data_source}}
+**Time Period:** {{time_period}}
+**Key Metrics:** {{key_metrics}}
+
+Please provide:
+
+1. **Data Exploration**
+   - Overview of the dataset structure
+   - Key variables and their distributions
+   - Data quality assessment and missing values
+
+2. **Statistical Analysis**
+   - Descriptive statistics for {{key_metrics}}
+   - Correlation analysis between variables
+   - Trend analysis over {{time_period}}
+
+3. **Insights and Findings**
+   - Key patterns and relationships discovered
+   - Significant trends or anomalies
+   - Business implications of findings
+
+4. **Query Examples**
+   - SQL/Python code for key calculations
+   - Visualization recommendations
+   - Data filtering and aggregation methods
+
+5. **Recommendations**
+   - Actionable insights based on analysis
+   - Further analysis suggestions
+   - Data collection improvements
+
+Analysis Level: {{complexity_level}}
+Output Format: {{output_format}}
+Include visualizations: {{include_charts}}`,
+        variables: ["dataset_name", "analysis_goal", "data_source", "time_period", "key_metrics", "complexity_level", "output_format", "include_charts"],
+        category: "analytics",
+        tags: ["data analysis", "business intelligence", "statistics", "SQL", "insights"]
+      },
+      {
+        title: "Problem-Solving Framework",
+        description: "Systematic approach to analyzing and solving complex problems using structured thinking methodologies. Great for consulting, project management, and strategic planning.",
+        prompt_template: `Analyze and provide a solution framework for the following problem:
+
+**Problem Statement:** {{problem_description}}
+**Context:** {{problem_context}}
+**Stakeholders:** {{stakeholders}}
+**Constraints:** {{constraints}}
+**Timeline:** {{timeline}}
+
+Using the {{methodology}} approach, please provide:
+
+1. **Problem Definition**
+   - Root cause analysis
+   - Problem scope and boundaries
+   - Impact assessment on {{stakeholders}}
+
+2. **Solution Framework**
+   - Multiple solution alternatives
+   - Pros and cons for each approach
+   - Resource requirements and feasibility
+
+3. **Implementation Plan**
+   - Step-by-step action plan
+   - Timeline and milestones
+   - Risk assessment and mitigation strategies
+
+4. **Success Metrics**
+   - Key performance indicators
+   - Measurement methods
+   - Success criteria definition
+
+5. **Recommendations**
+   - Preferred solution with justification
+   - Next steps and immediate actions
+   - Long-term considerations
+
+Analysis Depth: {{analysis_depth}}
+Decision Framework: {{decision_criteria}}
+Priority Level: {{priority_level}}`,
+        variables: ["problem_description", "problem_context", "stakeholders", "constraints", "timeline", "methodology", "analysis_depth", "decision_criteria", "priority_level"],
+        category: "problem-solving",
+        tags: ["problem solving", "analysis", "strategy", "consulting", "framework"]
+      },
+      {
+        title: "Code Generation Assistant",
+        description: "Generate well-structured, documented code with best practices, error handling, and comprehensive testing. Perfect for rapid prototyping and development.",
+        prompt_template: `Generate {{language}} code for the following requirements:
+
+**Project:** {{project_name}}
+**Functionality:** {{functionality_description}}
+**Framework/Library:** {{framework}}
+**Code Style:** {{coding_style}}
+
+Requirements:
+{{requirements}}
+
+Please provide:
+
+1. **Main Implementation**
+   - Clean, well-structured code
+   - Proper error handling and validation
+   - Performance optimizations where applicable
+   - Security best practices
+
+2. **Documentation**
+   - Comprehensive code comments
+   - Function/method documentation
+   - Usage examples
+   - API documentation (if applicable)
+
+3. **Testing**
+   - Unit test cases
+   - Integration test examples
+   - Edge case handling
+   - Mock data and fixtures
+
+4. **Configuration**
+   - Environment setup instructions
+   - Dependencies and requirements
+   - Configuration files (if needed)
+   - Deployment considerations
+
+Code Quality Standards:
+- Follow {{coding_style}} conventions
+- Include type hints/annotations (where applicable)
+- Implement proper logging
+- Handle edge cases and errors gracefully
+- Optimize for {{performance_priority}}
+
+Target Environment: {{target_environment}}
+Complexity Level: {{complexity_level}}`,
+        variables: ["language", "project_name", "functionality_description", "framework", "coding_style", "requirements", "performance_priority", "target_environment", "complexity_level"],
+        category: "development",
+        tags: ["code generation", "programming", "development", "testing", "best practices"]
+      },
+      {
+        title: "Business Strategy Consultant",
+        description: "Comprehensive business analysis and strategic planning assistant for market research, competitive analysis, and growth strategies.",
+        prompt_template: `Provide a strategic business analysis for {{company_name}} in the {{industry}} industry.
+
+**Company Profile:**
+- Company: {{company_name}}
+- Industry: {{industry}}
+- Current Stage: {{business_stage}}
+- Market Focus: {{target_market}}
+- Key Challenge: {{primary_challenge}}
+
+**Analysis Framework:**
+
+1. **Market Analysis**
+   - Industry overview and trends
+   - Market size and growth potential
+   - Key market drivers and barriers
+   - Regulatory environment impact
+
+2. **Competitive Landscape**
+   - Direct and indirect competitors
+   - Competitive advantages and gaps
+   - Market positioning analysis
+   - Pricing strategy comparison
+
+3. **SWOT Analysis**
+   - Internal strengths and capabilities
+   - Areas for improvement
+   - Market opportunities identification
+   - Threat assessment and risk factors
+
+4. **Strategic Recommendations**
+   - Growth strategy options
+   - Market entry/expansion strategies
+   - Operational efficiency improvements
+   - Innovation and differentiation opportunities
+
+5. **Implementation Roadmap**
+   - Priority initiatives and timeline
+   - Resource allocation requirements
+   - Key milestones and metrics
+   - Risk mitigation strategies
+
+**Specific Focus Areas:**
+- {{focus_area_1}}
+- {{focus_area_2}}
+- {{focus_area_3}}
+
+Analysis Depth: {{analysis_depth}}
+Time Horizon: {{time_horizon}}
+Budget Considerations: {{budget_range}}`,
+        variables: ["company_name", "industry", "business_stage", "target_market", "primary_challenge", "focus_area_1", "focus_area_2", "focus_area_3", "analysis_depth", "time_horizon", "budget_range"],
+        category: "business",
+        tags: ["business strategy", "market analysis", "consulting", "competitive analysis", "growth planning"]
+      }
+    ];
+  }
+
+  /**
+   * Initialize sample prompts in the database
+   */
+  public async initializeSamplePrompts(): Promise<void> {
+    if (this.initialized) {
+      return;
+    }
+
+    try {
+      const samplePrompts = this.getSamplePrompts();
+      
+      for (const sample of samplePrompts) {
+        // Check if prompt already exists
+        const existing = await db.prepare(`
+          SELECT id FROM prompt_cards WHERE title = ?
+        `).get(sample.title);
+
+        if (!existing) {
+          const result = await db.prepare(`
+            INSERT INTO prompt_cards (title, description, prompt_template, variables)
+            VALUES (?, ?, ?, ?)
+          `).run(
+            sample.title,
+            sample.description,
+            sample.prompt_template,
+            JSON.stringify(sample.variables)
+          );
+
+          console.log(`Created sample prompt: ${sample.title} (ID: ${result.lastInsertRowid})`);
+        }
+      }
+
+      this.initialized = true;
+      console.log(`Sample prompts initialization completed`);
+    } catch (error) {
+      console.error('Failed to initialize sample prompts:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get sample prompts by category
+   */
+  public getSamplePromptsByCategory(category: string): SamplePrompt[] {
+    return this.getSamplePrompts().filter(prompt => prompt.category === category);
+  }
+
+  /**
+   * Get all available categories
+   */
+  public getCategories(): string[] {
+    const categories = this.getSamplePrompts().map(prompt => prompt.category);
+    return [...new Set(categories)];
+  }
+
+  /**
+   * Create a database prompt card from a sample prompt
+   */
+  public async createPromptFromSample(sampleTitle: string): Promise<PromptCard | null> {
+    try {
+      const sample = this.getSamplePrompts().find(p => p.title === sampleTitle);
+      if (!sample) {
+        throw new Error(`Sample prompt '${sampleTitle}' not found`);
+      }
+
+      // Check if already exists
+      const existing = await db.prepare(`
+        SELECT * FROM prompt_cards WHERE title = ?
+      `).get(sample.title) as PromptCard;
+
+      if (existing) {
+        return {
+          ...existing,
+          variables: JSON.parse(existing.variables || '[]')
+        };
+      }
+
+      // Create new prompt card
+      const result = await db.prepare(`
+        INSERT INTO prompt_cards (title, description, prompt_template, variables)
+        VALUES (?, ?, ?, ?)
+      `).run(
+        sample.title,
+        sample.description,
+        sample.prompt_template,
+        JSON.stringify(sample.variables)
+      );
+
+      const newCard = await db.prepare(`
+        SELECT * FROM prompt_cards WHERE id = ?
+      `).get(result.lastInsertRowid) as PromptCard;
+
+      return {
+        ...newCard,
+        variables: JSON.parse(newCard.variables || '[]')
+      };
+    } catch (error) {
+      console.error('Failed to create prompt from sample:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get sample prompt preview without creating in database
+   */
+  public getSamplePromptPreview(title: string): SamplePrompt | null {
+    return this.getSamplePrompts().find(p => p.title === title) || null;
+  }
+
+  /**
+   * Validate sample prompt template
+   */
+  public validateSamplePrompt(sample: SamplePrompt): { isValid: boolean; errors: string[] } {
+    const errors: string[] = [];
+
+    // Check required fields
+    if (!sample.title?.trim()) {
+      errors.push('Title is required');
+    }
+
+    if (!sample.prompt_template?.trim()) {
+      errors.push('Prompt template is required');
+    }
+
+    if (!sample.description?.trim()) {
+      errors.push('Description is required');
+    }
+
+    // Check variables are used in template
+    if (sample.variables && sample.variables.length > 0) {
+      const templateVariables = this.extractVariablesFromTemplate(sample.prompt_template);
+      const unusedVariables = sample.variables.filter(v => !templateVariables.includes(v));
+      const undeclaredVariables = templateVariables.filter(v => !sample.variables.includes(v));
+
+      if (unusedVariables.length > 0) {
+        errors.push(`Unused variables declared: ${unusedVariables.join(', ')}`);
+      }
+
+      if (undeclaredVariables.length > 0) {
+        errors.push(`Variables used but not declared: ${undeclaredVariables.join(', ')}`);
+      }
+    }
+
+    return {
+      isValid: errors.length === 0,
+      errors
+    };
+  }
+
+  /**
+   * Extract variables from template
+   */
+  private extractVariablesFromTemplate(template: string): string[] {
+    const matches = template.match(/\{\{(\w+)\}\}/g) || [];
+    return [...new Set(matches.map(match => match.replace(/\{\{|\}\}/g, '')))];
+  }
+
+  /**
+   * Get sample prompt statistics
+   */
+  public getSamplePromptStats() {
+    const samples = this.getSamplePrompts();
+    const categories = this.getCategories();
+    
+    return {
+      totalSamples: samples.length,
+      categories: categories.length,
+      categoriesBreakdown: categories.map(cat => ({
+        category: cat,
+        count: samples.filter(s => s.category === cat).length
+      })),
+      averageVariables: Math.round(samples.reduce((sum, s) => sum + s.variables.length, 0) / samples.length),
+      totalVariables: samples.reduce((sum, s) => sum + s.variables.length, 0)
+    };
+  }
+}
+
+export default SamplePromptService;
