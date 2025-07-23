@@ -1,0 +1,773 @@
+7ccab1f877103034c0d21c5cbc0987c6
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+function _export(target, all) {
+    for(var name in all)Object.defineProperty(target, name, {
+        enumerable: true,
+        get: Object.getOwnPropertyDescriptor(all, name).get
+    });
+}
+_export(exports, {
+    get CapacityPlanner () {
+        return CapacityPlanner;
+    },
+    get capacityPlanner () {
+        return capacityPlanner;
+    }
+});
+const _PredictiveAnalytics = require("./PredictiveAnalytics");
+const _AnalyticsEngine = require("./AnalyticsEngine");
+const _PerformanceMonitor = require("../performance/PerformanceMonitor");
+const _EventStore = require("./EventStore");
+const _lrucache = require("lru-cache");
+function _define_property(obj, key, value) {
+    if (key in obj) {
+        Object.defineProperty(obj, key, {
+            value: value,
+            enumerable: true,
+            configurable: true,
+            writable: true
+        });
+    } else {
+        obj[key] = value;
+    }
+    return obj;
+}
+class CapacityPlanner {
+    /**
+   * Start capacity monitoring and planning
+   */ startMonitoring(intervalMs = 300000) {
+        if (this.isMonitoring) {
+            console.log('Capacity monitoring already running');
+            return;
+        }
+        this.isMonitoring = true;
+        console.log(`Starting capacity monitoring with ${intervalMs}ms interval`);
+        this.monitoringInterval = setInterval(async ()=>{
+            try {
+                await this.performCapacityAnalysis();
+            } catch (error) {
+                console.error('Error during capacity analysis:', error);
+            }
+        }, intervalMs);
+        // Perform initial analysis
+        this.performCapacityAnalysis();
+    }
+    /**
+   * Stop capacity monitoring
+   */ stopMonitoring() {
+        if (!this.isMonitoring) return;
+        this.isMonitoring = false;
+        if (this.monitoringInterval) {
+            clearInterval(this.monitoringInterval);
+            this.monitoringInterval = null;
+        }
+        console.log('Capacity monitoring stopped');
+    }
+    /**
+   * Generate comprehensive capacity forecast
+   */ async generateCapacityForecast(resources = [
+        'cpu',
+        'memory',
+        'storage',
+        'network'
+    ], timeframes = [
+        '1h',
+        '6h',
+        '24h',
+        '7d',
+        '30d'
+    ]) {
+        const forecasts = new Map();
+        for (const resource of resources){
+            const resourceForecasts = [];
+            for (const timeframe of timeframes){
+                try {
+                    const prediction = await this.predictiveAnalytics.predictCapacity(`${resource}_usage`, timeframe);
+                    resourceForecasts.push(prediction);
+                } catch (error) {
+                    console.warn(`Failed to generate forecast for ${resource} at ${timeframe}:`, error.message);
+                }
+            }
+            if (resourceForecasts.length > 0) {
+                forecasts.set(resource, resourceForecasts);
+            }
+        }
+        return forecasts;
+    }
+    /**
+   * Generate scaling recommendations
+   */ async generateScalingRecommendations() {
+        const recommendations = [];
+        const currentMetrics = await this.getCurrentResourceMetrics();
+        // Analyze each resource type
+        for (const [resource, metrics] of Object.entries(currentMetrics)){
+            if (resource === 'application') continue; // Skip application metrics for scaling
+            try {
+                const recommendation = await this.analyzeResourceScaling(resource, metrics);
+                if (recommendation) {
+                    recommendations.push(recommendation);
+                    this.recommendations.set(recommendation.id, recommendation);
+                }
+            } catch (error) {
+                console.error(`Error analyzing scaling for ${resource}:`, error);
+            }
+        }
+        return recommendations;
+    }
+    /**
+   * Analyze resource scaling needs
+   */ async analyzeResourceScaling(resource, metrics) {
+        const utilizationKey = `${resource}_utilization`;
+        const currentUtilization = metrics.utilization || 0;
+        // Get capacity model for this resource
+        const model = this.capacityModels.get(resource);
+        if (!model) {
+            await this.createCapacityModel(resource);
+        }
+        // Get predictions for different timeframes
+        const predictions = await Promise.all([
+            this.predictiveAnalytics.predictCapacity(`${resource}_usage`, '6h'),
+            this.predictiveAnalytics.predictCapacity(`${resource}_usage`, '24h'),
+            this.predictiveAnalytics.predictCapacity(`${resource}_usage`, '7d')
+        ]);
+        // Determine scaling action
+        const scalingAction = this.determineScalingAction(currentUtilization, predictions, model);
+        if (scalingAction.action === 'maintain') {
+            return null; // No scaling needed
+        }
+        // Calculate target capacity
+        const targetCapacity = this.calculateTargetCapacity(resource, currentUtilization, predictions, scalingAction.action);
+        // Estimate cost and benefit
+        const costBenefit = this.estimateCostBenefit(resource, scalingAction.action, targetCapacity);
+        // Assess risks
+        const riskAssessment = this.assessScalingRisks(resource, scalingAction.action, predictions);
+        const recommendation = {
+            id: `scaling_${resource}_${Date.now()}`,
+            resource,
+            currentState: {
+                capacity: metrics.total || metrics.cores || 100,
+                utilization: currentUtilization,
+                performance: this.assessPerformance(resource, metrics)
+            },
+            recommendation: {
+                action: scalingAction.action,
+                targetCapacity,
+                timeframe: scalingAction.timeframe,
+                priority: scalingAction.priority,
+                estimatedCost: costBenefit.cost,
+                expectedBenefit: costBenefit.benefit
+            },
+            reasoning: {
+                factors: scalingAction.factors,
+                dataPoints: predictions.map((p)=>({
+                        metric: p.metric,
+                        current: p.currentValue,
+                        predicted: p.predictedValue,
+                        threshold: p.threshold
+                    })),
+                riskAssessment
+            },
+            implementation: {
+                steps: this.generateImplementationSteps(resource, scalingAction.action),
+                estimatedTime: this.estimateImplementationTime(resource, scalingAction.action),
+                rollbackPlan: this.generateRollbackPlan(resource, scalingAction.action),
+                monitoringPoints: this.generateMonitoringPoints(resource)
+            }
+        };
+        return recommendation;
+    }
+    /**
+   * Create growth projections with ML models
+   */ async createGrowthProjections(resource, projectionDays = 30) {
+        const cacheKey = `growth_projection_${resource}_${projectionDays}`;
+        const cached = this.cache.get(cacheKey);
+        if (cached) return cached;
+        // Get growth projections from predictive analytics
+        const projections = await this.predictiveAnalytics.getGrowthProjections(`${resource}_usage`, projectionDays);
+        // Analyze seasonality patterns
+        const seasonality = await this.analyzeSeasonality(resource, projectionDays * 2);
+        // Generate different scenarios
+        const scenarios = this.generateScenarios(projections.projected, projections.growthRate);
+        // Generate recommendations based on projections
+        const recommendations = this.generateGrowthRecommendations(resource, projections.current, scenarios, projections.growthRate);
+        const result = {
+            current: projections.current,
+            projected: projections.projected,
+            growthRate: projections.growthRate,
+            seasonality,
+            scenarios,
+            recommendations
+        };
+        this.cache.set(cacheKey, result);
+        return result;
+    }
+    /**
+   * Generate capacity optimization recommendations
+   */ async generateOptimizationRecommendations() {
+        const recommendations = {
+            cpu: [],
+            memory: [],
+            storage: [],
+            network: [],
+            application: [],
+            cost: []
+        };
+        const metrics = await this.getCurrentResourceMetrics();
+        const forecasts = await this.generateCapacityForecast();
+        // CPU optimization
+        if (metrics.cpu.utilization < 30) {
+            recommendations.cpu.push('CPU utilization is low - consider downsizing instances');
+            recommendations.cost.push('Potential cost savings from CPU optimization');
+        } else if (metrics.cpu.utilization > 80) {
+            recommendations.cpu.push('CPU utilization is high - consider scaling up or optimizing workloads');
+        }
+        // Memory optimization
+        if (metrics.memory.utilization < 40) {
+            recommendations.memory.push('Memory utilization is low - review memory allocation');
+            recommendations.cost.push('Potential cost savings from memory optimization');
+        } else if (metrics.memory.utilization > 85) {
+            recommendations.memory.push('Memory utilization is high - consider adding memory or optimizing usage');
+        }
+        // Storage optimization
+        if (metrics.storage.utilization > 80) {
+            recommendations.storage.push('Storage utilization is high - plan for capacity expansion');
+        }
+        if (metrics.storage.iops > 1000) {
+            recommendations.storage.push('High IOPS detected - consider faster storage or caching');
+        }
+        // Network optimization
+        if (metrics.network.latency > 100) {
+            recommendations.network.push('High network latency detected - investigate network bottlenecks');
+        }
+        if (metrics.network.utilization > 70) {
+            recommendations.network.push('Network utilization is high - consider bandwidth upgrade');
+        }
+        // Application optimization
+        if (metrics.application.response_time > 2000) {
+            recommendations.application.push('High response times - optimize application performance');
+        }
+        if (metrics.application.queue_size > 100) {
+            recommendations.application.push('Large queue size - consider horizontal scaling');
+        }
+        if (metrics.application.error_rate > 1) {
+            recommendations.application.push('High error rate - investigate and fix application issues');
+        }
+        return recommendations;
+    }
+    /**
+   * Get capacity alerts
+   */ getCapacityAlerts() {
+        return Array.from(this.alerts.values()).filter((alert)=>!alert.resolved).sort((a, b)=>{
+            const severityOrder = {
+                critical: 3,
+                warning: 2,
+                info: 1
+            };
+            return severityOrder[b.severity] - severityOrder[a.severity];
+        });
+    }
+    /**
+   * Get capacity dashboard data
+   */ async getCapacityDashboard() {
+        const [resources, alerts, recommendations, forecasts, trends] = await Promise.all([
+            this.getCurrentResourceMetrics(),
+            Promise.resolve(this.getCapacityAlerts()),
+            this.generateScalingRecommendations(),
+            this.generateCapacityForecast(),
+            this.getResourceTrends()
+        ]);
+        const resourcesAtRisk = alerts.filter((a)=>a.severity === 'critical').length;
+        const upcomingThresholds = alerts.filter((a)=>a.alertType === 'prediction_warning' && a.prediction.timeToThreshold).length;
+        const optimizationOpportunities = recommendations.filter((r)=>r.recommendation.action === 'optimize').length;
+        return {
+            overview: {
+                totalResources: Object.keys(resources).length - 1,
+                resourcesAtRisk,
+                upcomingThresholds,
+                optimizationOpportunities
+            },
+            resources,
+            alerts,
+            recommendations,
+            forecasts: Object.fromEntries(forecasts),
+            trends
+        };
+    }
+    // Private helper methods
+    async initializeCapacityModels() {
+        const resources = [
+            'cpu',
+            'memory',
+            'storage',
+            'network'
+        ];
+        for (const resource of resources){
+            try {
+                await this.createCapacityModel(resource);
+            } catch (error) {
+                console.warn(`Failed to initialize capacity model for ${resource}:`, error.message);
+            }
+        }
+    }
+    async createCapacityModel(resource) {
+        // Get historical utilization data
+        const utilizationHistory = await this.getUtilizationHistory(resource, 30); // 30 days
+        // Calculate growth trend
+        const growthTrend = this.calculateGrowthTrend(utilizationHistory);
+        // Analyze seasonality
+        const seasonality = await this.analyzeSeasonality(resource, 30);
+        // Set thresholds based on resource type
+        const thresholds = this.getResourceThresholds(resource);
+        // Generate forecasts
+        const forecasts = await this.generateResourceForecasts(resource);
+        const model = {
+            id: `capacity_${resource}_${Date.now()}`,
+            resource,
+            currentCapacity: await this.getCurrentCapacity(resource),
+            utilizationHistory,
+            growthTrend: {
+                rate: growthTrend.rate,
+                confidence: growthTrend.confidence,
+                seasonality
+            },
+            thresholds,
+            forecasts
+        };
+        this.capacityModels.set(resource, model);
+        return model;
+    }
+    async performCapacityAnalysis() {
+        try {
+            // Update capacity models
+            for (const resource of this.capacityModels.keys()){
+                await this.updateCapacityModel(resource);
+            }
+            // Check for threshold violations
+            await this.checkCapacityThresholds();
+            // Generate alerts if needed
+            await this.generateCapacityAlerts();
+            // Update cache
+            this.cache.set('last_analysis', {
+                timestamp: new Date(),
+                models: this.capacityModels.size,
+                alerts: this.alerts.size
+            });
+        } catch (error) {
+            console.error('Error during capacity analysis:', error);
+        }
+    }
+    async updateCapacityModel(resource) {
+        const model = this.capacityModels.get(resource);
+        if (!model) return;
+        // Get latest utilization data
+        const latestUtilization = await this.getLatestUtilization(resource);
+        // Update utilization history
+        model.utilizationHistory.push({
+            timestamp: new Date(),
+            utilization: latestUtilization.current,
+            peak: latestUtilization.peak,
+            average: latestUtilization.average
+        });
+        // Keep only last 1000 data points
+        if (model.utilizationHistory.length > 1000) {
+            model.utilizationHistory = model.utilizationHistory.slice(-1000);
+        }
+        // Recalculate growth trend
+        model.growthTrend = {
+            ...model.growthTrend,
+            rate: this.calculateGrowthTrend(model.utilizationHistory).rate
+        };
+        // Update forecasts
+        model.forecasts = await this.generateResourceForecasts(resource);
+    }
+    async checkCapacityThresholds() {
+        const metrics = await this.getCurrentResourceMetrics();
+        for (const [resource, resourceMetrics] of Object.entries(metrics)){
+            if (resource === 'application') continue;
+            const model = this.capacityModels.get(resource);
+            if (!model) continue;
+            const utilization = resourceMetrics.utilization || 0;
+            // Check immediate thresholds
+            if (utilization > model.thresholds.critical) {
+                this.createCapacityAlert(resource, 'threshold_exceeded', 'critical', `${resource} utilization exceeded critical threshold`, utilization, model);
+            } else if (utilization > model.thresholds.warning) {
+                this.createCapacityAlert(resource, 'threshold_exceeded', 'warning', `${resource} utilization exceeded warning threshold`, utilization, model);
+            }
+            // Check predictions
+            const predictions = await this.predictiveAnalytics.predictCapacity(`${resource}_usage`, '24h');
+            if (predictions.willExceedThreshold && predictions.timeToThreshold) {
+                this.createCapacityAlert(resource, 'prediction_warning', 'warning', `${resource} predicted to exceed threshold within 24 hours`, utilization, model, predictions.timeToThreshold);
+            }
+        }
+    }
+    createCapacityAlert(resource, alertType, severity, message, currentUtilization, model, timeToThreshold) {
+        const alertId = `capacity_${resource}_${alertType}_${Date.now()}`;
+        // Check if similar alert already exists
+        const existingAlert = Array.from(this.alerts.values()).find((alert)=>alert.resource === resource && alert.alertType === alertType && !alert.resolved && Date.now() - alert.timestamp.getTime() < 30 * 60 * 1000 // 30 minutes
+        );
+        if (existingAlert) return; // Don't create duplicate alerts
+        const alert = {
+            id: alertId,
+            timestamp: new Date(),
+            resource,
+            alertType,
+            severity,
+            current: {
+                utilization: currentUtilization,
+                capacity: model.currentCapacity,
+                performance: {} // Would include performance metrics
+            },
+            prediction: {
+                timeToThreshold,
+                peakUtilization: Math.max(...model.utilizationHistory.map((h)=>h.peak)),
+                confidence: model.growthTrend.confidence
+            },
+            message,
+            recommendations: this.generateAlertRecommendations(resource, alertType, currentUtilization),
+            autoResolve: severity === 'info',
+            resolved: false
+        };
+        this.alerts.set(alertId, alert);
+        console.log(`Capacity alert created: ${message}`);
+    }
+    generateAlertRecommendations(resource, alertType, utilization) {
+        const recommendations = [];
+        if (alertType === 'threshold_exceeded') {
+            recommendations.push(`Immediate action required for ${resource}`);
+            recommendations.push('Consider scaling resources');
+            recommendations.push('Investigate high utilization causes');
+        }
+        if (alertType === 'prediction_warning') {
+            recommendations.push(`Plan capacity expansion for ${resource}`);
+            recommendations.push('Monitor growth trends closely');
+            recommendations.push('Prepare scaling procedures');
+        }
+        if (utilization > 90) {
+            recommendations.push('Critical utilization - immediate scaling recommended');
+        }
+        return recommendations;
+    }
+    // Additional helper methods would be implemented here...
+    // (Simplified for space considerations)
+    async getCurrentResourceMetrics() {
+        // Implementation to get current resource metrics
+        return {
+            cpu: {
+                cores: 4,
+                utilization: 65,
+                peak24h: 80,
+                average24h: 60,
+                trend: 0.5
+            },
+            memory: {
+                total: 16000,
+                used: 10000,
+                utilization: 62.5,
+                peak24h: 75,
+                average24h: 58,
+                trend: 0.3
+            },
+            storage: {
+                total: 1000000,
+                used: 600000,
+                utilization: 60,
+                iops: 500,
+                throughput: 100,
+                trend: 0.8
+            },
+            network: {
+                bandwidth: 1000,
+                utilization: 40,
+                latency: 50,
+                packetLoss: 0.1,
+                trend: 0.2
+            },
+            application: {
+                concurrent_users: 150,
+                requests_per_second: 45,
+                queue_size: 12,
+                response_time: 800,
+                error_rate: 0.5
+            }
+        };
+    }
+    determineScalingAction(currentUtilization, predictions, model) {
+        const factors = [];
+        let action = 'maintain';
+        let priority = 'low';
+        let timeframe = 'within 7 days';
+        // Determine action based on current utilization and predictions
+        const maxPredicted = Math.max(...predictions.map((p)=>p.predictedValue));
+        if (currentUtilization > 85 || maxPredicted > 90) {
+            action = 'scale_up';
+            priority = 'high';
+            timeframe = 'within 24 hours';
+            factors.push('High current or predicted utilization');
+        } else if (currentUtilization < 20 && maxPredicted < 30) {
+            action = 'scale_down';
+            priority = 'medium';
+            timeframe = 'within 7 days';
+            factors.push('Low utilization indicates over-provisioning');
+        } else if (currentUtilization > 70) {
+            action = 'optimize';
+            priority = 'medium';
+            factors.push('Moderate utilization - optimization opportunities exist');
+        }
+        return {
+            action,
+            timeframe,
+            priority,
+            factors
+        };
+    }
+    calculateTargetCapacity(resource, currentUtilization, predictions, action) {
+        const maxPredicted = Math.max(...predictions.map((p)=>p.predictedValue));
+        switch(action){
+            case 'scale_up':
+                // Target 70% utilization of new capacity
+                return Math.ceil(maxPredicted * 1.2 / 0.7);
+            case 'scale_down':
+                // Target 60% utilization of new capacity
+                return Math.ceil(maxPredicted * 1.1 / 0.6);
+            default:
+                return 100; // Maintain current
+        }
+    }
+    estimateCostBenefit(resource, action, targetCapacity) {
+        // Simplified cost estimation
+        const baseCost = {
+            cpu: 100,
+            memory: 50,
+            storage: 20,
+            network: 30
+        }[resource] || 50;
+        let cost = 0;
+        let benefit = '';
+        switch(action){
+            case 'scale_up':
+                cost = baseCost * 1.5;
+                benefit = 'Improved performance and reliability';
+                break;
+            case 'scale_down':
+                cost = -baseCost * 0.3; // Cost savings
+                benefit = 'Reduced operational costs';
+                break;
+            case 'optimize':
+                cost = baseCost * 0.1;
+                benefit = 'Better resource utilization without scaling';
+                break;
+        }
+        return {
+            cost,
+            benefit
+        };
+    }
+    assessScalingRisks(resource, action, predictions) {
+        const factors = [];
+        let level = 'low';
+        const confidence = Math.min(...predictions.map((p)=>p.confidence));
+        if (confidence < 0.7) {
+            factors.push('Low prediction confidence');
+            level = 'medium';
+        }
+        if (action === 'scale_down') {
+            factors.push('Risk of performance degradation');
+            level = level === 'medium' ? 'high' : 'medium';
+        }
+        if (action === 'scale_up') {
+            factors.push('Increased operational costs');
+        }
+        return {
+            level,
+            factors
+        };
+    }
+    generateImplementationSteps(resource, action) {
+        const baseSteps = [
+            'Create backup of current configuration',
+            'Plan maintenance window',
+            'Notify stakeholders'
+        ];
+        switch(action){
+            case 'scale_up':
+                return [
+                    ...baseSteps,
+                    `Add additional ${resource} capacity`,
+                    'Update load balancer configuration',
+                    'Test new capacity',
+                    'Monitor performance'
+                ];
+            case 'scale_down':
+                return [
+                    ...baseSteps,
+                    'Drain traffic from excess capacity',
+                    `Remove unnecessary ${resource} resources`,
+                    'Update monitoring thresholds',
+                    'Verify performance maintained'
+                ];
+            case 'optimize':
+                return [
+                    ...baseSteps,
+                    `Analyze ${resource} usage patterns`,
+                    'Implement optimization recommendations',
+                    'Monitor performance improvements',
+                    'Document optimizations'
+                ];
+            default:
+                return baseSteps;
+        }
+    }
+    estimateImplementationTime(resource, action) {
+        const timeMap = {
+            scale_up: '2-4 hours',
+            scale_down: '1-2 hours',
+            optimize: '4-8 hours',
+            maintain: '0 hours'
+        };
+        return timeMap[action] || '2-4 hours';
+    }
+    generateRollbackPlan(resource, action) {
+        return [
+            'Monitor key performance indicators',
+            'Identify performance degradation',
+            'Restore previous configuration',
+            'Verify system stability',
+            'Document rollback reasons'
+        ];
+    }
+    generateMonitoringPoints(resource) {
+        return [
+            `${resource} utilization`,
+            `${resource} performance metrics`,
+            'Application response times',
+            'Error rates',
+            'User experience metrics'
+        ];
+    }
+    // Additional helper methods (simplified implementations)
+    async getUtilizationHistory(resource, days) {
+        return [];
+    }
+    calculateGrowthTrend(history) {
+        return {
+            rate: 0.1,
+            confidence: 0.8
+        };
+    }
+    async analyzeSeasonality(resource, days) {
+        return {
+            daily: new Array(24).fill(0),
+            weekly: new Array(7).fill(0),
+            monthly: new Array(12).fill(0)
+        };
+    }
+    getResourceThresholds(resource) {
+        return {
+            warning: 70,
+            critical: 85,
+            maximum: 95
+        };
+    }
+    async generateResourceForecasts(resource) {
+        return [];
+    }
+    async getCurrentCapacity(resource) {
+        return 100;
+    }
+    async getLatestUtilization(resource) {
+        return {
+            current: 65,
+            peak: 80,
+            average: 60
+        };
+    }
+    async generateCapacityAlerts() {}
+    generateScenarios(projected, growthRate) {
+        return {
+            optimistic: projected * 0.8,
+            realistic: projected,
+            pessimistic: projected * 1.3
+        };
+    }
+    generateGrowthRecommendations(resource, current, scenarios, growthRate) {
+        return [
+            'Monitor growth trends',
+            'Plan for capacity expansion',
+            'Optimize resource usage'
+        ];
+    }
+    assessPerformance(resource, metrics) {
+        const utilization = metrics.utilization || 0;
+        if (utilization > 85) return 'poor';
+        if (utilization > 70) return 'fair';
+        return 'good';
+    }
+    async getResourceTrends() {
+        return {
+            cpu: [
+                60,
+                62,
+                65,
+                63,
+                68,
+                70,
+                65
+            ],
+            memory: [
+                55,
+                58,
+                60,
+                62,
+                59,
+                61,
+                63
+            ],
+            storage: [
+                50,
+                52,
+                55,
+                58,
+                60,
+                62,
+                60
+            ],
+            network: [
+                35,
+                38,
+                40,
+                42,
+                39,
+                41,
+                40
+            ]
+        };
+    }
+    constructor(){
+        _define_property(this, "predictiveAnalytics", void 0);
+        _define_property(this, "analyticsEngine", void 0);
+        _define_property(this, "performanceMonitor", void 0);
+        _define_property(this, "eventStore", void 0);
+        _define_property(this, "cache", void 0);
+        _define_property(this, "capacityModels", void 0);
+        _define_property(this, "alerts", void 0);
+        _define_property(this, "recommendations", void 0);
+        _define_property(this, "isMonitoring", false);
+        _define_property(this, "monitoringInterval", null);
+        this.predictiveAnalytics = new _PredictiveAnalytics.PredictiveAnalytics();
+        this.analyticsEngine = _AnalyticsEngine.AnalyticsEngine.getInstance();
+        this.performanceMonitor = new _PerformanceMonitor.PerformanceMonitor();
+        this.eventStore = _EventStore.EventStore.getInstance();
+        this.cache = new _lrucache.LRUCache({
+            max: 100,
+            ttl: 1000 * 60 * 15 // 15 minutes cache
+        });
+        this.capacityModels = new Map();
+        this.alerts = new Map();
+        this.recommendations = new Map();
+        this.initializeCapacityModels();
+    }
+}
+const capacityPlanner = new CapacityPlanner();

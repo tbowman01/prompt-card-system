@@ -241,7 +241,9 @@ export class HealthOrchestrator extends EventEmitter {
     try {
       this.modelMonitor = new ModelHealthMonitor({
         healthCheckInterval: 60000, // 1 minute
+        benchmarkInterval: 300000, // 5 minutes
         maxResponseTime: 30000, // 30 seconds
+        maxErrorRate: 10, // 10%
         minHealthScore: 70,
         alertThresholds: {
           responseTime: 15000, // 15 seconds

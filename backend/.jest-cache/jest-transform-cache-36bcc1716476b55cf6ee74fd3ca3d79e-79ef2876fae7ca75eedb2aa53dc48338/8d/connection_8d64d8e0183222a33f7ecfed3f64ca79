@@ -1,0 +1,319 @@
+45133dd90e612b9aba964ad40fb27491
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+function _export(target, all) {
+    for(var name in all)Object.defineProperty(target, name, {
+        enumerable: true,
+        get: Object.getOwnPropertyDescriptor(all, name).get
+    });
+}
+_export(exports, {
+    get connectionPool () {
+        return connectionPool;
+    },
+    get db () {
+        return db;
+    },
+    get default () {
+        return _default;
+    },
+    get initializeDatabase () {
+        return initializeDatabase;
+    }
+});
+const _bettersqlite3 = /*#__PURE__*/ _interop_require_default(require("better-sqlite3"));
+const _path = /*#__PURE__*/ _interop_require_default(require("path"));
+const _fs = /*#__PURE__*/ _interop_require_default(require("fs"));
+function _define_property(obj, key, value) {
+    if (key in obj) {
+        Object.defineProperty(obj, key, {
+            value: value,
+            enumerable: true,
+            configurable: true,
+            writable: true
+        });
+    } else {
+        obj[key] = value;
+    }
+    return obj;
+}
+function _interop_require_default(obj) {
+    return obj && obj.__esModule ? obj : {
+        default: obj
+    };
+}
+const DATABASE_PATH = process.env.DATABASE_PATH || _path.default.join(__dirname, '../../data/database.sqlite');
+const poolConfig = {
+    maxConnections: parseInt(process.env.DB_MAX_CONNECTIONS || '5'),
+    idleTimeout: parseInt(process.env.DB_IDLE_TIMEOUT || '30000'),
+    retryAttempts: parseInt(process.env.DB_RETRY_ATTEMPTS || '3'),
+    retryDelay: parseInt(process.env.DB_RETRY_DELAY || '1000')
+};
+// Connection pool implementation
+class DatabaseConnectionPool {
+    createConnection() {
+        // Ensure data directory exists
+        const dataDir = _path.default.dirname(this.dbPath);
+        if (!_fs.default.existsSync(dataDir)) {
+            _fs.default.mkdirSync(dataDir, {
+                recursive: true
+            });
+        }
+        const connection = new _bettersqlite3.default(this.dbPath, {
+            verbose: process.env.NODE_ENV === 'development' ? console.log : undefined,
+            timeout: 5000 // 5 second timeout
+        });
+        // Enable foreign keys and optimize for concurrent access
+        connection.pragma('foreign_keys = ON');
+        connection.pragma('journal_mode = WAL');
+        connection.pragma('synchronous = NORMAL');
+        connection.pragma('cache_size = 1000');
+        connection.pragma('temp_store = memory');
+        return connection;
+    }
+    async initializePool() {
+        if (this.initialized) return;
+        try {
+            // Create initial connections
+            for(let i = 0; i < this.config.maxConnections; i++){
+                const connection = this.createConnection();
+                this.connections.push(connection);
+                this.availableConnections.push(connection);
+            }
+            this.initialized = true;
+            this.retryCount = 0;
+            console.log(`Database connection pool initialized with ${this.config.maxConnections} connections`);
+        } catch (error) {
+            console.error('Failed to initialize database connection pool:', error);
+            await this.retryConnection();
+        }
+    }
+    async retryConnection() {
+        if (this.retryCount >= this.config.retryAttempts) {
+            throw new Error(`Failed to connect to database after ${this.config.retryAttempts} attempts`);
+        }
+        this.retryCount++;
+        console.log(`Retrying database connection (attempt ${this.retryCount}/${this.config.retryAttempts})...`);
+        await new Promise((resolve)=>setTimeout(resolve, this.config.retryDelay * this.retryCount));
+        await this.initializePool();
+    }
+    async getConnection() {
+        if (!this.initialized) {
+            await this.initializePool();
+        }
+        if (this.availableConnections.length === 0) {
+            // Wait for a connection to become available
+            await new Promise((resolve)=>setTimeout(resolve, 10));
+            return this.getConnection();
+        }
+        const connection = this.availableConnections.pop();
+        this.busyConnections.add(connection);
+        return connection;
+    }
+    releaseConnection(connection) {
+        if (this.busyConnections.has(connection)) {
+            this.busyConnections.delete(connection);
+            this.availableConnections.push(connection);
+        }
+    }
+    async withConnection(operation) {
+        const connection = await this.getConnection();
+        try {
+            return await operation(connection);
+        } finally{
+            this.releaseConnection(connection);
+        }
+    }
+    getStats() {
+        return {
+            total: this.connections.length,
+            available: this.availableConnections.length,
+            busy: this.busyConnections.size,
+            initialized: this.initialized
+        };
+    }
+    close() {
+        this.connections.forEach((conn)=>{
+            try {
+                conn.close();
+            } catch (error) {
+                console.error('Error closing database connection:', error);
+            }
+        });
+        this.connections = [];
+        this.availableConnections = [];
+        this.busyConnections.clear();
+        this.initialized = false;
+    }
+    constructor(dbPath, config){
+        _define_property(this, "dbPath", void 0);
+        _define_property(this, "config", void 0);
+        _define_property(this, "connections", void 0);
+        _define_property(this, "availableConnections", void 0);
+        _define_property(this, "busyConnections", void 0);
+        _define_property(this, "initialized", void 0);
+        _define_property(this, "retryCount", void 0);
+        this.dbPath = dbPath;
+        this.config = config;
+        this.connections = [];
+        this.availableConnections = [];
+        this.busyConnections = new Set();
+        this.initialized = false;
+        this.retryCount = 0;
+    }
+}
+// Create global connection pool
+const connectionPool = new DatabaseConnectionPool(DATABASE_PATH, poolConfig);
+const db = {
+    prepare: (sql)=>{
+        return {
+            run: async (...params)=>{
+                return connectionPool.withConnection((conn)=>{
+                    const stmt = conn.prepare(sql);
+                    return stmt.run(...params);
+                });
+            },
+            get: async (...params)=>{
+                return connectionPool.withConnection((conn)=>{
+                    const stmt = conn.prepare(sql);
+                    return stmt.get(...params);
+                });
+            },
+            all: async (...params)=>{
+                return connectionPool.withConnection((conn)=>{
+                    const stmt = conn.prepare(sql);
+                    return stmt.all(...params);
+                });
+            }
+        };
+    },
+    exec: async (sql)=>{
+        return connectionPool.withConnection((conn)=>conn.exec(sql));
+    },
+    pragma: async (pragma)=>{
+        return connectionPool.withConnection((conn)=>conn.pragma(pragma));
+    },
+    close: ()=>connectionPool.close(),
+    transaction: (operations)=>{
+        return connectionPool.withConnection((conn)=>{
+            const transaction = conn.transaction(operations);
+            return transaction(conn);
+        });
+    },
+    getStats: ()=>connectionPool.getStats()
+};
+async function initializeDatabase() {
+    console.log('Initializing database...');
+    try {
+        // Create prompt_cards table
+        await db.exec(`
+      CREATE TABLE IF NOT EXISTS prompt_cards (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        description TEXT,
+        prompt_template TEXT NOT NULL,
+        variables TEXT DEFAULT '[]', -- JSON array of variable names
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+        // Create test_cases table
+        await db.exec(`
+      CREATE TABLE IF NOT EXISTS test_cases (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        prompt_card_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        input_variables TEXT NOT NULL, -- JSON object
+        expected_output TEXT,
+        assertions TEXT DEFAULT '[]', -- JSON array of assertion objects
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (prompt_card_id) REFERENCES prompt_cards(id) ON DELETE CASCADE
+      )
+    `);
+        // Create enhanced test_results table for Phase 4
+        await db.exec(`
+      CREATE TABLE IF NOT EXISTS test_results (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        test_case_id INTEGER NOT NULL,
+        execution_id TEXT NOT NULL,
+        model TEXT NOT NULL,
+        response TEXT NOT NULL,
+        passed BOOLEAN NOT NULL,
+        assertions TEXT DEFAULT '[]', -- JSON array of assertion results
+        execution_time_ms INTEGER,
+        error TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (test_case_id) REFERENCES test_cases(id) ON DELETE CASCADE
+      )
+    `);
+        // Create test execution queue table
+        await db.exec(`
+      CREATE TABLE IF NOT EXISTS test_execution_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        execution_id TEXT UNIQUE NOT NULL,
+        prompt_card_id INTEGER NOT NULL,
+        test_case_ids TEXT NOT NULL, -- JSON array
+        model TEXT NOT NULL,
+        status TEXT DEFAULT 'pending', -- pending, running, completed, failed, cancelled
+        priority INTEGER DEFAULT 0,
+        configuration TEXT, -- JSON
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        started_at DATETIME,
+        completed_at DATETIME,
+        error_message TEXT,
+        FOREIGN KEY (prompt_card_id) REFERENCES prompt_cards(id)
+      )
+    `);
+        // Create assertion_types table for advanced assertion system
+        await db.exec(`
+      CREATE TABLE IF NOT EXISTS assertion_types (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE NOT NULL,
+        description TEXT NOT NULL,
+        parameters TEXT NOT NULL, -- JSON
+        examples TEXT NOT NULL, -- JSON
+        validator_code TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+        // Create assertion execution stats table
+        await db.exec(`
+      CREATE TABLE IF NOT EXISTS assertion_execution_stats (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        assertion_type TEXT NOT NULL,
+        total_executions INTEGER DEFAULT 0,
+        successful_executions INTEGER DEFAULT 0,
+        failed_executions INTEGER DEFAULT 0,
+        total_execution_time INTEGER DEFAULT 0,
+        last_executed DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(assertion_type)
+      )
+    `);
+        // Create indexes for better performance
+        await db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_prompt_cards_title ON prompt_cards(title);
+      CREATE INDEX IF NOT EXISTS idx_test_cases_prompt_card_id ON test_cases(prompt_card_id);
+      CREATE INDEX IF NOT EXISTS idx_test_results_test_case_id ON test_results(test_case_id);
+      CREATE INDEX IF NOT EXISTS idx_test_results_execution_id ON test_results(execution_id);
+      CREATE INDEX IF NOT EXISTS idx_test_queue_status ON test_execution_queue(status);
+      CREATE INDEX IF NOT EXISTS idx_test_queue_priority ON test_execution_queue(priority DESC);
+      CREATE INDEX IF NOT EXISTS idx_assertion_types_name ON assertion_types(name);
+      CREATE INDEX IF NOT EXISTS idx_assertion_stats_type ON assertion_execution_stats(assertion_type);
+    `);
+        console.log('Database initialized successfully');
+        return db;
+    } catch (error) {
+        console.error('Error initializing database:', error);
+        throw error;
+    }
+}
+// Graceful shutdown
+process.on('SIGINT', ()=>{
+    console.log('Closing database connection...');
+    db.close();
+    process.exit(0);
+});
+const _default = db;

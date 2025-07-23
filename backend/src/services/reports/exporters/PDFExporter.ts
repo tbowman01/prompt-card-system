@@ -1,6 +1,7 @@
 import PDFDocument from 'pdfkit';
 import { ChartJSNodeCanvas } from 'chartjs-node-canvas';
 import { ReportData, ReportExportOptions, ChartData, TableData, MetricData } from '../../../types/reports';
+import { ChartConfiguration } from 'chart.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -295,9 +296,18 @@ export class PDFExporter {
 
   private async generateChartSection(doc: PDFKit.PDFDocument, chartData: ChartData, y: number): Promise<number> {
     try {
-      const chartBuffer = await this.chartRenderer.renderToBuffer({
+      const chartConfig: ChartConfiguration = {
         type: 'line',
-        data: chartData,
+        data: {
+          labels: chartData.labels,
+          datasets: chartData.datasets.map(dataset => ({
+            label: dataset.label,
+            data: dataset.data,
+            backgroundColor: dataset.backgroundColor,
+            borderColor: dataset.borderColor,
+            borderWidth: dataset.borderWidth
+          }))
+        },
         options: {
           responsive: false,
           plugins: {
@@ -312,7 +322,8 @@ export class PDFExporter {
             }
           }
         }
-      });
+      };
+      const chartBuffer = await this.chartRenderer.renderToBuffer(chartConfig);
 
       const maxWidth = 500;
       const maxHeight = 300;

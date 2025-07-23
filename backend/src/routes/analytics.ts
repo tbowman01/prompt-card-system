@@ -1,11 +1,11 @@
-import express from 'express';
+import express, { Request, Response } from 'express';
 import { AnalyticsEngine } from '../services/analytics/AnalyticsEngine';
 
 const router = express.Router();
 const analyticsEngine = AnalyticsEngine.getInstance();
 
 // Get dashboard metrics
-router.get('/dashboard', async (req, res) => {
+router.get('/dashboard', async (req: Request, res: Response) => {
   try {
     const metrics = await analyticsEngine.getDashboardMetrics();
     res.json({ success: true, data: metrics });

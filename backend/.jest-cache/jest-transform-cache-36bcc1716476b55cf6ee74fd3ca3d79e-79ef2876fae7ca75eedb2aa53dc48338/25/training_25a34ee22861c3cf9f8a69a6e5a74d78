@@ -1,0 +1,585 @@
+681cee4e45b1f0a9c64c0054d1c9bc2f
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+Object.defineProperty(exports, "default", {
+    enumerable: true,
+    get: function() {
+        return _default;
+    }
+});
+const _express = /*#__PURE__*/ _interop_require_default(require("express"));
+const _ModelTrainingEngine = require("../services/training/ModelTrainingEngine");
+const _ModelRegistry = require("../services/training/ModelRegistry");
+const _validation = require("../middleware/validation");
+const _joi = /*#__PURE__*/ _interop_require_default(require("joi"));
+function _interop_require_default(obj) {
+    return obj && obj.__esModule ? obj : {
+        default: obj
+    };
+}
+const router = _express.default.Router();
+// Validation schemas
+const trainingConfigSchema = _joi.default.object({
+    name: _joi.default.string().required().min(1).max(100),
+    model: _joi.default.string().required(),
+    trainingData: _joi.default.object({
+        source: _joi.default.string().valid('file', 'database', 'api', 'synthetic').required(),
+        path: _joi.default.string().when('source', {
+            is: 'file',
+            then: _joi.default.required()
+        }),
+        query: _joi.default.string().when('source', {
+            is: 'database',
+            then: _joi.default.required()
+        }),
+        endpoint: _joi.default.string().when('source', {
+            is: 'api',
+            then: _joi.default.required()
+        }),
+        format: _joi.default.string().valid('jsonl', 'csv', 'txt', 'parquet').required(),
+        validation_split: _joi.default.number().min(0.1).max(0.9).required()
+    }).required(),
+    hyperparameters: _joi.default.object({
+        learning_rate: _joi.default.number().min(0.00001).max(1).required(),
+        batch_size: _joi.default.number().integer().min(1).max(1024).required(),
+        epochs: _joi.default.number().integer().min(1).max(1000).required(),
+        warmup_steps: _joi.default.number().integer().min(0).default(0),
+        weight_decay: _joi.default.number().min(0).max(1).default(0.01),
+        dropout_rate: _joi.default.number().min(0).max(1).default(0.1),
+        gradient_clip_norm: _joi.default.number().min(0).default(1.0)
+    }).required(),
+    optimization: _joi.default.object({
+        optimizer: _joi.default.string().valid('adam', 'adamw', 'sgd', 'rmsprop').default('adamw'),
+        scheduler: _joi.default.string().valid('linear', 'cosine', 'exponential', 'polynomial').default('linear'),
+        early_stopping: _joi.default.object({
+            enabled: _joi.default.boolean().default(true),
+            patience: _joi.default.number().integer().min(1).default(5),
+            metric: _joi.default.string().default('validation_loss'),
+            min_delta: _joi.default.number().min(0).default(0.001)
+        }).default()
+    }).default(),
+    evaluation: _joi.default.object({
+        metrics: _joi.default.array().items(_joi.default.string()).default([
+            'accuracy',
+            'f1_score'
+        ]),
+        benchmark_datasets: _joi.default.array().items(_joi.default.string()).default([]),
+        validation_frequency: _joi.default.number().integer().min(1).default(1),
+        save_best_model: _joi.default.boolean().default(true)
+    }).default(),
+    resources: _joi.default.object({
+        gpu_memory_limit: _joi.default.number().integer().min(1),
+        cpu_cores: _joi.default.number().integer().min(1),
+        memory_limit: _joi.default.number().integer().min(1),
+        storage_limit: _joi.default.number().integer().min(1)
+    }).default({}),
+    deployment: _joi.default.object({
+        auto_deploy: _joi.default.boolean().default(false),
+        deployment_target: _joi.default.string().valid('ollama', 'huggingface', 'local', 'cloud').default('local'),
+        rollback_on_failure: _joi.default.boolean().default(true),
+        health_check_enabled: _joi.default.boolean().default(true)
+    }).default(),
+    metadata: _joi.default.object({
+        description: _joi.default.string().default(''),
+        tags: _joi.default.array().items(_joi.default.string()).default([]),
+        base_model: _joi.default.string(),
+        training_objective: _joi.default.string().default('general_improvement')
+    }).default()
+});
+const syntheticDataSchema = _joi.default.object({
+    template_prompts: _joi.default.array().items(_joi.default.string()).min(1).required(),
+    generation_config: _joi.default.object({
+        num_samples: _joi.default.number().integer().min(1).max(100000).required(),
+        temperature: _joi.default.number().min(0).max(2).default(0.7),
+        max_tokens: _joi.default.number().integer().min(10).max(4096).default(512),
+        diversity_penalty: _joi.default.number().min(0).max(2).default(0.5),
+        quality_filter: _joi.default.boolean().default(true)
+    }).required(),
+    output_format: _joi.default.string().valid('jsonl', 'csv', 'txt').default('jsonl')
+});
+const modelRegistrationSchema = _joi.default.object({
+    name: _joi.default.string().required().min(1).max(100),
+    version: _joi.default.string().required(),
+    description: _joi.default.string().required(),
+    author: _joi.default.string().required(),
+    license: _joi.default.string().required(),
+    tags: _joi.default.array().items(_joi.default.string()).default([]),
+    model_type: _joi.default.string().valid('foundation', 'fine_tuned', 'specialized', 'custom').required(),
+    base_model: _joi.default.string(),
+    training_job_id: _joi.default.string(),
+    size_mb: _joi.default.number().integer().min(1).required(),
+    parameter_count: _joi.default.number().integer().min(1).required(),
+    architecture: _joi.default.object({
+        model_family: _joi.default.string().required(),
+        layers: _joi.default.number().integer().min(1).required(),
+        hidden_size: _joi.default.number().integer().min(1).required(),
+        attention_heads: _joi.default.number().integer().min(1).required(),
+        vocab_size: _joi.default.number().integer().min(1).required(),
+        max_sequence_length: _joi.default.number().integer().min(1).required()
+    }).required(),
+    capabilities: _joi.default.object({
+        text_generation: _joi.default.boolean().default(false),
+        text_classification: _joi.default.boolean().default(false),
+        question_answering: _joi.default.boolean().default(false),
+        summarization: _joi.default.boolean().default(false),
+        code_generation: _joi.default.boolean().default(false),
+        embedding_generation: _joi.default.boolean().default(false),
+        multimodal: _joi.default.boolean().default(false)
+    }).default(),
+    performance_metrics: _joi.default.object({
+        accuracy: _joi.default.number().min(0).max(1),
+        f1_score: _joi.default.number().min(0).max(1),
+        bleu_score: _joi.default.number().min(0).max(1),
+        rouge_score: _joi.default.number().min(0).max(1),
+        perplexity: _joi.default.number().min(1),
+        inference_latency_ms: _joi.default.number().min(0).required(),
+        throughput_tokens_per_sec: _joi.default.number().min(0).required(),
+        memory_usage_mb: _joi.default.number().min(0).required()
+    }).required(),
+    file_path: _joi.default.string(),
+    config_path: _joi.default.string(),
+    tokenizer_path: _joi.default.string()
+});
+const modelSearchSchema = _joi.default.object({
+    query: _joi.default.string().allow(''),
+    filters: _joi.default.object({
+        model_type: _joi.default.array().items(_joi.default.string().valid('foundation', 'fine_tuned', 'specialized', 'custom')),
+        capabilities: _joi.default.array().items(_joi.default.string()),
+        size_range: _joi.default.object({
+            min_mb: _joi.default.number().integer().min(0),
+            max_mb: _joi.default.number().integer().min(0)
+        }),
+        performance_threshold: _joi.default.object().pattern(_joi.default.string(), _joi.default.number()),
+        deployment_status: _joi.default.array().items(_joi.default.string().valid('pending', 'deployed', 'deprecated', 'failed')),
+        tags: _joi.default.array().items(_joi.default.string()),
+        created_after: _joi.default.date().iso(),
+        created_before: _joi.default.date().iso()
+    }).default({}),
+    sort_by: _joi.default.string().valid('name', 'created_at', 'size_mb', 'performance', 'usage').default('created_at'),
+    sort_order: _joi.default.string().valid('asc', 'desc').default('desc'),
+    limit: _joi.default.number().integer().min(1).max(100).default(20),
+    offset: _joi.default.number().integer().min(0).default(0)
+});
+/**
+ * @route POST /api/training/jobs
+ * @desc Create a new training job
+ */ router.post('/jobs', (0, _validation.validation)(trainingConfigSchema), async (req, res)=>{
+    try {
+        const job = await _ModelTrainingEngine.modelTrainingEngine.createTrainingJob(req.body);
+        res.status(201).json({
+            success: true,
+            data: {
+                job_id: job.id,
+                status: job.status,
+                config: job.config,
+                created_at: job.config.metadata.created_at
+            }
+        });
+    } catch (error) {
+        console.error('Error creating training job:', error);
+        res.status(400).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to create training job'
+        });
+    }
+});
+/**
+ * @route POST /api/training/jobs/:jobId/start
+ * @desc Start a training job
+ */ router.post('/jobs/:jobId/start', async (req, res)=>{
+    try {
+        const { jobId } = req.params;
+        await _ModelTrainingEngine.modelTrainingEngine.startTrainingJob(jobId);
+        res.json({
+            success: true,
+            message: `Training job ${jobId} started successfully`
+        });
+    } catch (error) {
+        console.error('Error starting training job:', error);
+        res.status(400).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to start training job'
+        });
+    }
+});
+/**
+ * @route GET /api/training/jobs/:jobId
+ * @desc Get training job details
+ */ router.get('/jobs/:jobId', async (req, res)=>{
+    try {
+        const { jobId } = req.params;
+        const job = _ModelTrainingEngine.modelTrainingEngine.getTrainingJob(jobId);
+        if (!job) {
+            return res.status(404).json({
+                success: false,
+                error: 'Training job not found'
+            });
+        }
+        res.json({
+            success: true,
+            data: job
+        });
+    } catch (error) {
+        console.error('Error getting training job:', error);
+        res.status(500).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to get training job'
+        });
+    }
+});
+/**
+ * @route GET /api/training/jobs
+ * @desc List training jobs with filters
+ */ router.get('/jobs', async (req, res)=>{
+    try {
+        const filters = {};
+        if (req.query.status) filters.status = req.query.status;
+        if (req.query.model) filters.model = req.query.model;
+        if (req.query.created_after) filters.created_after = new Date(req.query.created_after);
+        if (req.query.created_before) filters.created_before = new Date(req.query.created_before);
+        const jobs = _ModelTrainingEngine.modelTrainingEngine.listTrainingJobs(filters);
+        res.json({
+            success: true,
+            data: {
+                jobs,
+                total_count: jobs.length
+            }
+        });
+    } catch (error) {
+        console.error('Error listing training jobs:', error);
+        res.status(500).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to list training jobs'
+        });
+    }
+});
+/**
+ * @route POST /api/training/jobs/:jobId/cancel
+ * @desc Cancel a training job
+ */ router.post('/jobs/:jobId/cancel', async (req, res)=>{
+    try {
+        const { jobId } = req.params;
+        await _ModelTrainingEngine.modelTrainingEngine.cancelTrainingJob(jobId);
+        res.json({
+            success: true,
+            message: `Training job ${jobId} cancelled successfully`
+        });
+    } catch (error) {
+        console.error('Error cancelling training job:', error);
+        res.status(400).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to cancel training job'
+        });
+    }
+});
+/**
+ * @route POST /api/training/synthetic-data
+ * @desc Generate synthetic training data
+ */ router.post('/synthetic-data', (0, _validation.validation)(syntheticDataSchema), async (req, res)=>{
+    try {
+        const outputPath = await _ModelTrainingEngine.modelTrainingEngine.generateSyntheticData(req.body);
+        res.json({
+            success: true,
+            data: {
+                output_path: outputPath,
+                generation_config: req.body.generation_config,
+                template_count: req.body.template_prompts.length
+            }
+        });
+    } catch (error) {
+        console.error('Error generating synthetic data:', error);
+        res.status(400).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to generate synthetic data'
+        });
+    }
+});
+/**
+ * @route POST /api/training/evaluate/:modelName
+ * @desc Evaluate model performance
+ */ router.post('/evaluate/:modelName', async (req, res)=>{
+    try {
+        const { modelName } = req.params;
+        const { benchmark_datasets = [], custom_metrics = [] } = req.body;
+        const evaluation = await _ModelTrainingEngine.modelTrainingEngine.evaluateModel(modelName, benchmark_datasets, custom_metrics);
+        res.json({
+            success: true,
+            data: evaluation
+        });
+    } catch (error) {
+        console.error('Error evaluating model:', error);
+        res.status(400).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to evaluate model'
+        });
+    }
+});
+/**
+ * @route POST /api/training/deploy/:modelVersionId
+ * @desc Deploy a trained model
+ */ router.post('/deploy/:modelVersionId', async (req, res)=>{
+    try {
+        const { modelVersionId } = req.params;
+        const { target = 'local', auto_rollback = true, health_check_timeout = 30000, deployment_tags = [] } = req.body;
+        const deployment = await _ModelTrainingEngine.modelTrainingEngine.deployModel(modelVersionId, target, {
+            auto_rollback,
+            health_check_timeout,
+            deployment_tags
+        });
+        res.json({
+            success: true,
+            data: deployment
+        });
+    } catch (error) {
+        console.error('Error deploying model:', error);
+        res.status(400).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to deploy model'
+        });
+    }
+});
+/**
+ * @route GET /api/training/statistics
+ * @desc Get training system statistics
+ */ router.get('/statistics', async (req, res)=>{
+    try {
+        const stats = _ModelTrainingEngine.modelTrainingEngine.getTrainingStatistics();
+        res.json({
+            success: true,
+            data: stats
+        });
+    } catch (error) {
+        console.error('Error getting training statistics:', error);
+        res.status(500).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to get training statistics'
+        });
+    }
+});
+// Model Registry Routes
+/**
+ * @route POST /api/training/models
+ * @desc Register a new model
+ */ router.post('/models', (0, _validation.validation)(modelRegistrationSchema), async (req, res)=>{
+    try {
+        const model = await _ModelRegistry.modelRegistry.registerModel(req.body);
+        res.status(201).json({
+            success: true,
+            data: model
+        });
+    } catch (error) {
+        console.error('Error registering model:', error);
+        res.status(400).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to register model'
+        });
+    }
+});
+/**
+ * @route GET /api/training/models/:modelId
+ * @desc Get model details
+ */ router.get('/models/:modelId', async (req, res)=>{
+    try {
+        const { modelId } = req.params;
+        const model = _ModelRegistry.modelRegistry.getModel(modelId);
+        if (!model) {
+            return res.status(404).json({
+                success: false,
+                error: 'Model not found'
+            });
+        }
+        res.json({
+            success: true,
+            data: model
+        });
+    } catch (error) {
+        console.error('Error getting model:', error);
+        res.status(500).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to get model'
+        });
+    }
+});
+/**
+ * @route POST /api/training/models/search
+ * @desc Search models with filters
+ */ router.post('/models/search', (0, _validation.validation)(modelSearchSchema), async (req, res)=>{
+    try {
+        const searchResult = _ModelRegistry.modelRegistry.searchModels(req.body);
+        res.json({
+            success: true,
+            data: searchResult
+        });
+    } catch (error) {
+        console.error('Error searching models:', error);
+        res.status(400).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to search models'
+        });
+    }
+});
+/**
+ * @route POST /api/training/models/compare
+ * @desc Compare two models
+ */ router.post('/models/compare', async (req, res)=>{
+    try {
+        const { model_a_id, model_b_id } = req.body;
+        if (!model_a_id || !model_b_id) {
+            return res.status(400).json({
+                success: false,
+                error: 'Both model_a_id and model_b_id are required'
+            });
+        }
+        const comparison = await _ModelRegistry.modelRegistry.compareModels(model_a_id, model_b_id);
+        res.json({
+            success: true,
+            data: comparison
+        });
+    } catch (error) {
+        console.error('Error comparing models:', error);
+        res.status(400).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to compare models'
+        });
+    }
+});
+/**
+ * @route GET /api/training/models/:modelId/usage
+ * @desc Get model usage statistics
+ */ router.get('/models/:modelId/usage', async (req, res)=>{
+    try {
+        const { modelId } = req.params;
+        const timeRange = req.query.start && req.query.end ? {
+            start: new Date(req.query.start),
+            end: new Date(req.query.end)
+        } : undefined;
+        const usage = _ModelRegistry.modelRegistry.getModelUsageStats(modelId, timeRange);
+        res.json({
+            success: true,
+            data: usage
+        });
+    } catch (error) {
+        console.error('Error getting model usage:', error);
+        res.status(400).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to get model usage'
+        });
+    }
+});
+/**
+ * @route GET /api/training/models/:modelId/versions
+ * @desc Get model version history
+ */ router.get('/models/:modelId/versions', async (req, res)=>{
+    try {
+        const { modelId } = req.params;
+        const versions = _ModelRegistry.modelRegistry.getModelVersionHistory(modelId);
+        res.json({
+            success: true,
+            data: {
+                model_id: modelId,
+                versions,
+                total_versions: versions.length
+            }
+        });
+    } catch (error) {
+        console.error('Error getting model versions:', error);
+        res.status(500).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to get model versions'
+        });
+    }
+});
+/**
+ * @route PUT /api/training/models/:modelId
+ * @desc Update model metadata
+ */ router.put('/models/:modelId', async (req, res)=>{
+    try {
+        const { modelId } = req.params;
+        const updatedModel = await _ModelRegistry.modelRegistry.updateModel(modelId, req.body);
+        res.json({
+            success: true,
+            data: updatedModel
+        });
+    } catch (error) {
+        console.error('Error updating model:', error);
+        res.status(400).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to update model'
+        });
+    }
+});
+/**
+ * @route DELETE /api/training/models/:modelId
+ * @desc Delete a model
+ */ router.delete('/models/:modelId', async (req, res)=>{
+    try {
+        const { modelId } = req.params;
+        const force = req.query.force === 'true';
+        await _ModelRegistry.modelRegistry.deleteModel(modelId, force);
+        res.json({
+            success: true,
+            message: `Model ${modelId} deleted successfully`
+        });
+    } catch (error) {
+        console.error('Error deleting model:', error);
+        res.status(400).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to delete model'
+        });
+    }
+});
+/**
+ * @route GET /api/training/registry/statistics
+ * @desc Get model registry statistics
+ */ router.get('/registry/statistics', async (req, res)=>{
+    try {
+        const stats = _ModelRegistry.modelRegistry.getRegistryStatistics();
+        res.json({
+            success: true,
+            data: stats
+        });
+    } catch (error) {
+        console.error('Error getting registry statistics:', error);
+        res.status(500).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to get registry statistics'
+        });
+    }
+});
+/**
+ * @route GET /api/training/health
+ * @desc Health check for training system
+ */ router.get('/health', async (req, res)=>{
+    try {
+        const health = {
+            status: 'healthy',
+            timestamp: new Date(),
+            components: {
+                training_engine: 'healthy',
+                model_registry: 'healthy',
+                tensorflow: 'healthy'
+            },
+            statistics: {
+                active_jobs: _ModelTrainingEngine.modelTrainingEngine.listTrainingJobs({
+                    status: 'training'
+                }).length,
+                total_models: _ModelRegistry.modelRegistry.getRegistryStatistics().total_models,
+                system_load: process.cpuUsage(),
+                memory_usage: process.memoryUsage()
+            }
+        };
+        res.json({
+            success: true,
+            data: health
+        });
+    } catch (error) {
+        console.error('Error getting training health:', error);
+        res.status(500).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Training system health check failed'
+        });
+    }
+});
+const _default = router;

@@ -133,17 +133,18 @@ async function testTestQueueManager() {
   console.log('\n=== Testing TestQueueManager ===');
   
   // Initialize test database
-  const db = initializeDatabase();
+  const db = await initializeDatabase();
   
   // Create test data
   const promptCardId = Date.now();
   const testCaseIds = [1, 2, 3, 4, 5];
   
   // Insert test prompt card
-  db.prepare(`
+  const insertPromptCard = (await db).prepare(`
     INSERT INTO prompt_cards (id, title, description, prompt_template, created_at)
     VALUES (?, ?, ?, ?, ?)
-  `).run(
+  `);
+  insertPromptCard.run(
     promptCardId,
     'Test Prompt Card',
     'Test description',
@@ -152,11 +153,12 @@ async function testTestQueueManager() {
   );
   
   // Insert test cases
+  const insertTestCase = (await db).prepare(`
+    INSERT INTO test_cases (id, prompt_card_id, name, input_variables, assertions, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
   for (const testCaseId of testCaseIds) {
-    db.prepare(`
-      INSERT INTO test_cases (id, prompt_card_id, name, input_variables, assertions, created_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(
+    insertTestCase.run(
       testCaseId,
       promptCardId,
       `Test Case ${testCaseId}`,
@@ -175,8 +177,7 @@ async function testTestQueueManager() {
     port: 6379,
     // Use fake Redis for testing
     lazyConnect: true,
-    maxRetriesPerRequest: 1,
-    retryDelayOnFailover: 100
+    maxRetriesPerRequest: 1
   });
   
   // Test queuing execution

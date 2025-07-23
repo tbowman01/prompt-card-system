@@ -64,7 +64,7 @@ describe('Docker Integration Tests - Complete System Verification', () => {
     analyticsSessionId: ''
   };
 
-  before(async function() {
+  beforeAll(async function() {
     this.timeout(120000); // 2 minutes for setup
     
     console.log('🐳 Starting Docker Integration Test Suite');
@@ -76,7 +76,7 @@ describe('Docker Integration Tests - Complete System Verification', () => {
     console.log('✅ Baseline metrics captured:', baselineMetrics);
   });
 
-  after(async function() {
+  afterAll(async function() {
     this.timeout(60000); // 1 minute for cleanup
     
     console.log('🧹 Cleaning up Docker integration test resources...');
@@ -91,7 +91,7 @@ describe('Docker Integration Tests - Complete System Verification', () => {
         const isHealthy = await checkServiceHealth(service);
         healthResults.push({ service: service.name, healthy: isHealthy });
         
-        expect(isHealthy).to.be.true; 
+        expect(isHealthy).toBe(true); 
         // `Service ${service.name} is not healthy`;
       }
       
@@ -104,28 +104,28 @@ describe('Docker Integration Tests - Complete System Verification', () => {
         'prompt-frontend', 
         'prompt-backend:3001'
       );
-      expect(frontendToBackend).to.be.true;
+      expect(frontendToBackend).toBe(true);
 
       // Test backend -> ollama connectivity
       const backendToOllama = await testNetworkConnectivity(
         'prompt-backend', 
         'prompt-ollama:11434'
       );
-      expect(backendToOllama).to.be.true;
+      expect(backendToOllama).toBe(true);
 
       // Test backend -> redis connectivity
       const backendToRedis = await testNetworkConnectivity(
         'prompt-backend', 
         'prompt-redis:6379'
       );
-      expect(backendToRedis).to.be.true;
+      expect(backendToRedis).toBe(true);
 
       // Test backend -> postgres connectivity
       const backendToPostgres = await testNetworkConnectivity(
         'prompt-backend', 
         'prompt-postgres:5432'
       );
-      expect(backendToPostgres).to.be.true;
+      expect(backendToPostgres).toBe(true);
 
       console.log('✅ All inter-service network connections verified');
     });
@@ -134,16 +134,16 @@ describe('Docker Integration Tests - Complete System Verification', () => {
       const startupOrder = await getServiceStartupOrder();
       
       // Verify postgres started before backend
-      expect(startupOrder.postgres).to.be.below(startupOrder.backend);
+      expect(startupOrder.postgres).toBeLessThan(startupOrder.backend);
       
       // Verify redis started before backend
-      expect(startupOrder.redis).to.be.below(startupOrder.backend);
+      expect(startupOrder.redis).toBeLessThan(startupOrder.backend);
       
       // Verify ollama started before backend
-      expect(startupOrder.ollama).to.be.below(startupOrder.backend);
+      expect(startupOrder.ollama).toBeLessThan(startupOrder.backend);
       
       // Verify backend started before frontend
-      expect(startupOrder.backend).to.be.below(startupOrder.frontend);
+      expect(startupOrder.backend).toBeLessThan(startupOrder.frontend);
       
       console.log('✅ Service startup order verified:', startupOrder);
     });
@@ -172,8 +172,8 @@ describe('Docker Integration Tests - Complete System Verification', () => {
         .expect(201);
 
       testData.cardId = createResponse.body.data.id;
-      expect(createResponse.body.success).to.be.true;
-      expect(createResponse.body.data).to.have.property('id');
+      expect(createResponse.body.success).toBe(true);
+      expect(createResponse.body.data).toHaveProperty('id');
 
       // 2. Execute tests on the prompt card
       const testResponse = await request(`http://localhost:3001`)
@@ -197,7 +197,7 @@ describe('Docker Integration Tests - Complete System Verification', () => {
         .expect(200);
 
       testData.testExecutionId = testResponse.body.data.executionId;
-      expect(testResponse.body.success).to.be.true;
+      expect(testResponse.body.success).toBe(true);
       
       // 3. Wait for test completion and verify results
       await waitForTestCompletion(testData.testExecutionId);
@@ -206,9 +206,9 @@ describe('Docker Integration Tests - Complete System Verification', () => {
         .get(`/api/test-execution/${testData.testExecutionId}/results`)
         .expect(200);
 
-      expect(resultsResponse.body.success).to.be.true;
-      expect(resultsResponse.body.data).to.have.property('testResults');
-      expect(resultsResponse.body.data.testResults).to.be.an('array');
+      expect(resultsResponse.body.success).toBe(true);
+      expect(resultsResponse.body.data).toHaveProperty('testResults');
+      expect(Array.isArray(resultsResponse.body.data.testResults)).toBe(true);
 
       console.log('✅ Complete workflow verified successfully');
     });
@@ -245,8 +245,8 @@ describe('Docker Integration Tests - Complete System Verification', () => {
           
           if (message.type === 'completed' || progressUpdatesReceived >= 2) {
             clearTimeout(timeout);
-            expect(connectionEstablished).to.be.true;
-            expect(progressUpdatesReceived).to.be.above(0);
+            expect(connectionEstablished).toBe(true);
+            expect(progressUpdatesReceived).toBeGreaterThan(0);
             ws.close();
             resolve(undefined);
           }
@@ -285,9 +285,9 @@ describe('Docker Integration Tests - Complete System Verification', () => {
         })
         .expect(200);
 
-      expect(metricsResponse.body.success).to.be.true;
-      expect(metricsResponse.body.data).to.have.property('executionMetrics');
-      expect(metricsResponse.body.data).to.have.property('performanceMetrics');
+      expect(metricsResponse.body.success).toBe(true);
+      expect(metricsResponse.body.data).toHaveProperty('executionMetrics');
+      expect(metricsResponse.body.data).toHaveProperty('performanceMetrics');
 
       console.log('✅ Analytics data collection verified');
     });
@@ -323,8 +323,8 @@ describe('Docker Integration Tests - Complete System Verification', () => {
       
       const successRate = (successful / responses.length) * 100;
       
-      expect(successRate).to.be.above(90); // 90% success rate
-      expect(duration).to.be.below(15000); // Under 15 seconds
+      expect(successRate).toBeGreaterThan(90); // 90% success rate
+      expect(duration).toBeLessThan(15000); // Under 15 seconds
       
       console.log(`✅ Concurrent load test: ${successRate}% success rate in ${duration}ms`);
     });
@@ -370,8 +370,8 @@ describe('Docker Integration Tests - Complete System Verification', () => {
         metricsEnd
       );
       
-      expect(successRate).to.be.above(85); // 85% success rate under load
-      expect(performanceDegradation).to.be.below(30); // Less than 30% degradation
+      expect(successRate).toBeGreaterThan(85); // 85% success rate under load
+      expect(performanceDegradation).toBeLessThan(30); // Less than 30% degradation
       
       console.log(`✅ Sustained load test: ${successRate}% success rate, ${performanceDegradation}% performance degradation`);
     });
@@ -381,8 +381,8 @@ describe('Docker Integration Tests - Complete System Verification', () => {
       
       // Verify no container is using excessive resources
       for (const [containerName, metrics] of Object.entries(resourceMetrics)) {
-        expect(metrics.cpuPercent).to.be.below(80); // Less than 80% CPU
-        expect(metrics.memoryPercent).to.be.below(85); // Less than 85% memory
+        expect(metrics.cpuPercent).toBeLessThan(80); // Less than 80% CPU
+        expect(metrics.memoryPercent).toBeLessThan(85); // Less than 85% memory
         
         console.log(`📊 ${containerName}: CPU ${metrics.cpuPercent}%, Memory ${metrics.memoryPercent}%`);
       }
@@ -403,7 +403,7 @@ describe('Docker Integration Tests - Complete System Verification', () => {
           .get('/api/health')
           .expect(200);
         
-        expect(response.body).to.have.property('status');
+        expect(response.body).toHaveProperty('status');
         // Health check might report degraded status
         
         // Test caching functionality (should gracefully degrade)
@@ -422,7 +422,7 @@ describe('Docker Integration Tests - Complete System Verification', () => {
           });
         
         // Should still work but might be slower
-        expect(cacheTestResponse.status).to.be.oneOf([200, 503]);
+        expect([200, 503]).toContain(cacheTestResponse.status);
         
       } finally {
         // Restart Redis
@@ -433,7 +433,7 @@ describe('Docker Integration Tests - Complete System Verification', () => {
         
         // Verify Redis is back online
         const redisHealth = await checkServiceHealth(services.find(s => s.name === 'redis')!);
-        expect(redisHealth).to.be.true;
+        expect(redisHealth).toBe(true);
       }
       
       console.log('✅ Service failure handling verified');
@@ -445,9 +445,9 @@ describe('Docker Integration Tests - Complete System Verification', () => {
         .expect(200);
       
       // Check security headers
-      expect(response.headers).to.have.property('x-frame-options');
-      expect(response.headers).to.have.property('x-content-type-options');
-      expect(response.headers['x-content-type-options']).to.equal('nosniff');
+      expect(response.headers).toHaveProperty('x-frame-options');
+      expect(response.headers).toHaveProperty('x-content-type-options');
+      expect(response.headers['x-content-type-options']).toBe('nosniff');
       
       // Test CORS
       const corsResponse = await request(`http://localhost:3001`)
@@ -455,7 +455,7 @@ describe('Docker Integration Tests - Complete System Verification', () => {
         .set('Origin', 'http://localhost:3000')
         .expect(200);
       
-      expect(corsResponse.headers['access-control-allow-origin']).to.exist;
+      expect(corsResponse.headers['access-control-allow-origin']).toBeDefined();
       
       console.log('✅ Security headers and CORS verified');
     });
@@ -466,15 +466,15 @@ describe('Docker Integration Tests - Complete System Verification', () => {
         .get('/api/prompt-cards')
         .expect(200);
       
-      expect(dbTestResponse.body.success).to.be.true;
+      expect(dbTestResponse.body.success).toBe(true);
       
       // Verify database is properly connected
       const dbHealthResponse = await request(`http://localhost:3001`)
         .get('/api/health/database')
         .expect(200);
       
-      expect(dbHealthResponse.body.database).to.have.property('connected');
-      expect(dbHealthResponse.body.database.connected).to.be.true;
+      expect(dbHealthResponse.body.database).toHaveProperty('connected');
+      expect(dbHealthResponse.body.database.connected).toBe(true);
       
       console.log('✅ Database connection handling verified');
     });
@@ -486,19 +486,19 @@ describe('Docker Integration Tests - Complete System Verification', () => {
         .get('/api/health/comprehensive')
         .expect(200);
       
-      expect(healthResponse.body).to.have.property('status');
-      expect(healthResponse.body).to.have.property('timestamp');
-      expect(healthResponse.body).to.have.property('services');
-      expect(healthResponse.body).to.have.property('database');
-      expect(healthResponse.body).to.have.property('cache');
-      expect(healthResponse.body).to.have.property('llm');
-      expect(healthResponse.body).to.have.property('system');
+      expect(healthResponse.body).toHaveProperty('status');
+      expect(healthResponse.body).toHaveProperty('timestamp');
+      expect(healthResponse.body).toHaveProperty('services');
+      expect(healthResponse.body).toHaveProperty('database');
+      expect(healthResponse.body).toHaveProperty('cache');
+      expect(healthResponse.body).toHaveProperty('llm');
+      expect(healthResponse.body).toHaveProperty('system');
       
       // Verify all service statuses
-      expect(healthResponse.body.services.backend).to.equal('healthy');
-      expect(healthResponse.body.database.connected).to.be.true;
-      expect(healthResponse.body.cache.connected).to.be.true;
-      expect(healthResponse.body.llm.available).to.be.true;
+      expect(healthResponse.body.services.backend).toBe('healthy');
+      expect(healthResponse.body.database.connected).toBe(true);
+      expect(healthResponse.body.cache.connected).toBe(true);
+      expect(healthResponse.body.llm.available).toBe(true);
       
       console.log('✅ Comprehensive health monitoring verified');
     });
@@ -509,10 +509,10 @@ describe('Docker Integration Tests - Complete System Verification', () => {
         .expect(200);
       
       // Should return Prometheus-format metrics
-      expect(metricsResponse.text).to.include('# HELP');
-      expect(metricsResponse.text).to.include('# TYPE');
-      expect(metricsResponse.text).to.include('http_requests_total');
-      expect(metricsResponse.text).to.include('process_cpu_user_seconds_total');
+      expect(metricsResponse.text).toContain('# HELP');
+      expect(metricsResponse.text).toContain('# TYPE');
+      expect(metricsResponse.text).toContain('http_requests_total');
+      expect(metricsResponse.text).toContain('process_cpu_user_seconds_total');
       
       console.log('✅ Metrics collection and export verified');
     });

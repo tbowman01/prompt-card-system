@@ -112,7 +112,7 @@ export interface TrainingLog {
   metadata?: Record<string, any>;
 }
 
-export interface ModelVersion {
+export interface TrainingModelVersion {
   id: string;
   model_name: string;
   version: string;
@@ -164,7 +164,7 @@ export class ModelTrainingEngine extends EventEmitter {
   private modelHealthMonitor: ModelHealthMonitor;
   private optimizationEngine: OptimizationEngine;
   private activeJobs: Map<string, TrainingJob>;
-  private modelRegistry: Map<string, ModelVersion[]>;
+  private modelRegistry: Map<string, TrainingModelVersion[]>;
   private trainingCache: LRUCache<string, any>;
   private performanceMetrics: Map<string, number[]>;
   private isInitialized = false;
@@ -174,6 +174,21 @@ export class ModelTrainingEngine extends EventEmitter {
     this.eventStore = EventStore.getInstance();
     this.activeJobs = new Map();
     this.modelRegistry = new Map();
+    
+    // Initialize services
+    this.modelHealthMonitor = new ModelHealthMonitor({
+      healthCheckInterval: 60000,
+      benchmarkInterval: 300000,
+      maxResponseTime: 30000,
+      maxErrorRate: 10,
+      minHealthScore: 70,
+      alertThresholds: {
+        responseTime: 15000,
+        errorRate: 10,
+        memoryUsage: 85
+      }
+    });
+    this.optimizationEngine = new OptimizationEngine();
     
     // Initialize caches
     this.trainingCache = new LRUCache({
@@ -221,10 +236,10 @@ export class ModelTrainingEngine extends EventEmitter {
       metadata: {
         created_by: 'system',
         created_at: new Date(),
-        tags: config.metadata?.tags || [],
-        description: config.metadata?.description || '',
-        base_model: config.metadata?.base_model || config.model,
-        training_objective: config.metadata?.training_objective || 'general_improvement'
+        tags: [],
+        description: '',
+        base_model: config.model,
+        training_objective: 'general_improvement'
       }
     };
 
@@ -622,7 +637,7 @@ export class ModelTrainingEngine extends EventEmitter {
   /**
    * Get model registry
    */
-  getModelRegistry(): Map<string, ModelVersion[]> {
+  getModelRegistry(): Map<string, TrainingModelVersion[]> {
     return new Map(this.modelRegistry);
   }
 
@@ -852,10 +867,10 @@ export class ModelTrainingEngine extends EventEmitter {
     };
   }
 
-  private async createModelVersion(job: TrainingJob, evaluation: any): Promise<ModelVersion> {
+  private async createModelVersion(job: TrainingJob, evaluation: any): Promise<TrainingModelVersion> {
     const versionId = `${job.config.model}_v${Date.now()}`;
     
-    const modelVersion: ModelVersion = {
+    const modelVersion: TrainingModelVersion = {
       id: versionId,
       model_name: job.config.model,
       version: `1.0.${Date.now()}`,
@@ -1039,7 +1054,7 @@ Return only the varied prompt without explanations.`;
     return recommendations;
   }
 
-  private async getModelVersion(versionId: string): Promise<ModelVersion | null> {
+  private async getModelVersion(versionId: string): Promise<TrainingModelVersion | null> {
     for (const versions of this.modelRegistry.values()) {
       const version = versions.find(v => v.id === versionId);
       if (version) return version;
@@ -1047,27 +1062,27 @@ Return only the varied prompt without explanations.`;
     return null;
   }
 
-  private async updateModelVersion(version: ModelVersion): Promise<void> {
+  private async updateModelVersion(version: TrainingModelVersion): Promise<void> {
     // Update model version in registry and storage
     console.log(`Updated model version: ${version.id}`);
   }
 
-  private async deployToOllama(version: ModelVersion, config: any): Promise<any> {
+  private async deployToOllama(version: TrainingModelVersion, config: any): Promise<any> {
     // Implement Ollama deployment
     return { status: 'success', endpoint: `http://localhost:11434/api/generate` };
   }
 
-  private async deployToHuggingFace(version: ModelVersion, config: any): Promise<any> {
+  private async deployToHuggingFace(version: TrainingModelVersion, config: any): Promise<any> {
     // Implement HuggingFace deployment
     return { status: 'success', endpoint: `https://huggingface.co/models/${version.model_name}` };
   }
 
-  private async deployToLocal(version: ModelVersion, config: any): Promise<any> {
+  private async deployToLocal(version: TrainingModelVersion, config: any): Promise<any> {
     // Implement local deployment
     return { status: 'success', endpoint: `http://localhost:8080/api/generate` };
   }
 
-  private async deployToCloud(version: ModelVersion, config: any): Promise<any> {
+  private async deployToCloud(version: TrainingModelVersion, config: any): Promise<any> {
     // Implement cloud deployment
     return { status: 'success', endpoint: `https://api.cloud-provider.com/models/${version.id}` };
   }

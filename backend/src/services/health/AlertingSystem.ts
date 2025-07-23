@@ -16,7 +16,8 @@ export enum AlertType {
   CIRCUIT_BREAKER_OPENED = 'circuit_breaker_opened',
   CIRCUIT_BREAKER_CLOSED = 'circuit_breaker_closed',
   SYSTEM_UNHEALTHY = 'system_unhealthy',
-  DEPENDENCY_FAILURE = 'dependency_failure'
+  DEPENDENCY_FAILURE = 'dependency_failure',
+  PERFORMANCE = 'performance'
 }
 
 interface Alert {
@@ -268,7 +269,7 @@ export class AlertingSystem extends EventEmitter {
     });
   }
 
-  private checkAndCreateAlert(params: {
+  public checkAndCreateAlert(params: {
     type: AlertType;
     service: string;
     message: string;

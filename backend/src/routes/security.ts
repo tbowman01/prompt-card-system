@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import {
   securityMonitor,
   logAggregator,
@@ -15,7 +15,7 @@ import {
 const router = Router();
 
 // Security monitoring endpoints
-router.get('/status', async (req, res) => {
+router.get('/status', async (req: Request, res: Response) => {
   try {
     const metrics = securityMonitor.getSecurityMetrics();
     const alertStats = alertingSystem.getAlertStatistics();
@@ -37,7 +37,7 @@ router.get('/status', async (req, res) => {
 });
 
 // Vulnerability scanning endpoints
-router.post('/scan/dependencies', async (req, res) => {
+router.post('/scan/dependencies', async (req: Request, res: Response) => {
   try {
     const report = await securityMonitor.scanDependencies();
     res.json(report);

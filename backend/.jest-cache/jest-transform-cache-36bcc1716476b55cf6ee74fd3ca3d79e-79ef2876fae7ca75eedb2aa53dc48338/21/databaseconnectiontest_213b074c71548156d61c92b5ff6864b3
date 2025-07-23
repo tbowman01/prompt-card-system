@@ -1,0 +1,86 @@
+9ebd5f26915a5d4d3e38387250b0e4d9
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+const _connection = require("../../database/connection");
+describe('Database Connection Pool', ()=>{
+    beforeEach(async ()=>{
+        // Ensure connection pool is initialized before tests
+        await _connection.connectionPool.getConnection().then((conn)=>_connection.connectionPool.releaseConnection(conn));
+    });
+    afterEach(()=>{
+    // Cleanup connections
+    });
+    describe('Connection Pool Management', ()=>{
+        it('should initialize connection pool', async ()=>{
+            // Wait for initialization to complete
+            await _connection.connectionPool.getConnection().then((conn)=>_connection.connectionPool.releaseConnection(conn));
+            const stats = _connection.connectionPool.getStats();
+            expect(stats.total).toBeGreaterThan(0);
+        });
+        it('should get and release connections', async ()=>{
+            const connection = await _connection.connectionPool.getConnection();
+            expect(connection).toBeDefined();
+            _connection.connectionPool.releaseConnection(connection);
+            const stats = _connection.connectionPool.getStats();
+            expect(stats.available).toBeGreaterThan(0);
+        });
+        it('should handle concurrent connections', async ()=>{
+            const connections = await Promise.all([
+                _connection.connectionPool.getConnection(),
+                _connection.connectionPool.getConnection(),
+                _connection.connectionPool.getConnection()
+            ]);
+            expect(connections).toHaveLength(3);
+            connections.forEach((conn)=>expect(conn).toBeDefined());
+            // Release all connections
+            connections.forEach((conn)=>_connection.connectionPool.releaseConnection(conn));
+        });
+        it('should execute operations with connection pooling', async ()=>{
+            const result = await _connection.connectionPool.withConnection(async (conn)=>{
+                // Simple test query
+                return conn.prepare('SELECT 1 as test').get();
+            });
+            expect(result).toEqual({
+                test: 1
+            });
+        });
+    });
+    describe('Database Operations', ()=>{
+        it('should execute prepared statements', async ()=>{
+            const stmt = _connection.db.prepare('SELECT ? as value');
+            const result = await stmt.get('test');
+            expect(result).toEqual({
+                value: 'test'
+            });
+        });
+        it('should handle transactions', async ()=>{
+            const result = await _connection.db.transaction((database)=>{
+                const stmt = database.prepare('SELECT ? as transaction_test');
+                return stmt.get('success');
+            });
+            expect(result).toEqual({
+                transaction_test: 'success'
+            });
+        });
+        it('should provide connection stats', ()=>{
+            const stats = _connection.db.getStats();
+            expect(stats).toHaveProperty('total');
+            expect(stats).toHaveProperty('available');
+            expect(stats).toHaveProperty('busy');
+            expect(stats).toHaveProperty('initialized');
+        });
+    });
+    describe('Error Handling', ()=>{
+        it('should handle connection failures gracefully', async ()=>{
+            // Test with genuinely invalid SQL that will throw an error
+            await expect(_connection.db.exec('CREATE TABLE invalid_table (column_with_invalid_syntax INVALID_TYPE CONSTRAINT)')).rejects.toThrow();
+        });
+        it('should recover from connection issues', async ()=>{
+            // Test connection recovery logic
+            const stats = _connection.db.getStats();
+            expect(stats.initialized).toBe(true);
+        });
+    });
+});

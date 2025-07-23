@@ -959,8 +959,8 @@ export class CapacityPlanner {
   // Additional helper methods (simplified implementations)
   private async getUtilizationHistory(resource: string, days: number): Promise<any[]> { return []; }
   private calculateGrowthTrend(history: any[]): { rate: number; confidence: number } { return { rate: 0.1, confidence: 0.8 }; }
-  private async analyzeSeasonality(resource: string, days: number): Promise<{ daily: number[]; weekly: number[] }> { 
-    return { daily: new Array(24).fill(0), weekly: new Array(7).fill(0) }; 
+  private async analyzeSeasonality(resource: string, days: number): Promise<{ daily: number[]; weekly: number[]; monthly: number[] }> { 
+    return { daily: new Array(24).fill(0), weekly: new Array(7).fill(0), monthly: new Array(12).fill(0) }; 
   }
   private getResourceThresholds(resource: string): { warning: number; critical: number; maximum: number } {
     return { warning: 70, critical: 85, maximum: 95 };

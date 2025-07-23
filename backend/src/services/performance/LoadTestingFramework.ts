@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events';
 import { performance } from 'perf_hooks';
 import { Worker, isMainThread, parentPort, workerData } from 'worker_threads';
-import { setTimeout } from 'timers/promises';
+import { setTimeout as setTimeoutPromise } from 'timers/promises';
 import { promisify } from 'util';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
@@ -212,7 +212,7 @@ class WorkerPool {
           this.busy.add(worker);
           resolve(worker);
         } else {
-          setTimeout(checkAvailable, 10);
+          setTimeout(() => checkAvailable(), 10);
         }
       };
       checkAvailable();
@@ -451,7 +451,7 @@ export class LoadTestingFramework extends EventEmitter {
       });
 
       // Wait for test duration
-      await setTimeout(config.duration.total * 1000);
+      await setTimeoutPromise(config.duration.total * 1000);
 
       // Stop all users
       this.isRunning = false;
@@ -544,7 +544,7 @@ export class LoadTestingFramework extends EventEmitter {
       }
       
       if (delay > 0 && i < totalUsers - 1) {
-        await setTimeout(delay);
+        await setTimeoutPromise(delay);
       }
     }
   }
@@ -590,7 +590,7 @@ export class LoadTestingFramework extends EventEmitter {
       // Think time
       const thinkTime = this.calculateThinkTime(config.users.thinkTime);
       if (thinkTime > 0) {
-        await setTimeout(thinkTime);
+        await setTimeoutPromise(thinkTime);
       }
     }
   }
@@ -648,7 +648,9 @@ export class LoadTestingFramework extends EventEmitter {
         timestamp: Date.now(),
         userId: context.userId,
         endpoint: endpoint.path,
-        headers: response.headers
+        headers: Object.fromEntries(
+          Object.entries(response.headers).map(([key, value]) => [key, String(value)])
+        )
       };
 
     } catch (error) {

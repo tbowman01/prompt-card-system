@@ -1,0 +1,516 @@
+e1199c9c92b95e518415d35a53caf329
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+function _export(target, all) {
+    for(var name in all)Object.defineProperty(target, name, {
+        enumerable: true,
+        get: Object.getOwnPropertyDescriptor(all, name).get
+    });
+}
+_export(exports, {
+    get PerformanceMonitor () {
+        return PerformanceMonitor;
+    },
+    get performanceMonitor () {
+        return performanceMonitor;
+    }
+});
+const _perf_hooks = require("perf_hooks");
+const _events = require("events");
+const _os = /*#__PURE__*/ _interop_require_wildcard(require("os"));
+const _lrucache = require("lru-cache");
+function _define_property(obj, key, value) {
+    if (key in obj) {
+        Object.defineProperty(obj, key, {
+            value: value,
+            enumerable: true,
+            configurable: true,
+            writable: true
+        });
+    } else {
+        obj[key] = value;
+    }
+    return obj;
+}
+function _getRequireWildcardCache(nodeInterop) {
+    if (typeof WeakMap !== "function") return null;
+    var cacheBabelInterop = new WeakMap();
+    var cacheNodeInterop = new WeakMap();
+    return (_getRequireWildcardCache = function(nodeInterop) {
+        return nodeInterop ? cacheNodeInterop : cacheBabelInterop;
+    })(nodeInterop);
+}
+function _interop_require_wildcard(obj, nodeInterop) {
+    if (!nodeInterop && obj && obj.__esModule) {
+        return obj;
+    }
+    if (obj === null || typeof obj !== "object" && typeof obj !== "function") {
+        return {
+            default: obj
+        };
+    }
+    var cache = _getRequireWildcardCache(nodeInterop);
+    if (cache && cache.has(obj)) {
+        return cache.get(obj);
+    }
+    var newObj = {
+        __proto__: null
+    };
+    var hasPropertyDescriptor = Object.defineProperty && Object.getOwnPropertyDescriptor;
+    for(var key in obj){
+        if (key !== "default" && Object.prototype.hasOwnProperty.call(obj, key)) {
+            var desc = hasPropertyDescriptor ? Object.getOwnPropertyDescriptor(obj, key) : null;
+            if (desc && (desc.get || desc.set)) {
+                Object.defineProperty(newObj, key, desc);
+            } else {
+                newObj[key] = obj[key];
+            }
+        }
+    }
+    newObj.default = obj;
+    if (cache) {
+        cache.set(obj, newObj);
+    }
+    return newObj;
+}
+class PerformanceMonitor extends _events.EventEmitter {
+    /**
+   * Start monitoring system and application performance
+   */ startMonitoring(intervalMs = 5000) {
+        if (this.isMonitoring) {
+            return;
+        }
+        this.isMonitoring = true;
+        // Start collecting metrics at specified interval
+        this.intervalId = setInterval(()=>{
+            this.collectSystemMetrics();
+            this.collectApplicationMetrics();
+            this.checkAlerts();
+        }, intervalMs);
+        // Start Node.js performance monitoring
+        if (this.observer) {
+            this.observer.observe({
+                entryTypes: [
+                    'measure',
+                    'mark',
+                    'resource'
+                ]
+            });
+        }
+        console.log(`Performance monitoring started with ${intervalMs}ms interval`);
+    }
+    /**
+   * Stop monitoring
+   */ stopMonitoring() {
+        if (!this.isMonitoring) {
+            return;
+        }
+        this.isMonitoring = false;
+        if (this.intervalId) {
+            clearInterval(this.intervalId);
+            this.intervalId = null;
+        }
+        if (this.observer) {
+            this.observer.disconnect();
+        }
+        console.log('Performance monitoring stopped');
+    }
+    /**
+   * Record a custom metric
+   */ recordMetric(name, value, unit = '', tags) {
+        const metric = {
+            name,
+            value,
+            unit,
+            timestamp: new Date(),
+            tags
+        };
+        if (!this.metrics.has(name)) {
+            this.metrics.set(name, []);
+        }
+        const metricArray = this.metrics.get(name);
+        metricArray.push(metric);
+        // Keep only last 1000 metrics per name
+        if (metricArray.length > 1000) {
+            metricArray.shift();
+        }
+        // Check if this metric triggers an alert
+        this.checkMetricThreshold(name, value);
+        // Emit metric event
+        this.emit('metric', metric);
+    }
+    /**
+   * Get metrics for a specific name
+   */ getMetrics(name, limit = 100) {
+        const metrics = this.metrics.get(name) || [];
+        return metrics.slice(-limit);
+    }
+    /**
+   * Get all metric names
+   */ getMetricNames() {
+        return Array.from(this.metrics.keys());
+    }
+    /**
+   * Get current system metrics
+   */ async getSystemMetrics() {
+        const cacheKey = 'system_metrics';
+        const cached = this.cache.get(cacheKey);
+        if (cached) {
+            return cached;
+        }
+        const metrics = await this.collectSystemMetrics();
+        this.cache.set(cacheKey, metrics, {
+            ttl: 1000 * 10
+        }); // 10 seconds cache
+        return metrics;
+    }
+    /**
+   * Get current application metrics
+   */ getApplicationMetrics() {
+        const cacheKey = 'app_metrics';
+        const cached = this.cache.get(cacheKey);
+        if (cached) {
+            return cached;
+        }
+        const metrics = this.collectApplicationMetrics();
+        this.cache.set(cacheKey, metrics, {
+            ttl: 1000 * 5
+        }); // 5 seconds cache
+        return metrics;
+    }
+    /**
+   * Get active alerts
+   */ getActiveAlerts() {
+        return Array.from(this.alerts.values()).filter((alert)=>!alert.resolved);
+    }
+    /**
+   * Get performance summary
+   */ getPerformanceSummary() {
+        const activeAlerts = this.getActiveAlerts();
+        const systemHealth = this.determineSystemHealth(activeAlerts);
+        const uptime = Date.now() - this.startTime;
+        // Calculate top metrics by recent activity
+        const topMetrics = this.getTopMetrics(5);
+        return {
+            systemHealth,
+            uptime,
+            totalMetrics: this.metrics.size,
+            activeAlerts: activeAlerts.length,
+            topMetrics
+        };
+    }
+    /**
+   * Set custom threshold for a metric
+   */ setThreshold(metricName, warning, critical) {
+        this.thresholds.set(metricName, {
+            warning,
+            critical
+        });
+    }
+    /**
+   * Clear all metrics and alerts
+   */ clear() {
+        this.metrics.clear();
+        this.alerts.clear();
+        this.cache.clear();
+        console.log('Performance metrics cleared');
+    }
+    /**
+   * Get performance statistics
+   */ getStatistics() {
+        const stats = {};
+        for (const [name, metrics] of this.metrics){
+            if (metrics.length > 0) {
+                const values = metrics.map((m)=>m.value);
+                const avg = values.reduce((sum, val)=>sum + val, 0) / values.length;
+                const max = Math.max(...values);
+                const min = Math.min(...values);
+                stats[name] = {
+                    avg: Math.round(avg * 100) / 100,
+                    max: Math.round(max * 100) / 100,
+                    min: Math.round(min * 100) / 100,
+                    count: metrics.length
+                };
+            }
+        }
+        return stats;
+    }
+    /**
+   * Initialize performance observer
+   */ initializePerformanceObserver() {
+        try {
+            this.observer = new _perf_hooks.PerformanceObserver((list)=>{
+                for (const entry of list.getEntries()){
+                    this.recordMetric(`nodejs_${entry.entryType}_${entry.name}`, entry.duration || 0, 'ms', {
+                        type: entry.entryType
+                    });
+                }
+            });
+        } catch (error) {
+            console.warn('Failed to initialize performance observer:', error.message);
+        }
+    }
+    /**
+   * Collect system metrics
+   */ async collectSystemMetrics() {
+        const cpuUsage = _os.loadavg()[0] / _os.cpus().length;
+        const totalMemory = _os.totalmem();
+        const freeMemory = _os.freemem();
+        const usedMemory = totalMemory - freeMemory;
+        const metrics = {
+            cpu: {
+                usage: Math.round(cpuUsage * 100),
+                loadAverage: _os.loadavg(),
+                cores: _os.cpus().length
+            },
+            memory: {
+                total: totalMemory,
+                used: usedMemory,
+                free: freeMemory,
+                cached: 0,
+                utilization: Math.round(usedMemory / totalMemory * 100)
+            },
+            disk: {
+                total: 0,
+                used: 0,
+                free: 0,
+                utilization: 0
+            },
+            network: {
+                bytesIn: 0,
+                bytesOut: 0,
+                packetsIn: 0,
+                packetsOut: 0
+            }
+        };
+        // Record individual metrics
+        this.recordMetric('cpu_usage', metrics.cpu.usage, '%');
+        this.recordMetric('memory_usage', metrics.memory.utilization, '%');
+        this.recordMetric('memory_used', metrics.memory.used, 'bytes');
+        this.recordMetric('memory_free', metrics.memory.free, 'bytes');
+        this.lastSystemMetrics = metrics;
+        return metrics;
+    }
+    /**
+   * Collect application-specific metrics
+   */ collectApplicationMetrics() {
+        const memoryUsage = process.memoryUsage();
+        const uptime = process.uptime();
+        const metrics = {
+            requestsPerSecond: this.calculateRequestsPerSecond(),
+            averageResponseTime: this.calculateAverageResponseTime(),
+            errorRate: this.calculateErrorRate(),
+            activeConnections: this.getActiveConnections(),
+            queueSize: this.getQueueSize(),
+            cacheHitRate: this.calculateCacheHitRate(),
+            databaseQueries: this.getDatabaseQueries(),
+            memoryLeaks: this.detectMemoryLeaks()
+        };
+        // Record individual metrics
+        this.recordMetric('app_requests_per_second', metrics.requestsPerSecond, 'rps');
+        this.recordMetric('app_response_time', metrics.averageResponseTime, 'ms');
+        this.recordMetric('app_error_rate', metrics.errorRate, '%');
+        this.recordMetric('app_active_connections', metrics.activeConnections, 'connections');
+        this.recordMetric('app_queue_size', metrics.queueSize, 'items');
+        this.recordMetric('app_cache_hit_rate', metrics.cacheHitRate, '%');
+        this.recordMetric('nodejs_heap_used', memoryUsage.heapUsed, 'bytes');
+        this.recordMetric('nodejs_heap_total', memoryUsage.heapTotal, 'bytes');
+        this.recordMetric('nodejs_external', memoryUsage.external, 'bytes');
+        this.recordMetric('nodejs_uptime', uptime, 'seconds');
+        return metrics;
+    }
+    /**
+   * Setup default performance thresholds
+   */ setupDefaultThresholds() {
+        this.thresholds.set('cpu_usage', {
+            warning: 70,
+            critical: 90
+        });
+        this.thresholds.set('memory_usage', {
+            warning: 80,
+            critical: 95
+        });
+        this.thresholds.set('app_response_time', {
+            warning: 1000,
+            critical: 5000
+        });
+        this.thresholds.set('app_error_rate', {
+            warning: 5,
+            critical: 10
+        });
+        this.thresholds.set('app_queue_size', {
+            warning: 100,
+            critical: 500
+        });
+        this.thresholds.set('nodejs_heap_used', {
+            warning: 1e9,
+            critical: 2e9
+        }); // 1GB, 2GB
+    }
+    /**
+   * Check if a metric exceeds thresholds
+   */ checkMetricThreshold(metricName, value) {
+        const threshold = this.thresholds.get(metricName);
+        if (!threshold) return;
+        const alertId = `${metricName}_threshold`;
+        const existingAlert = this.alerts.get(alertId);
+        if (value >= threshold.critical) {
+            if (!existingAlert || existingAlert.severity !== 'critical') {
+                this.createAlert(alertId, 'critical', metricName, threshold.critical, value);
+            }
+        } else if (value >= threshold.warning) {
+            if (!existingAlert || existingAlert.severity !== 'high') {
+                this.createAlert(alertId, 'high', metricName, threshold.warning, value);
+            }
+        } else {
+            // Value is below thresholds, resolve alert if it exists
+            if (existingAlert && !existingAlert.resolved) {
+                existingAlert.resolved = true;
+                this.emit('alert_resolved', existingAlert);
+            }
+        }
+    }
+    /**
+   * Create a performance alert
+   */ createAlert(id, severity, metric, threshold, currentValue) {
+        const alert = {
+            id,
+            severity,
+            metric,
+            threshold,
+            currentValue,
+            message: `${metric} exceeded ${severity} threshold: ${currentValue} >= ${threshold}`,
+            timestamp: new Date(),
+            resolved: false
+        };
+        this.alerts.set(id, alert);
+        this.emit('alert', alert);
+    }
+    /**
+   * Check all active alerts
+   */ checkAlerts() {
+    // This method can be extended to perform more complex alert logic
+    // For now, individual metric checks handle alert creation
+    }
+    /**
+   * Calculate requests per second
+   */ calculateRequestsPerSecond() {
+        const requestMetrics = this.getMetrics('app_requests_per_second', 60);
+        if (requestMetrics.length === 0) return 0;
+        const recent = requestMetrics.slice(-10); // Last 10 measurements
+        return recent.reduce((sum, m)=>sum + m.value, 0) / recent.length;
+    }
+    /**
+   * Calculate average response time
+   */ calculateAverageResponseTime() {
+        const responseMetrics = this.getMetrics('app_response_time', 60);
+        if (responseMetrics.length === 0) return 0;
+        const recent = responseMetrics.slice(-10);
+        return recent.reduce((sum, m)=>sum + m.value, 0) / recent.length;
+    }
+    /**
+   * Calculate error rate
+   */ calculateErrorRate() {
+        const errorMetrics = this.getMetrics('app_error_rate', 60);
+        if (errorMetrics.length === 0) return 0;
+        const recent = errorMetrics.slice(-10);
+        return recent.reduce((sum, m)=>sum + m.value, 0) / recent.length;
+    }
+    /**
+   * Get active connections (placeholder)
+   */ getActiveConnections() {
+        // This would be implemented based on your WebSocket/HTTP server
+        return 0;
+    }
+    /**
+   * Get queue size (placeholder)
+   */ getQueueSize() {
+        // This would be implemented based on your queue system
+        return 0;
+    }
+    /**
+   * Calculate cache hit rate
+   */ calculateCacheHitRate() {
+        const hitRate = this.cache.calculatedSize > 0 ? (this.cache.calculatedSize - this.cache.size) / this.cache.calculatedSize * 100 : 0;
+        return Math.round(hitRate * 100) / 100;
+    }
+    /**
+   * Get database queries count (placeholder)
+   */ getDatabaseQueries() {
+        // This would be implemented based on your database connection pool
+        return 0;
+    }
+    /**
+   * Detect memory leaks
+   */ detectMemoryLeaks() {
+        const memoryMetrics = this.getMetrics('nodejs_heap_used', 30);
+        if (memoryMetrics.length < 10) return false;
+        // Simple memory leak detection: check if memory usage is consistently increasing
+        const recent = memoryMetrics.slice(-10);
+        const trend = recent.reduce((sum, metric, index)=>{
+            if (index === 0) return sum;
+            return sum + (metric.value - recent[index - 1].value);
+        }, 0);
+        return trend > 0 && trend > recent[0].value * 0.1; // 10% increase trend
+    }
+    /**
+   * Determine overall system health
+   */ determineSystemHealth(alerts) {
+        if (alerts.some((alert)=>alert.severity === 'critical')) {
+            return 'critical';
+        }
+        if (alerts.some((alert)=>alert.severity === 'high' || alert.severity === 'medium')) {
+            return 'warning';
+        }
+        return 'good';
+    }
+    /**
+   * Get top metrics by recent activity
+   */ getTopMetrics(limit) {
+        const topMetrics = [];
+        for (const [name, metrics] of this.metrics){
+            if (metrics.length > 0) {
+                const latest = metrics[metrics.length - 1];
+                topMetrics.push({
+                    name,
+                    value: latest.value,
+                    unit: latest.unit
+                });
+            }
+        }
+        // Sort by value (descending) and take top N
+        return topMetrics.sort((a, b)=>b.value - a.value).slice(0, limit);
+    }
+    /**
+   * Export metrics to JSON
+   */ exportMetrics() {
+        const exportData = {
+            timestamp: new Date().toISOString(),
+            uptime: Date.now() - this.startTime,
+            metrics: Object.fromEntries(this.metrics),
+            alerts: Array.from(this.alerts.values()),
+            thresholds: Object.fromEntries(this.thresholds),
+            summary: this.getPerformanceSummary()
+        };
+        return JSON.stringify(exportData, null, 2);
+    }
+    constructor(){
+        super(), _define_property(this, "metrics", void 0), _define_property(this, "alerts", void 0), _define_property(this, "thresholds", void 0), _define_property(this, "cache", void 0), _define_property(this, "observer", null), _define_property(this, "intervalId", null), _define_property(this, "isMonitoring", false), _define_property(this, "startTime", void 0), _define_property(this, "lastSystemMetrics", null);
+        this.metrics = new Map();
+        this.alerts = new Map();
+        this.thresholds = new Map();
+        this.startTime = Date.now();
+        // Initialize cache for storing computed metrics
+        this.cache = new _lrucache.LRUCache({
+            max: 1000,
+            ttl: 1000 * 60 * 5 // 5 minutes
+        });
+        // Set default thresholds
+        this.setupDefaultThresholds();
+        // Initialize performance observer
+        this.initializePerformanceObserver();
+    }
+}
+const performanceMonitor = new PerformanceMonitor();

@@ -105,15 +105,15 @@ describe('WebSocket Integration Tests', () => {
       });
 
       // Should have received progress updates
-      expect(progressUpdates.length).to.be.greaterThan(0);
+      expect(progressUpdates.length).toBeGreaterThan(0);
       
       // Check progress update structure
       const firstUpdate = progressUpdates[0];
-      expect(firstUpdate).to.have.property('sessionId', testSessionId);
-      expect(firstUpdate).to.have.property('cardId', testCardId);
-      expect(firstUpdate).to.have.property('progress');
-      expect(firstUpdate).to.have.property('currentTest');
-      expect(firstUpdate).to.have.property('timestamp');
+      expect(firstUpdate).toHaveProperty('sessionId', testSessionId);
+      expect(firstUpdate).toHaveProperty('cardId', testCardId);
+      expect(firstUpdate).toHaveProperty('progress');
+      expect(firstUpdate).toHaveProperty('currentTest');
+      expect(firstUpdate).toHaveProperty('timestamp');
     });
 
     it('should receive analytics updates in real-time', async () => {
@@ -159,13 +159,13 @@ describe('WebSocket Integration Tests', () => {
       });
 
       // Should have received analytics updates
-      expect(analyticsUpdates.length).to.be.greaterThan(0);
+      expect(analyticsUpdates.length).toBeGreaterThan(0);
       
       const firstUpdate = analyticsUpdates[0];
-      expect(firstUpdate).to.have.property('cardId', testCardId);
-      expect(firstUpdate).to.have.property('metrics');
-      expect(firstUpdate.metrics).to.have.property('totalTests');
-      expect(firstUpdate.metrics).to.have.property('successRate');
+      expect(firstUpdate).toHaveProperty('cardId', testCardId);
+      expect(firstUpdate).toHaveProperty('metrics');
+      expect(firstUpdate.metrics).toHaveProperty('totalTests');
+      expect(firstUpdate.metrics).toHaveProperty('successRate');
     });
 
     it('should handle cost tracking updates', async () => {
@@ -204,13 +204,13 @@ describe('WebSocket Integration Tests', () => {
       });
 
       // Should have received cost updates
-      expect(costUpdates.length).to.be.greaterThan(0);
+      expect(costUpdates.length).toBeGreaterThan(0);
       
       const firstUpdate = costUpdates[0];
-      expect(firstUpdate).to.have.property('cardId', testCardId);
-      expect(firstUpdate).to.have.property('totalCost');
-      expect(firstUpdate).to.have.property('costPerTest');
-      expect(firstUpdate).to.have.property('tokenUsage');
+      expect(firstUpdate).toHaveProperty('cardId', testCardId);
+      expect(firstUpdate).toHaveProperty('totalCost');
+      expect(firstUpdate).toHaveProperty('costPerTest');
+      expect(firstUpdate).toHaveProperty('tokenUsage');
     });
   });
 
@@ -263,12 +263,12 @@ describe('WebSocket Integration Tests', () => {
       });
 
       // Should have received coordination messages
-      expect(agentUpdates.length).to.be.greaterThan(0);
+      expect(agentUpdates.length).toBeGreaterThan(0);
       
       const firstUpdate = agentUpdates[0];
-      expect(firstUpdate).to.have.property('type');
-      expect(firstUpdate).to.have.property('fromAgent');
-      expect(firstUpdate).to.have.property('message');
+      expect(firstUpdate).toHaveProperty('type');
+      expect(firstUpdate).toHaveProperty('fromAgent');
+      expect(firstUpdate).toHaveProperty('message');
     });
   });
 
@@ -314,12 +314,12 @@ describe('WebSocket Integration Tests', () => {
       });
 
       // Should have received queue updates
-      expect(queueUpdates.length).to.be.greaterThan(0);
+      expect(queueUpdates.length).toBeGreaterThan(0);
       
       const firstUpdate = queueUpdates[0];
-      expect(firstUpdate).to.have.property('queueLength');
-      expect(firstUpdate).to.have.property('processing');
-      expect(firstUpdate).to.have.property('completed');
+      expect(firstUpdate).toHaveProperty('queueLength');
+      expect(firstUpdate).toHaveProperty('processing');
+      expect(firstUpdate).toHaveProperty('completed');
     });
   });
 
@@ -357,13 +357,13 @@ describe('WebSocket Integration Tests', () => {
       });
 
       // Should have received resource updates
-      expect(resourceUpdates.length).to.be.greaterThan(0);
+      expect(resourceUpdates.length).toBeGreaterThan(0);
       
       const firstUpdate = resourceUpdates[0];
-      expect(firstUpdate).to.have.property('cpu');
-      expect(firstUpdate).to.have.property('memory');
-      expect(firstUpdate).to.have.property('activeConnections');
-      expect(firstUpdate).to.have.property('timestamp');
+      expect(firstUpdate).toHaveProperty('cpu');
+      expect(firstUpdate).toHaveProperty('memory');
+      expect(firstUpdate).toHaveProperty('activeConnections');
+      expect(firstUpdate).toHaveProperty('timestamp');
     });
   });
 
@@ -385,8 +385,8 @@ describe('WebSocket Integration Tests', () => {
       // Wait for error response
       await new Promise<void>((resolve) => {
         clientSocket.on('session_error', (error) => {
-          expect(error).to.have.property('message');
-          expect(error.message).to.include('Invalid session');
+          expect(error).toHaveProperty('message');
+          expect(error.message).toContain('Invalid session');
           resolve();
         });
       });
@@ -416,7 +416,7 @@ describe('WebSocket Integration Tests', () => {
         setTimeout(resolve, 2000);
       });
 
-      assert(clientSocket.connected === true);
+      expect(clientSocket.connected).toBe(true);
     });
   });
 
@@ -443,9 +443,9 @@ describe('WebSocket Integration Tests', () => {
       }
 
       // All clients should be connected
-      expect(clients.length).to.equal(connections);
+      expect(clients.length).toBe(connections);
       for (const client of clients) {
-        assert(client.connected === true);
+        expect(client.connected).toBe(true);
       }
 
       // Broadcast message to all clients
@@ -472,7 +472,7 @@ describe('WebSocket Integration Tests', () => {
       });
 
       // All clients should have received the message
-      expect(messagesReceived.length).to.equal(connections);
+      expect(messagesReceived.length).toBe(connections);
 
       // Clean up
       clients.forEach(client => client.disconnect());
@@ -493,7 +493,7 @@ describe('WebSocket Integration Tests', () => {
       
       unauthenticatedClient.on('connect_error', (error) => {
         authError = true;
-        expect(error.message).to.include('authentication');
+        expect(error.message).toContain('authentication');
       });
 
       unauthenticatedClient.connect();
@@ -503,8 +503,8 @@ describe('WebSocket Integration Tests', () => {
         setTimeout(resolve, 2000);
       });
 
-      assert(authError === true);
-      expect(unauthenticatedClient.connected).to.be.false;
+      expect(authError).toBe(true);
+      expect(unauthenticatedClient.connected).toBe(false);
       
       unauthenticatedClient.disconnect();
     });
@@ -519,7 +519,7 @@ describe('WebSocket Integration Tests', () => {
 
       clientSocket.on('unauthorized', (error) => {
         unauthorizedAccess = true;
-        expect(error.message).to.include('unauthorized');
+        expect(error.message).toContain('unauthorized');
       });
 
       // Wait for response
@@ -527,7 +527,7 @@ describe('WebSocket Integration Tests', () => {
         setTimeout(resolve, 1000);
       });
 
-      assert(unauthorizedAccess === true);
+      expect(unauthorizedAccess).toBe(true);
     });
   });
 });

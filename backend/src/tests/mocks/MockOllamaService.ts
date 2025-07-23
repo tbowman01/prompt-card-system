@@ -247,7 +247,7 @@ export class MockOllamaService {
 
   private simulateFailure(): void {
     if (Math.random() < this.config.failureRate) {
-      throw new Error('Simulated failure');
+      throw new Error('simulated failure');
     }
   }
 

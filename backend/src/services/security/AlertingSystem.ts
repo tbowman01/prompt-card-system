@@ -644,11 +644,12 @@ export class AlertingSystem extends EventEmitter {
   // Analytics
   getAlertStatistics(): {
     total: number;
-    bySeverity: Record<Alert['severity'], number>;
-    byType: Record<Alert['type'], number>;
+    bySeverity: Record<'low' | 'medium' | 'high' | 'critical', number>;
+    byType: Record<'security' | 'performance' | 'system' | 'compliance', number>;
     acknowledged: number;
     resolved: number;
     recentActivity: { date: string; count: number }[];
+    critical: number;
   } {
     const stats = {
       total: this.alerts.length,
@@ -681,7 +682,10 @@ export class AlertingSystem extends EventEmitter {
       });
     }
 
-    return stats;
+    return {
+      ...stats,
+      critical: stats.bySeverity.critical
+    };
   }
 
   // Cleanup

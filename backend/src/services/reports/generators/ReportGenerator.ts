@@ -20,7 +20,7 @@ import { performance } from 'perf_hooks';
 export class ReportGenerator {
   private analyticsEngine: AnalyticsEngine;
   private costTracker: CostTracker;
-  private db: Database;
+  private db: any;
   private progressCallbacks: Map<string, (progress: ReportGenerationProgress) => void>;
   private templateCache: LRUCache<string, any>;
   private dataCache: LRUCache<string, any>;
@@ -29,7 +29,7 @@ export class ReportGenerator {
   constructor() {
     this.analyticsEngine = AnalyticsEngine.getInstance();
     this.costTracker = new CostTracker();
-    this.db = initializeDatabase();
+    this.initializeDb();
     this.progressCallbacks = new Map();
     
     // Initialize caching for better performance
@@ -44,6 +44,10 @@ export class ReportGenerator {
     });
     
     this.performanceMetrics = new Map();
+  }
+
+  private async initializeDb(): Promise<void> {
+    this.db = await initializeDatabase();
   }
 
   async generateReport(
@@ -329,8 +333,7 @@ export class ReportGenerator {
             label: 'Tests Over Time',
             data: dashboardMetrics.trends.testsOverTime.map(t => t.count),
             borderColor: '#36A2EB',
-            backgroundColor: 'rgba(54, 162, 235, 0.1)',
-            fill: true
+            backgroundColor: 'rgba(54, 162, 235, 0.1)'
           }]
         };
 
@@ -346,7 +349,6 @@ export class ReportGenerator {
             data: usageAnalytics.costTrend.map(t => t.cost),
             borderColor: '#FF6384',
             backgroundColor: 'rgba(255, 99, 132, 0.1)',
-            fill: true
           }]
         };
 
@@ -360,7 +362,6 @@ export class ReportGenerator {
             data: dashboardMetrics.trends.performanceOverTime.map(t => t.avgTime),
             borderColor: '#FFCE56',
             backgroundColor: 'rgba(255, 206, 86, 0.1)',
-            fill: true
           }]
         };
 

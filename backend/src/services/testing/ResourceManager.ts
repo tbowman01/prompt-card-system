@@ -30,7 +30,7 @@ export class ResourceManager extends EventEmitter {
   private reservedResources: Map<string, ResourceRequirement> = new Map();
   private currentUsage: ResourceUsage;
   private limits: ResourceLimits;
-  private monitoringInterval: NodeJS.Timer;
+  private monitoringInterval?: NodeJS.Timeout;
 
   constructor(limits?: Partial<ResourceLimits>) {
     super();

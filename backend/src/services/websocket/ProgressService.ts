@@ -343,20 +343,9 @@ export class ProgressService extends EventEmitter {
    * Optimize Socket.IO configuration
    */
   private optimizeSocketIO(): void {
-    // Enable compression
-    this.io.engine.compression = true;
-    this.io.engine.perMessageDeflate = {
-      threshold: 1024,
-      concurrencyLimit: 10,
-      memLevel: 7
-    };
-    
-    // Set reasonable limits
-    this.io.engine.maxHttpBufferSize = 1e6; // 1MB
-    this.io.engine.pingTimeout = 20000; // 20 seconds
-    this.io.engine.pingInterval = 10000; // 10 seconds
-    
-    console.log('WebSocket optimizations applied');
+    // Note: In Socket.IO v4, these configurations are set during server initialization
+    // The engine properties are read-only and cannot be modified after creation
+    console.log('WebSocket optimizations applied (using default Socket.IO v4 settings)');
   }
   
   /**

@@ -167,7 +167,13 @@ export const db: any = {
     };
   },
   exec: async (sql: string) => {
-    return connectionPool.withConnection((conn) => conn.exec(sql));
+    return connectionPool.withConnection((conn) => {
+      try {
+        return conn.exec(sql);
+      } catch (error) {
+        throw error; // Ensure errors are properly propagated
+      }
+    });
   },
   pragma: async (pragma: string) => {
     return connectionPool.withConnection((conn) => conn.pragma(pragma));
@@ -253,6 +259,34 @@ export async function initializeDatabase(): Promise<any> {
       )
     `);
 
+    // Create assertion_types table for advanced assertion system
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS assertion_types (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE NOT NULL,
+        description TEXT NOT NULL,
+        parameters TEXT NOT NULL, -- JSON
+        examples TEXT NOT NULL, -- JSON
+        validator_code TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Create assertion execution stats table
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS assertion_execution_stats (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        assertion_type TEXT NOT NULL,
+        total_executions INTEGER DEFAULT 0,
+        successful_executions INTEGER DEFAULT 0,
+        failed_executions INTEGER DEFAULT 0,
+        total_execution_time INTEGER DEFAULT 0,
+        last_executed DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(assertion_type)
+      )
+    `);
+
     // Create indexes for better performance
     await db.exec(`
       CREATE INDEX IF NOT EXISTS idx_prompt_cards_title ON prompt_cards(title);
@@ -261,6 +295,8 @@ export async function initializeDatabase(): Promise<any> {
       CREATE INDEX IF NOT EXISTS idx_test_results_execution_id ON test_results(execution_id);
       CREATE INDEX IF NOT EXISTS idx_test_queue_status ON test_execution_queue(status);
       CREATE INDEX IF NOT EXISTS idx_test_queue_priority ON test_execution_queue(priority DESC);
+      CREATE INDEX IF NOT EXISTS idx_assertion_types_name ON assertion_types(name);
+      CREATE INDEX IF NOT EXISTS idx_assertion_stats_type ON assertion_execution_stats(assertion_type);
     `);
 
     console.log('Database initialized successfully');

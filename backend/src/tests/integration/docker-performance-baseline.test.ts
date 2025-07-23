@@ -37,7 +37,7 @@ describe('Docker Performance Baseline Establishment', () => {
   let baseline: PerformanceBaseline;
   const baselineFile = path.join(__dirname, '../../../performance-baseline.json');
 
-  before(async function() {
+  beforeAll(async function() {
     this.timeout(300000); // 5 minutes for comprehensive baseline
     
     console.log('📊 Establishing Docker Performance Baseline...');
@@ -68,7 +68,7 @@ describe('Docker Performance Baseline Establishment', () => {
           frontend: 25000    // 25 seconds (build + start)
         };
         
-        expect(startupTime).to.be.below(benchmarks[service as keyof typeof benchmarks]);
+        expect(startupTime).toBeLessThan(benchmarks[service as keyof typeof benchmarks]);
         
         console.log(`⏱️  ${service}: ${startupTime}ms (target: <${benchmarks[service as keyof typeof benchmarks]}ms)`);
       }
@@ -89,8 +89,8 @@ describe('Docker Performance Baseline Establishment', () => {
         
         const readinessTime = Date.now() - startTime;
         
-        expect(response.status).to.equal(200);
-        expect(readinessTime).to.be.below(check.timeout);
+        expect(response.status).toBe(200);
+        expect(readinessTime).toBeLessThan(check.timeout);
         
         console.log(`✅ ${check.service} ready in ${readinessTime}ms`);
       }
@@ -110,7 +110,7 @@ describe('Docker Performance Baseline Establishment', () => {
         };
         
         const limit = memoryLimits[serviceName as keyof typeof memoryLimits] || 500;
-        expect(metrics.memoryUsage).to.be.below(limit);
+        expect(metrics.memoryUsage).toBeLessThan(limit);
         
         console.log(`💾 ${serviceName}: ${metrics.memoryUsage}MB (limit: ${limit}MB)`);
       }
@@ -128,21 +128,21 @@ describe('Docker Performance Baseline Establishment', () => {
         };
         
         const limit = cpuLimits[serviceName as keyof typeof cpuLimits] || 25;
-        expect(metrics.cpuUsage).to.be.below(limit);
+        expect(metrics.cpuUsage).toBeLessThan(limit);
         
         console.log(`🔥 ${serviceName}: ${metrics.cpuUsage}% (limit: ${limit}%)`);
       }
     });
 
     it('should measure disk usage and I/O performance', async () => {
-      expect(baseline.system.diskUsage).to.be.below(80); // Less than 80% disk usage
+      expect(baseline.system.diskUsage).toBeLessThan(80); // Less than 80% disk usage
       
       // Test disk I/O performance
       const ioTestStart = Date.now();
       await execAsync('docker exec prompt-postgres sh -c "dd if=/dev/zero of=/tmp/test bs=1M count=100 && rm /tmp/test"');
       const ioTestDuration = Date.now() - ioTestStart;
       
-      expect(ioTestDuration).to.be.below(10000); // Under 10 seconds for 100MB
+      expect(ioTestDuration).toBeLessThan(10000); // Under 10 seconds for 100MB
       
       console.log(`💽 Disk usage: ${baseline.system.diskUsage}%`);
       console.log(`📝 I/O performance: 100MB in ${ioTestDuration}ms`);
@@ -161,14 +161,14 @@ describe('Docker Performance Baseline Establishment', () => {
       for (const test of networkTests) {
         const latency = await measureNetworkLatency(test.from, test.to, test.port);
         
-        expect(latency).to.be.below(50); // Under 50ms for inter-container communication
+        expect(latency).toBeLessThan(50); // Under 50ms for inter-container communication
         
         console.log(`🌐 ${test.from} → ${test.to}: ${latency}ms`);
       }
     });
 
     it('should measure external network performance', async () => {
-      expect(baseline.system.networkLatency).to.be.below(500); // Under 500ms external latency
+      expect(baseline.system.networkLatency).toBeLessThan(500); // Under 500ms external latency
       
       console.log(`🌍 External network latency: ${baseline.system.networkLatency}ms`);
     });
@@ -191,27 +191,27 @@ describe('Docker Performance Baseline Establishment', () => {
         
         const responseTime = Date.now() - startTime;
         
-        expect(response.status).to.equal(200);
-        expect(responseTime).to.be.below(test.target);
+        expect(response.status).toBe(200);
+        expect(responseTime).toBeLessThan(test.target);
         
         console.log(`⚡ ${test.endpoint}: ${responseTime}ms (target: <${test.target}ms)`);
       }
     });
 
     it('should measure database query performance', async () => {
-      expect(baseline.benchmarks.databaseQuery).to.be.below(100); // Under 100ms for simple queries
+      expect(baseline.benchmarks.databaseQuery).toBeLessThan(100); // Under 100ms for simple queries
       
       console.log(`🗄️  Database query: ${baseline.benchmarks.databaseQuery}ms`);
     });
 
     it('should measure LLM inference performance', async () => {
-      expect(baseline.benchmarks.llmInference).to.be.below(30000); // Under 30 seconds for inference
+      expect(baseline.benchmarks.llmInference).toBeLessThan(30000); // Under 30 seconds for inference
       
       console.log(`🤖 LLM inference: ${baseline.benchmarks.llmInference}ms`);
     });
 
     it('should measure cache operation performance', async () => {
-      expect(baseline.benchmarks.cacheOperation).to.be.below(10); // Under 10ms for cache ops
+      expect(baseline.benchmarks.cacheOperation).toBeLessThan(10); // Under 10ms for cache ops
       
       console.log(`💨 Cache operation: ${baseline.benchmarks.cacheOperation}ms`);
     });
@@ -236,11 +236,11 @@ describe('Docker Performance Baseline Establishment', () => {
         
         // Throughput shouldn't drop by more than 50% when doubling users
         const throughputDrop = (prev.throughput - curr.throughput) / prev.throughput;
-        expect(throughputDrop).to.be.below(0.5);
+        expect(throughputDrop).toBeLessThan(0.5);
         
         // Response time shouldn't increase by more than 300% when doubling users
         const responseTimeIncrease = (curr.avgResponseTime - prev.avgResponseTime) / prev.avgResponseTime;
-        expect(responseTimeIncrease).to.be.below(3.0);
+        expect(responseTimeIncrease).toBeLessThan(3.0);
       }
     });
 
@@ -262,11 +262,11 @@ describe('Docker Performance Baseline Establishment', () => {
       
       // Memory increase should be reasonable
       const memoryIncrease = ((finalMemory - initialMemory) / initialMemory) * 100;
-      expect(memoryIncrease).to.be.below(50); // Less than 50% increase
+      expect(memoryIncrease).toBeLessThan(50); // Less than 50% increase
       
       // Peak memory usage should be within limits
       const peakMemory = Math.max(...memoryDuringLoad);
-      expect(peakMemory).to.be.below(initialMemory * 2); // Less than 2x initial memory
+      expect(peakMemory).toBeLessThan(initialMemory * 2); // Less than 2x initial memory
       
       console.log(`📈 Memory under load: ${memoryIncrease.toFixed(1)}% increase, peak: ${peakMemory}MB`);
     });
@@ -439,7 +439,7 @@ describe('Docker Performance Baseline Establishment', () => {
       .get('/api/prompt-cards')
       .timeout(30000);
     
-    expect(response.status).to.equal(200);
+    expect(response.status).toBe(200);
     return Date.now() - startTime;
   }
 
@@ -450,7 +450,7 @@ describe('Docker Performance Baseline Establishment', () => {
       .get('/api/health/database')
       .timeout(10000);
     
-    expect(response.status).to.equal(200);
+    expect(response.status).toBe(200);
     return Date.now() - startTime;
   }
 

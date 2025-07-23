@@ -1,0 +1,662 @@
+3d74c2eaa0751eb36d8fe44559731051
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+Object.defineProperty(exports, "default", {
+    enumerable: true,
+    get: function() {
+        return _default;
+    }
+});
+const _express = require("express");
+const _LoadTestingFramework = require("../services/performance/LoadTestingFramework");
+const _PerformanceRegressionDetector = require("../services/performance/PerformanceRegressionDetector");
+const _PerformanceBenchmark = require("../services/performance/PerformanceBenchmark");
+const _validation = require("../middleware/validation");
+const _joi = /*#__PURE__*/ _interop_require_default(require("joi"));
+function _interop_require_default(obj) {
+    return obj && obj.__esModule ? obj : {
+        default: obj
+    };
+}
+const router = (0, _express.Router)();
+// Validation schemas
+const scenarioSchema = _joi.default.object({
+    id: _joi.default.string().required(),
+    name: _joi.default.string().required(),
+    description: _joi.default.string().required(),
+    config: _joi.default.object({
+        baseUrl: _joi.default.string().uri().required(),
+        endpoints: _joi.default.array().items(_joi.default.object({
+            path: _joi.default.string().required(),
+            method: _joi.default.string().valid('GET', 'POST', 'PUT', 'DELETE', 'PATCH').required(),
+            weight: _joi.default.number().min(0).max(100).required(),
+            headers: _joi.default.object().optional(),
+            body: _joi.default.any().optional(),
+            timeout: _joi.default.number().min(1000).optional(),
+            params: _joi.default.object().optional(),
+            validation: _joi.default.object({
+                statusCode: _joi.default.array().items(_joi.default.number()).optional(),
+                responseTime: _joi.default.number().optional(),
+                bodyContains: _joi.default.array().items(_joi.default.string()).optional(),
+                headerExists: _joi.default.array().items(_joi.default.string()).optional()
+            }).optional()
+        })).min(1).required(),
+        users: _joi.default.object({
+            concurrent: _joi.default.number().min(1).max(1000).required(),
+            rampUp: _joi.default.object({
+                duration: _joi.default.number().min(1).required(),
+                strategy: _joi.default.string().valid('linear', 'exponential', 'step').required()
+            }).required(),
+            rampDown: _joi.default.object({
+                duration: _joi.default.number().min(1).required(),
+                strategy: _joi.default.string().valid('linear', 'exponential', 'immediate').required()
+            }).required(),
+            thinkTime: _joi.default.object({
+                min: _joi.default.number().min(0).required(),
+                max: _joi.default.number().min(0).required(),
+                distribution: _joi.default.string().valid('uniform', 'normal', 'exponential').required()
+            }).required()
+        }).required(),
+        duration: _joi.default.object({
+            total: _joi.default.number().min(10).max(3600).required(),
+            warmup: _joi.default.number().min(0).optional(),
+            cooldown: _joi.default.number().min(0).optional()
+        }).required(),
+        thresholds: _joi.default.object({
+            responseTime: _joi.default.object({
+                p95: _joi.default.number().min(1).required(),
+                p99: _joi.default.number().min(1).required(),
+                max: _joi.default.number().min(1).required()
+            }).required(),
+            errorRate: _joi.default.object({
+                max: _joi.default.number().min(0).max(100).required()
+            }).required(),
+            throughput: _joi.default.object({
+                min: _joi.default.number().min(0).required()
+            }).required()
+        }).required(),
+        environment: _joi.default.object({
+            variables: _joi.default.object().optional(),
+            dataFiles: _joi.default.array().items(_joi.default.string()).optional(),
+            concurrent: _joi.default.boolean().optional(),
+            keepAlive: _joi.default.boolean().optional(),
+            compression: _joi.default.boolean().optional()
+        }).optional()
+    }).required()
+});
+const runTestSchema = _joi.default.object({
+    scenarioId: _joi.default.string().required(),
+    options: _joi.default.object({
+        dryRun: _joi.default.boolean().optional(),
+        saveBaseline: _joi.default.boolean().optional(),
+        compareBaseline: _joi.default.boolean().optional()
+    }).optional()
+});
+const regressionTestSchema = _joi.default.object({
+    scenarioIds: _joi.default.array().items(_joi.default.string()).min(1).required()
+});
+const baselineSchema = _joi.default.object({
+    scenarioId: _joi.default.string().required(),
+    version: _joi.default.string().optional(),
+    environment: _joi.default.string().optional(),
+    confidence: _joi.default.number().min(0).max(1).optional()
+});
+const thresholdSchema = _joi.default.object({
+    metric: _joi.default.string().required(),
+    warning: _joi.default.number().min(0).required(),
+    critical: _joi.default.number().min(0).required(),
+    method: _joi.default.string().valid('absolute', 'statistical', 'adaptive').required(),
+    confidence: _joi.default.number().min(0).max(1).required(),
+    minSampleSize: _joi.default.number().min(1).required()
+});
+/**
+ * GET /load-testing/scenarios
+ * Get all registered load test scenarios
+ */ router.get('/scenarios', (req, res)=>{
+    try {
+        const scenarios = _LoadTestingFramework.loadTestingFramework.getScenarios();
+        res.json({
+            success: true,
+            data: {
+                scenarios,
+                count: scenarios.length
+            }
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+/**
+ * POST /load-testing/scenarios
+ * Register a new load test scenario
+ */ router.post('/scenarios', (0, _validation.validateRequest)(scenarioSchema), (req, res)=>{
+    try {
+        const scenario = req.body;
+        _LoadTestingFramework.loadTestingFramework.registerScenario(scenario);
+        res.status(201).json({
+            success: true,
+            data: {
+                message: 'Scenario registered successfully',
+                scenarioId: scenario.id
+            }
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+/**
+ * POST /load-testing/run
+ * Run a load test scenario
+ */ router.post('/run', (0, _validation.validateRequest)(runTestSchema), async (req, res)=>{
+    try {
+        const { scenarioId, options } = req.body;
+        // Check if test is already running
+        const status = _LoadTestingFramework.loadTestingFramework.getStatus();
+        if (status.isRunning) {
+            return res.status(409).json({
+                success: false,
+                error: 'Load test is already running',
+                currentTest: status.currentTest
+            });
+        }
+        // Start test asynchronously
+        const testPromise = _LoadTestingFramework.loadTestingFramework.runLoadTest(scenarioId, options);
+        // Return immediately with test started status
+        res.status(202).json({
+            success: true,
+            data: {
+                message: 'Load test started',
+                scenarioId,
+                status: 'running'
+            }
+        });
+        // Handle test completion
+        testPromise.then((results)=>{
+            console.log(`Load test completed for scenario: ${scenarioId}`);
+        }).catch((error)=>{
+            console.error(`Load test failed for scenario: ${scenarioId}`, error);
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+/**
+ * GET /load-testing/status
+ * Get current load test status
+ */ router.get('/status', (req, res)=>{
+    try {
+        const status = _LoadTestingFramework.loadTestingFramework.getStatus();
+        res.json({
+            success: true,
+            data: status
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+/**
+ * POST /load-testing/stop
+ * Stop current load test
+ */ router.post('/stop', async (req, res)=>{
+    try {
+        await _LoadTestingFramework.loadTestingFramework.stopTest();
+        res.json({
+            success: true,
+            data: {
+                message: 'Load test stopped successfully'
+            }
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+/**
+ * POST /load-testing/regression-test
+ * Run regression test on multiple scenarios
+ */ router.post('/regression-test', (0, _validation.validateRequest)(regressionTestSchema), async (req, res)=>{
+    try {
+        const { scenarioIds } = req.body;
+        // Start regression test asynchronously
+        const regressionPromise = _LoadTestingFramework.loadTestingFramework.runRegressionTest(scenarioIds);
+        res.status(202).json({
+            success: true,
+            data: {
+                message: 'Regression test started',
+                scenarioIds,
+                status: 'running'
+            }
+        });
+        // Handle completion
+        regressionPromise.then((results)=>{
+            console.log('Regression test completed:', results);
+        }).catch((error)=>{
+            console.error('Regression test failed:', error);
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+/**
+ * GET /load-testing/results/:scenarioId?
+ * Get load test results
+ */ router.get('/results/:scenarioId?', async (req, res)=>{
+    try {
+        const { scenarioId } = req.params;
+        const limit = parseInt(req.query.limit) || 10;
+        const offset = parseInt(req.query.offset) || 0;
+        let query = `
+      SELECT * FROM load_test_results 
+      ORDER BY created_at DESC 
+      LIMIT ? OFFSET ?
+    `;
+        let params = [
+            limit,
+            offset
+        ];
+        if (scenarioId) {
+            query = `
+        SELECT * FROM load_test_results 
+        WHERE scenario_id = ? 
+        ORDER BY created_at DESC 
+        LIMIT ? OFFSET ?
+      `;
+            params = [
+                scenarioId,
+                limit,
+                offset
+            ];
+        }
+        const stmt = _LoadTestingFramework.loadTestingFramework['db']?.prepare?.(query) || require('../../database/connection').db.prepare(query);
+        const results = stmt.all(...params);
+        const formattedResults = results.map((row)=>({
+                id: row.id,
+                scenarioId: row.scenario_id,
+                scenarioName: row.scenario_name,
+                startTime: row.start_time,
+                endTime: row.end_time,
+                duration: row.duration,
+                totalRequests: row.total_requests,
+                successfulRequests: row.successful_requests,
+                failedRequests: row.failed_requests,
+                requestsPerSecond: row.requests_per_second,
+                avgResponseTime: row.avg_response_time,
+                p95ResponseTime: row.p95_response_time,
+                p99ResponseTime: row.p99_response_time,
+                errorRate: row.error_rate,
+                createdAt: row.created_at,
+                // Include full results if requested
+                ...req.query.detailed === 'true' && {
+                    fullResults: JSON.parse(row.results_json || '{}')
+                }
+            }));
+        res.json({
+            success: true,
+            data: {
+                results: formattedResults,
+                pagination: {
+                    limit,
+                    offset,
+                    count: formattedResults.length
+                }
+            }
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+/**
+ * POST /load-testing/baselines
+ * Set performance baseline for a scenario
+ */ router.post('/baselines', (0, _validation.validateRequest)(baselineSchema), async (req, res)=>{
+    try {
+        const { scenarioId, version, environment, confidence } = req.body;
+        // Get the latest test results for the scenario
+        const stmt = require('../../database/connection').db.prepare(`
+      SELECT results_json FROM load_test_results 
+      WHERE scenario_id = ? 
+      ORDER BY created_at DESC 
+      LIMIT 1
+    `);
+        const row = stmt.get(scenarioId);
+        if (!row) {
+            return res.status(404).json({
+                success: false,
+                error: 'No test results found for scenario'
+            });
+        }
+        const results = JSON.parse(row.results_json);
+        await _PerformanceRegressionDetector.performanceRegressionDetector.setBaseline(scenarioId, results, {
+            version,
+            environment,
+            confidence
+        });
+        res.json({
+            success: true,
+            data: {
+                message: 'Baseline set successfully',
+                scenarioId,
+                version,
+                environment
+            }
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+/**
+ * GET /load-testing/baselines
+ * Get all performance baselines
+ */ router.get('/baselines', (req, res)=>{
+    try {
+        const baselines = _PerformanceRegressionDetector.performanceRegressionDetector.getBaselines();
+        res.json({
+            success: true,
+            data: {
+                baselines,
+                count: baselines.length
+            }
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+/**
+ * GET /load-testing/regression-alerts
+ * Get regression alerts
+ */ router.get('/regression-alerts', async (req, res)=>{
+    try {
+        const { start, end, severity, scenarioId } = req.query;
+        let period;
+        if (start && end) {
+            period = {
+                start: new Date(start),
+                end: new Date(end)
+            };
+        }
+        let alerts = await _PerformanceRegressionDetector.performanceRegressionDetector.getRegressionAlerts(period);
+        // Filter by severity if provided
+        if (severity) {
+            alerts = alerts.filter((alert)=>alert.severity === severity);
+        }
+        // Filter by scenario if provided
+        if (scenarioId) {
+            alerts = alerts.filter((alert)=>alert.scenarioId === scenarioId);
+        }
+        res.json({
+            success: true,
+            data: {
+                alerts,
+                count: alerts.length,
+                severityBreakdown: {
+                    critical: alerts.filter((a)=>a.severity === 'critical').length,
+                    high: alerts.filter((a)=>a.severity === 'high').length,
+                    medium: alerts.filter((a)=>a.severity === 'medium').length,
+                    low: alerts.filter((a)=>a.severity === 'low').length
+                }
+            }
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+/**
+ * POST /load-testing/regression-thresholds
+ * Set regression detection thresholds
+ */ router.post('/regression-thresholds', (0, _validation.validateRequest)(thresholdSchema), (req, res)=>{
+    try {
+        const threshold = req.body;
+        _PerformanceRegressionDetector.performanceRegressionDetector.setThreshold(threshold.metric, threshold);
+        res.json({
+            success: true,
+            data: {
+                message: 'Threshold updated successfully',
+                metric: threshold.metric
+            }
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+/**
+ * GET /load-testing/regression-report/:scenarioId
+ * Generate regression report for a scenario
+ */ router.get('/regression-report/:scenarioId', async (req, res)=>{
+    try {
+        const { scenarioId } = req.params;
+        const { start, end } = req.query;
+        if (!start || !end) {
+            return res.status(400).json({
+                success: false,
+                error: 'Start and end dates are required'
+            });
+        }
+        const period = {
+            start: new Date(start),
+            end: new Date(end)
+        };
+        const report = await _PerformanceRegressionDetector.performanceRegressionDetector.generateRegressionReport(scenarioId, period);
+        res.json({
+            success: true,
+            data: report
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+/**
+ * POST /load-testing/regression-monitoring/start
+ * Start automated regression monitoring
+ */ router.post('/regression-monitoring/start', (req, res)=>{
+    try {
+        const interval = parseInt(req.body.intervalMinutes) || 15;
+        _PerformanceRegressionDetector.performanceRegressionDetector.startMonitoring(interval);
+        res.json({
+            success: true,
+            data: {
+                message: 'Regression monitoring started',
+                intervalMinutes: interval
+            }
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+/**
+ * POST /load-testing/regression-monitoring/stop
+ * Stop automated regression monitoring
+ */ router.post('/regression-monitoring/stop', (req, res)=>{
+    try {
+        _PerformanceRegressionDetector.performanceRegressionDetector.stopMonitoring();
+        res.json({
+            success: true,
+            data: {
+                message: 'Regression monitoring stopped'
+            }
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+/**
+ * GET /load-testing/benchmarks
+ * Get available performance benchmarks
+ */ router.get('/benchmarks', (req, res)=>{
+    try {
+        const status = _PerformanceBenchmark.performanceBenchmark.getStatus();
+        res.json({
+            success: true,
+            data: {
+                status,
+                availableBenchmarks: [
+                    'Analytics Engine',
+                    'Report Generation',
+                    'Optimization Engine',
+                    'Database Queries',
+                    'Cache Performance',
+                    'Memory Usage',
+                    'Concurrent Operations'
+                ]
+            }
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+/**
+ * POST /load-testing/benchmarks/run
+ * Run performance benchmark suite
+ */ router.post('/benchmarks/run', async (req, res)=>{
+    try {
+        const suiteName = req.body.suiteName || 'Performance Benchmark Suite';
+        // Check if already running
+        const status = _PerformanceBenchmark.performanceBenchmark.getStatus();
+        if (status.isRunning) {
+            return res.status(409).json({
+                success: false,
+                error: 'Benchmark suite is already running',
+                currentSuite: status.currentSuite,
+                progress: status.progress
+            });
+        }
+        // Start benchmark asynchronously
+        const benchmarkPromise = _PerformanceBenchmark.performanceBenchmark.runBenchmarkSuite(suiteName);
+        res.status(202).json({
+            success: true,
+            data: {
+                message: 'Benchmark suite started',
+                suiteName,
+                status: 'running'
+            }
+        });
+        // Handle completion
+        benchmarkPromise.then((results)=>{
+            console.log('Benchmark suite completed:', results.name);
+        }).catch((error)=>{
+            console.error('Benchmark suite failed:', error);
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+/**
+ * GET /load-testing/benchmarks/status
+ * Get benchmark execution status
+ */ router.get('/benchmarks/status', (req, res)=>{
+    try {
+        const status = _PerformanceBenchmark.performanceBenchmark.getStatus();
+        res.json({
+            success: true,
+            data: status
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+/**
+ * POST /load-testing/neural-training
+ * Train neural model for anomaly detection
+ */ router.post('/neural-training', async (req, res)=>{
+    try {
+        await _PerformanceRegressionDetector.performanceRegressionDetector.trainNeuralModel();
+        res.json({
+            success: true,
+            data: {
+                message: 'Neural model training completed'
+            }
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+/**
+ * GET /load-testing/health
+ * Health check for load testing services
+ */ router.get('/health', (req, res)=>{
+    try {
+        const loadTestStatus = _LoadTestingFramework.loadTestingFramework.getStatus();
+        const benchmarkStatus = _PerformanceBenchmark.performanceBenchmark.getStatus();
+        const health = {
+            loadTesting: {
+                available: true,
+                running: loadTestStatus.isRunning,
+                currentTest: loadTestStatus.currentTest
+            },
+            benchmarks: {
+                available: true,
+                running: benchmarkStatus.isRunning,
+                currentSuite: benchmarkStatus.currentSuite
+            },
+            regressionDetection: {
+                available: true,
+                monitoring: _PerformanceRegressionDetector.performanceRegressionDetector['isMonitoring'] || false
+            },
+            timestamp: new Date().toISOString()
+        };
+        res.json({
+            success: true,
+            data: health
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+const _default = router;

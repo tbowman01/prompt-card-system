@@ -9,7 +9,7 @@ import { NodeSDK } from '@opentelemetry/sdk-node';
 import { Resource } from '@opentelemetry/resources';
 import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
-import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
+import { PeriodicExportingMetricReader, MetricReader } from '@opentelemetry/sdk-metrics';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 import { JaegerExporter } from '@opentelemetry/exporter-jaeger';
 import { BatchSpanProcessor, ConsoleSpanExporter } from '@opentelemetry/sdk-trace-base';
@@ -17,9 +17,9 @@ import { WinstonInstrumentation } from '@opentelemetry/instrumentation-winston';
 import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
 import { ExpressInstrumentation } from '@opentelemetry/instrumentation-express';
 import { RedisInstrumentation } from '@opentelemetry/instrumentation-redis-4';
-import { SqliteInstrumentation } from '@opentelemetry/instrumentation-sqlite3';
+// import { SqliteInstrumentation } from '@opentelemetry/instrumentation-sqlite3';
 import { SocketIoInstrumentation } from '@opentelemetry/instrumentation-socket.io';
-import { trace, metrics, Span, SpanStatusCode } from '@opentelemetry/api';
+import { trace, metrics, Span, SpanStatusCode, context } from '@opentelemetry/api';
 
 export interface TelemetryConfig {
   serviceName: string;
@@ -100,19 +100,14 @@ export class TelemetryManager {
         resource,
         spanProcessors,
         metricReader: new PeriodicExportingMetricReader({
-          exporter: prometheusExporter,
+          exporter: prometheusExporter as any,
           exportIntervalMillis: 10000, // Export every 10 seconds
-        }),
+        }) as any,
         instrumentations: [
           getNodeAutoInstrumentations({
-            // Disable default console instrumentation to avoid noise
-            '@opentelemetry/instrumentation-console': {
-              enabled: false,
-            },
             // Configure specific instrumentations
             '@opentelemetry/instrumentation-http': {
               enabled: true,
-              ignoreBoundariesInstrumentation: false,
             },
             '@opentelemetry/instrumentation-express': {
               enabled: true,
@@ -150,9 +145,9 @@ export class TelemetryManager {
           new RedisInstrumentation({
             enabled: true,
           }),
-          new SqliteInstrumentation({
-            enabled: true,
-          }),
+          // new SqliteInstrumentation({
+          //   enabled: true,
+          // }),
           new SocketIoInstrumentation({
             enabled: true,
           }),
@@ -248,7 +243,7 @@ export class TelemetryManager {
   public withSpan<T>(name: string, fn: (span: Span) => T, attributes?: Record<string, any>): T {
     const span = this.startSpan(name, attributes);
     try {
-      const result = trace.setSpan(trace.active(), span).with(fn)(span);
+      const result = context.with(trace.setSpan(context.active(), span), () => fn(span));
       span.setStatus({ code: SpanStatusCode.OK });
       return result;
     } catch (error) {

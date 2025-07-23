@@ -665,7 +665,7 @@ export class LoadTestScheduler extends EventEmitter {
       this.cronJobs.set(scheduledTest.id, job);
       
       // Update next run time
-      const nextRun = job.nextDate()?.toDate();
+      const nextRun = job.nextDate()?.toJSDate();
       if (nextRun) {
         scheduledTest.nextRun = nextRun;
       }
@@ -679,7 +679,7 @@ export class LoadTestScheduler extends EventEmitter {
   private stopCronJob(scheduledTestId: string): void {
     const job = this.cronJobs.get(scheduledTestId);
     if (job) {
-      job.destroy();
+      job.stop();
       this.cronJobs.delete(scheduledTestId);
     }
   }

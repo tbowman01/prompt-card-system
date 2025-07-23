@@ -1,19 +1,16 @@
+import { UserPresence } from '../../types/collaboration';
+
 // Placeholder PresenceService to fix import error
-export interface UserPresence {
-  userId: string;
-  status: 'online' | 'offline' | 'away';
-  lastSeen: Date;
-  socketId?: string;
-}
 
 export class PresenceService {
   private presenceMap: Map<string, UserPresence> = new Map();
   
   constructor() {}
   
-  async updatePresence(userId: string, status: string): Promise<void> {
+  async updatePresence(userId: string, documentId: string, status: string): Promise<void> {
     const presence: UserPresence = {
       userId,
+      documentId,
       status: status as 'online' | 'offline' | 'away',
       lastSeen: new Date()
     };
