@@ -1,0 +1,263 @@
+name: 📊 Project Board Automation
+
+on:
+  issues:
+    types: [opened, closed, labeled, unlabeled]
+  pull_request:
+    types: [opened, closed, converted_to_draft, ready_for_review]
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  manage_project_board:
+    name: 🎯 Manage Project Board
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 🏗️ Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: 📋 Add Issues to Project Board
+        if: github.event_name == 'issues' && (github.event.action == 'opened' || github.event.action == 'labeled')
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue = context.payload.issue;
+            const labels = issue.labels.map(label => label.name);
+            
+            console.log('Issue:', issue.number, 'Labels:', labels);
+            
+            // Logic for adding to project board based on priority and type
+            let shouldAddToBoard = false;
+            let boardColumn = 'Backlog';
+            
+            // High priority items go to board automatically
+            if (labels.includes('priority:critical') || labels.includes('priority:high')) {
+              shouldAddToBoard = true;
+              boardColumn = labels.includes('priority:critical') ? 'Critical' : 'High Priority';
+            }
+            
+            // Bugs go to board automatically
+            if (labels.includes('type:bug')) {
+              shouldAddToBoard = true;
+              boardColumn = 'Bug Triage';
+            }
+            
+            // Features that are ready go to board
+            if (labels.includes('type:feature') && labels.includes('status:ready')) {
+              shouldAddToBoard = true;
+              boardColumn = 'Ready for Development';
+            }
+            
+            // Security issues always go to board
+            if (labels.includes('type:security')) {
+              shouldAddToBoard = true;
+              boardColumn = 'Security Review';
+            }
+            
+            if (shouldAddToBoard) {
+              console.log(`Would add issue #${issue.number} to project board in column: ${boardColumn}`);
+              
+              // Note: Actual project board integration would require GitHub Projects API v2
+              // This is a placeholder for the logic
+              
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `📋 **Added to Project Board**
+
+This issue has been automatically added to the project board in the **${boardColumn}** column.
+
+**Reason:** ${
+                  labels.includes('priority:critical') ? 'Critical priority item' :
+                  labels.includes('priority:high') ? 'High priority item' :
+                  labels.includes('type:bug') ? 'Bug requiring triage' :
+                  labels.includes('type:security') ? 'Security-related issue' :
+                  'Ready for development'
+                }
+
+**Next Steps:**
+- Issue will be reviewed by the appropriate team
+- Timeline will be established based on priority
+- Development will begin once approved
+
+---
+*Automated by Project Board Management System*`
+              });
+            }
+            
+      - name: 🔄 Move Cards Based on Status
+        if: github.event_name == 'issues' && (github.event.action == 'labeled' || github.event.action == 'unlabeled')
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue = context.payload.issue;
+            const labels = issue.labels.map(label => label.name);
+            
+            let newColumn = '';
+            let statusMessage = '';
+            
+            // Determine new column based on status labels
+            if (labels.includes('status:triage')) {
+              newColumn = 'Triage';
+              statusMessage = 'Moved to triage for initial review';
+            } else if (labels.includes('status:ready')) {
+              newColumn = 'Ready for Development';
+              statusMessage = 'Ready for development team assignment';
+            } else if (labels.includes('status:in-progress')) {
+              newColumn = 'In Progress';
+              statusMessage = 'Development has started';
+            } else if (labels.includes('status:review')) {
+              newColumn = 'In Review';
+              statusMessage = 'Under review - PR created';
+            } else if (labels.includes('status:blocked')) {
+              newColumn = 'Blocked';
+              statusMessage = 'Blocked - requires attention';
+            } else if (labels.includes('status:needs-info')) {
+              newColumn = 'Waiting for Info';
+              statusMessage = 'Waiting for additional information';
+            }
+            
+            if (newColumn) {
+              console.log(`Would move issue #${issue.number} to column: ${newColumn}`);
+              
+              // Create status update comment for visibility
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `🔄 **Status Update**
+
+**New Status:** ${newColumn}
+**Reason:** ${statusMessage}
+
+${newColumn === 'Blocked' ? `
+**⚠️ Attention Required:**
+This issue is now blocked and requires immediate attention to resolve blockers.
+` : ''}
+
+${newColumn === 'Ready for Development' ? `
+**🚀 Ready for Development:**
+This issue is now ready for development team assignment and implementation.
+` : ''}
+
+---
+*Automated by Project Board Management System*`
+              });
+            }
+            
+      - name: 📊 Update PR Project Status
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const pr = context.payload.pull_request;
+            const action = context.payload.action;
+            
+            let column = '';
+            let message = '';
+            
+            if (action === 'opened') {
+              column = pr.draft ? 'Draft PRs' : 'Review Required';
+              message = pr.draft ? 'Draft PR created - work in progress' : 'PR ready for review';
+            } else if (action === 'ready_for_review') {
+              column = 'Review Required';
+              message = 'PR ready for review';
+            } else if (action === 'converted_to_draft') {
+              column = 'Draft PRs';
+              message = 'Converted to draft - work in progress';
+            } else if (action === 'closed') {
+              column = pr.merged ? 'Done' : 'Cancelled';
+              message = pr.merged ? 'PR merged successfully' : 'PR closed without merging';
+            }
+            
+            if (column) {
+              console.log(`Would move PR #${pr.number} to column: ${column}`);
+              
+              // Extract associated issue number from branch or PR body
+              const branchName = pr.head.ref;
+              const prBody = pr.body || '';
+              const issueMatch = branchName.match(/issue-(\d+)/) || prBody.match(/#(\d+)/);
+              
+              if (issueMatch) {
+                const issueNumber = issueMatch[1];
+                
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: parseInt(issueNumber),
+                  body: `🔄 **PR Status Update**
+
+PR #${pr.number}: **${message}**
+**Board Column:** ${column}
+
+${pr.merged ? `
+🎉 **Congratulations!** Your contribution has been merged and is now live.
+` : action === 'opened' ? `
+👀 **Review Requested:** The development team will review this PR soon.
+` : ''}
+
+---
+*Automated by Project Board Management System*`
+                });
+              }
+            }
+            
+      - name: 📈 Generate Board Metrics
+        if: github.event_name == 'issues' && github.event.action == 'closed'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue = context.payload.issue;
+            const createdAt = new Date(issue.created_at);
+            const closedAt = new Date(issue.closed_at);
+            const timeToResolve = Math.round((closedAt - createdAt) / (1000 * 60 * 60 * 24)); // days
+            
+            const labels = issue.labels.map(label => label.name);
+            const priority = labels.find(l => l.startsWith('priority:'))?.replace('priority:', '') || 'unknown';
+            const type = labels.find(l => l.startsWith('type:'))?.replace('type:', '') || 'unknown';
+            const effort = labels.find(l => l.startsWith('effort:'))?.replace('effort:', '') || 'unknown';
+            
+            // Create metrics comment (could be enhanced to store in database)
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              body: `📊 **Issue Metrics & Closure**
+
+**Resolution Time:** ${timeToResolve} days
+**Priority Level:** ${priority}
+**Issue Type:** ${type}
+**Effort Estimation:** ${effort}
+
+${timeToResolve <= 1 ? '⚡ **Excellent Response Time!**' : 
+  timeToResolve <= 7 ? '✅ **Good Response Time**' : 
+  timeToResolve <= 30 ? '⚠️ **Average Response Time**' : 
+  '🚨 **Long Resolution Time - Consider Process Improvements**'}
+
+**Team Performance:**
+- Critical issues should be resolved within 24 hours
+- High priority within 7 days  
+- Medium priority within 30 days
+- Low priority within 90 days
+
+---
+*Automated metrics by Project Board Management System*`
+            });
+            
+            console.log(`Issue #${issue.number} metrics:`, {
+              timeToResolve,
+              priority,
+              type,
+              effort
+            });

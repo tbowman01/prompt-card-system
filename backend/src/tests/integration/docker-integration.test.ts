@@ -4,6 +4,7 @@ import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
 import assert from 'assert';
+import { TestTimeouts, HookTimeouts } from '../jest.timeouts';
 
 const execAsync = promisify(exec);
 
@@ -24,6 +25,8 @@ interface SystemMetrics {
 }
 
 describe('Docker Integration Tests - Complete System Verification', () => {
+  // Set timeout for entire test suite
+  jest.setTimeout(TestTimeouts.DOCKER);
   const services: DockerService[] = [
     {
       name: 'frontend',
@@ -64,8 +67,7 @@ describe('Docker Integration Tests - Complete System Verification', () => {
     analyticsSessionId: ''
   };
 
-  beforeAll(async function() {
-    this.timeout(120000); // 2 minutes for setup
+  beforeAll(async () => {
     
     console.log('🐳 Starting Docker Integration Test Suite');
     console.log('📊 Establishing baseline performance metrics...');
@@ -76,8 +78,7 @@ describe('Docker Integration Tests - Complete System Verification', () => {
     console.log('✅ Baseline metrics captured:', baselineMetrics);
   });
 
-  afterAll(async function() {
-    this.timeout(60000); // 1 minute for cleanup
+  afterAll(async () => {
     
     console.log('🧹 Cleaning up Docker integration test resources...');
     await cleanupTestResources();

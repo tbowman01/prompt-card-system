@@ -49,7 +49,7 @@ const mockMetrics: DashboardMetrics = {
     },
     {
       id: '2',
-      type: 'performance',
+      type: 'anomaly',
       title: 'Slow Response Times',
       description: 'Average response time is above normal thresholds',
       severity: 'medium',
