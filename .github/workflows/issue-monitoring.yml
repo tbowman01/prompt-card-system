@@ -1,0 +1,504 @@
+name: 🔍 Issue Monitoring & Reporting
+
+on:
+  schedule:
+    - cron: '0 9 * * MON'  # Every Monday at 9 AM UTC
+    - cron: '0 17 * * *'   # Every day at 5 PM UTC for daily summary
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+  pull-requests: read
+
+jobs:
+  daily_summary:
+    name: 📊 Daily Issue Summary
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 17 * * *' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: 🏗️ Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: 📈 Generate Daily Report
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const now = new Date();
+            const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+            
+            // Get all issues
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'all',
+              since: yesterday.toISOString(),
+              per_page: 100
+            });
+            
+            // Categorize issues
+            let stats = {
+              opened: 0,
+              closed: 0,
+              critical: 0,
+              high: 0,
+              medium: 0,
+              low: 0,
+              bugs: 0,
+              features: 0,
+              security: 0,
+              blocked: 0,
+              inProgress: 0,
+              needsInfo: 0
+            };
+            
+            let criticalIssues = [];
+            let blockedIssues = [];
+            let oldIssues = [];
+            
+            for (const issue of issues) {
+              const labels = issue.labels.map(label => label.name);
+              const createdAt = new Date(issue.created_at);
+              const daysSinceCreated = Math.floor((now - createdAt) / (1000 * 60 * 60 * 24));
+              
+              // Count new and closed issues
+              if (createdAt >= yesterday) stats.opened++;
+              if (issue.closed_at && new Date(issue.closed_at) >= yesterday) stats.closed++;
+              
+              // Count by priority
+              if (labels.includes('priority:critical')) {
+                stats.critical++;
+                if (issue.state === 'open') criticalIssues.push(issue);
+              }
+              if (labels.includes('priority:high')) stats.high++;
+              if (labels.includes('priority:medium')) stats.medium++;
+              if (labels.includes('priority:low')) stats.low++;
+              
+              // Count by type
+              if (labels.includes('type:bug')) stats.bugs++;
+              if (labels.includes('type:feature')) stats.features++;
+              if (labels.includes('type:security')) stats.security++;
+              
+              // Count by status
+              if (labels.includes('status:blocked') && issue.state === 'open') {
+                stats.blocked++;
+                blockedIssues.push(issue);
+              }
+              if (labels.includes('status:in-progress')) stats.inProgress++;
+              if (labels.includes('status:needs-info')) stats.needsInfo++;
+              
+              // Find old issues
+              if (issue.state === 'open' && daysSinceCreated > 30) {
+                oldIssues.push({...issue, daysSinceCreated});
+              }
+            }
+            
+            // Generate report
+            let report = `# 📊 Daily Issue Summary - ${now.toDateString()}
+
+## 📈 Today's Activity
+- **New Issues:** ${stats.opened}
+- **Closed Issues:** ${stats.closed}
+- **Net Change:** ${stats.opened - stats.closed > 0 ? '+' : ''}${stats.opened - stats.closed}
+
+## 🎯 Priority Distribution
+- **Critical:** ${stats.critical} 🔴
+- **High:** ${stats.high} 🟡
+- **Medium:** ${stats.medium} 🟢
+- **Low:** ${stats.low} ⚪
+
+## 🏷️ Issue Types
+- **Bugs:** ${stats.bugs} 🐛
+- **Features:** ${stats.features} ✨
+- **Security:** ${stats.security} 🛡️
+
+## 🔄 Current Status
+- **In Progress:** ${stats.inProgress} ⚡
+- **Blocked:** ${stats.blocked} ⛔
+- **Needs Info:** ${stats.needsInfo} ❓
+
+---
+
+`;
+
+            // Add critical issues section
+            if (criticalIssues.length > 0) {
+              report += `## 🚨 CRITICAL ISSUES REQUIRING ATTENTION\n\n`;
+              for (const issue of criticalIssues) {
+                const daysSinceCreated = Math.floor((now - new Date(issue.created_at)) / (1000 * 60 * 60 * 24));
+                report += `- **#${issue.number}**: ${issue.title} (${daysSinceCreated} days old) [View](${issue.html_url})\n`;
+              }
+              report += '\n';
+            }
+            
+            // Add blocked issues section
+            if (blockedIssues.length > 0) {
+              report += `## ⛔ BLOCKED ISSUES\n\n`;
+              for (const issue of blockedIssues) {
+                const daysSinceCreated = Math.floor((now - new Date(issue.created_at)) / (1000 * 60 * 60 * 24));
+                report += `- **#${issue.number}**: ${issue.title} (${daysSinceCreated} days old) [View](${issue.html_url})\n`;
+              }
+              report += '\n';
+            }
+            
+            // Add old issues section
+            if (oldIssues.length > 0) {
+              report += `## ⏰ OLD ISSUES (30+ days)\n\n`;
+              oldIssues.sort((a, b) => b.daysSinceCreated - a.daysSinceCreated);
+              for (const issue of oldIssues.slice(0, 10)) { // Top 10 oldest
+                report += `- **#${issue.number}**: ${issue.title} (${issue.daysSinceCreated} days old) [View](${issue.html_url})\n`;
+              }
+              if (oldIssues.length > 10) {
+                report += `- ... and ${oldIssues.length - 10} more old issues\n`;
+              }
+              report += '\n';
+            }
+            
+            report += `---\n*Generated automatically by Issue Monitoring System*`;
+            
+            // Create issue with the report
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `📊 Daily Issue Summary - ${now.toDateString()}`,
+              body: report,
+              labels: ['report', 'automation', 'status:triage']
+            });
+            
+            console.log('Daily summary report created');
+            
+  weekly_review:
+    name: 📋 Weekly Issue Review
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 9 * * MON' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: 🏗️ Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: 📊 Generate Weekly Report
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const now = new Date();
+            const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            
+            // Get all issues updated in the last week
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'all',
+              since: weekAgo.toISOString(),
+              per_page: 100
+            });
+            
+            // Get all PRs from the last week
+            const { data: prs } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'all',
+              per_page: 100
+            });
+            
+            const recentPRs = prs.filter(pr => new Date(pr.created_at) >= weekAgo);
+            
+            let weeklyStats = {
+              issuesOpened: 0,
+              issuesClosed: 0,
+              prsOpened: 0,
+              prsMerged: 0,
+              prsDeclined: 0,
+              criticalResolved: 0,
+              bugsFixed: 0,
+              featuresDelivered: 0,
+              averageResolutionTime: 0,
+              totalResolutionTime: 0,
+              resolvedCount: 0
+            };
+            
+            let performanceMetrics = {
+              fastResolutions: 0,  // <= 1 day
+              averageResolutions: 0,  // 2-7 days
+              slowResolutions: 0   // > 7 days
+            };
+            
+            let teamActivity = {};
+            let componentActivity = {};
+            
+            // Analyze issues
+            for (const issue of issues) {
+              const createdAt = new Date(issue.created_at);
+              const labels = issue.labels.map(label => label.name);
+              
+              // Count weekly activity
+              if (createdAt >= weekAgo) weeklyStats.issuesOpened++;
+              if (issue.closed_at && new Date(issue.closed_at) >= weekAgo) {
+                weeklyStats.issuesClosed++;
+                
+                // Calculate resolution time
+                const resolutionTime = (new Date(issue.closed_at) - createdAt) / (1000 * 60 * 60 * 24);
+                weeklyStats.totalResolutionTime += resolutionTime;
+                weeklyStats.resolvedCount++;
+                
+                // Categorize resolution speed
+                if (resolutionTime <= 1) performanceMetrics.fastResolutions++;
+                else if (resolutionTime <= 7) performanceMetrics.averageResolutions++;
+                else performanceMetrics.slowResolutions++;
+                
+                // Count by type
+                if (labels.includes('priority:critical')) weeklyStats.criticalResolved++;
+                if (labels.includes('type:bug')) weeklyStats.bugsFixed++;
+                if (labels.includes('type:feature')) weeklyStats.featuresDelivered++;
+              }
+              
+              // Track component activity
+              for (const label of labels) {
+                if (label.startsWith('component:')) {
+                  const component = label.replace('component:', '');
+                  componentActivity[component] = (componentActivity[component] || 0) + 1;
+                }
+              }
+              
+              // Track assignee activity
+              if (issue.assignee) {
+                teamActivity[issue.assignee.login] = (teamActivity[issue.assignee.login] || 0) + 1;
+              }
+            }
+            
+            // Analyze PRs
+            for (const pr of recentPRs) {
+              weeklyStats.prsOpened++;
+              if (pr.merged_at) weeklyStats.prsMerged++;
+              else if (pr.state === 'closed') weeklyStats.prsDeclined++;
+              
+              if (pr.user) {
+                teamActivity[pr.user.login] = (teamActivity[pr.user.login] || 0) + 1;
+              }
+            }
+            
+            // Calculate average resolution time
+            if (weeklyStats.resolvedCount > 0) {
+              weeklyStats.averageResolutionTime = Math.round(weeklyStats.totalResolutionTime / weeklyStats.resolvedCount * 10) / 10;
+            }
+            
+            // Generate comprehensive report
+            let report = `# 📋 Weekly Issue Review - Week of ${weekAgo.toDateString()}
+
+## 📊 Weekly Summary
+- **Issues Opened:** ${weeklyStats.issuesOpened}
+- **Issues Closed:** ${weeklyStats.issuesClosed}
+- **Net Issue Change:** ${weeklyStats.issuesOpened - weeklyStats.issuesClosed > 0 ? '+' : ''}${weeklyStats.issuesOpened - weeklyStats.issuesClosed}
+- **PRs Opened:** ${weeklyStats.prsOpened}
+- **PRs Merged:** ${weeklyStats.prsMerged}
+- **PRs Declined:** ${weeklyStats.prsDeclined}
+
+## 🎯 Delivery Metrics
+- **Critical Issues Resolved:** ${weeklyStats.criticalResolved} 🔴
+- **Bugs Fixed:** ${weeklyStats.bugsFixed} 🐛
+- **Features Delivered:** ${weeklyStats.featuresDelivered} ✨
+- **Average Resolution Time:** ${weeklyStats.averageResolutionTime} days ⏱️
+
+## ⚡ Performance Analysis
+- **Fast Resolutions (≤1 day):** ${performanceMetrics.fastResolutions}
+- **Average Resolutions (2-7 days):** ${performanceMetrics.averageResolutions}
+- **Slow Resolutions (>7 days):** ${performanceMetrics.slowResolutions}
+
+${performanceMetrics.fastResolutions > performanceMetrics.slowResolutions 
+  ? '✅ **Great job on response times!**' 
+  : '⚠️ **Consider improving response times**'}
+
+## 🏗️ Component Activity
+`;
+
+            // Add component breakdown
+            const sortedComponents = Object.entries(componentActivity).sort((a, b) => b[1] - a[1]);
+            for (const [component, count] of sortedComponents) {
+              report += `- **${component}:** ${count} issues\n`;
+            }
+            
+            report += `\n## 👥 Team Activity\n`;
+            
+            // Add team breakdown
+            const sortedTeam = Object.entries(teamActivity).sort((a, b) => b[1] - a[1]);
+            for (const [member, count] of sortedTeam.slice(0, 10)) {
+              report += `- **@${member}:** ${count} contributions\n`;
+            }
+            
+            report += `\n## 📈 Recommendations\n\n`;
+            
+            // Add automated recommendations
+            if (weeklyStats.averageResolutionTime > 7) {
+              report += `- ⚠️ **Improve Response Time:** Average resolution time is ${weeklyStats.averageResolutionTime} days. Consider breaking down large issues.\n`;
+            }
+            if (weeklyStats.criticalResolved === 0 && weeklyStats.issuesClosed > 0) {
+              report += `- ✅ **Good Priority Management:** No critical issues this week.\n`;
+            }
+            if (weeklyStats.prsMerged / Math.max(weeklyStats.prsOpened, 1) < 0.7) {
+              report += `- 🔄 **PR Success Rate:** Consider improving PR quality or review process.\n`;
+            }
+            if (performanceMetrics.fastResolutions > 5) {
+              report += `- 🚀 **Excellent Response Time:** ${performanceMetrics.fastResolutions} issues resolved within 24 hours!\n`;
+            }
+            
+            report += `\n---\n*Generated automatically by Issue Monitoring System*`;
+            
+            // Create the weekly review issue
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `📋 Weekly Issue Review - Week of ${weekAgo.toDateString()}`,
+              body: report,
+              labels: ['report', 'weekly-review', 'automation', 'status:triage']
+            });
+            
+            console.log('Weekly review report created');
+            
+  stale_issue_management:
+    name: 🕰️ Stale Issue Management
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 🏗️ Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: 🔍 Identify Stale Issues
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const now = new Date();
+            const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+            const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            
+            // Get all open issues
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100
+            });
+            
+            for (const issue of issues) {
+              const updatedAt = new Date(issue.updated_at);
+              const createdAt = new Date(issue.created_at);
+              const labels = issue.labels.map(label => label.name);
+              
+              const daysSinceUpdate = Math.floor((now - updatedAt) / (1000 * 60 * 60 * 24));
+              const daysSinceCreated = Math.floor((now - createdAt) / (1000 * 60 * 60 * 24));
+              
+              // Skip if already marked as stale
+              if (labels.includes('status:stale')) continue;
+              
+              // Skip critical issues from stale marking
+              if (labels.includes('priority:critical')) continue;
+              
+              // Mark as stale if no activity for 30 days
+              if (updatedAt < thirtyDaysAgo) {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  labels: ['status:stale']
+                });
+                
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  body: `🕰️ **Stale Issue Notice**
+
+This issue has been automatically marked as stale because it has had no activity for 30 days.
+
+**Options:**
+- Add a comment to remove the stale label
+- Close if no longer relevant
+- Update priority if still important
+- Add more information if needed
+
+**Auto-close:** This issue will be automatically closed in 7 days if no activity occurs.
+
+---
+*Automated by Issue Monitoring System*`
+                });
+                
+                console.log(`Marked issue #${issue.number} as stale`);
+              }
+              
+              // Warn about old issues that need attention
+              else if (daysSinceCreated > 60 && !labels.includes('status:needs-info')) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  body: `⏰ **Long-Running Issue Notice**
+
+This issue has been open for ${daysSinceCreated} days. Consider:
+
+- Breaking it down into smaller, actionable tasks
+- Updating the priority level
+- Adding more specific requirements
+- Closing if no longer relevant
+
+---
+*Automated by Issue Monitoring System*`
+                });
+                
+                console.log(`Added long-running notice to issue #${issue.number}`);
+              }
+            }
+            
+      - name: 🗑️ Close Stale Issues
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const now = new Date();
+            const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            
+            // Get all issues marked as stale
+            const { data: staleIssues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'status:stale',
+              per_page: 100
+            });
+            
+            for (const issue of staleIssues) {
+              const updatedAt = new Date(issue.updated_at);
+              const labels = issue.labels.map(label => label.name);
+              
+              // If stale issue hasn't been updated in 7 days, close it
+              if (updatedAt < sevenDaysAgo && !labels.includes('priority:critical')) {
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  state: 'closed'
+                });
+                
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  body: `🗑️ **Auto-Closed Stale Issue**
+
+This issue has been automatically closed due to inactivity. It was marked as stale 7 days ago and received no further activity.
+
+**To Reopen:**
+- Add a comment explaining why this should be reopened
+- Provide updated information or requirements
+- Tag a maintainer for review
+
+Thank you for your contribution!
+
+---
+*Automated by Issue Monitoring System*`
+                });
+                
+                console.log(`Auto-closed stale issue #${issue.number}`);
+              }
+            }
