@@ -2,6 +2,9 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 
+// Import database types
+import type { DatabaseConnection, AsyncDatabaseConnection, PreparedStatement, AsyncPreparedStatement } from '../types/database';
+
 const DATABASE_PATH = process.env.DATABASE_PATH || path.join(__dirname, '../../data/database.sqlite');
 
 // Connection pool configuration
@@ -142,9 +145,58 @@ class DatabaseConnectionPool {
 // Create global connection pool
 const connectionPool = new DatabaseConnectionPool(DATABASE_PATH, poolConfig);
 
-// Export legacy db interface for backward compatibility
-export const db: any = {
-  prepare: (sql: string) => {
+// Export properly typed db interface
+export const db: DatabaseConnection = {
+  prepare: (sql: string): PreparedStatement => {
+    // Return sync interface for existing code compatibility
+    const stmt = {
+      run: (...params: any[]) => {
+        // Synchronous wrapper around async pool
+        const conn = connectionPool.connections[0]; // Use first available connection
+        if (!conn) throw new Error('No database connection available');
+        return conn.prepare(sql).run(...params);
+      },
+      get: (...params: any[]) => {
+        const conn = connectionPool.connections[0];
+        if (!conn) throw new Error('No database connection available');
+        return conn.prepare(sql).get(...params);
+      },
+      all: (...params: any[]) => {
+        const conn = connectionPool.connections[0];
+        if (!conn) throw new Error('No database connection available');
+        return conn.prepare(sql).all(...params);
+      }
+    };
+    return stmt;
+  },
+  exec: (sql: string) => {
+    // Synchronous exec for compatibility
+    const conn = connectionPool.connections[0];
+    if (!conn) throw new Error('No database connection available');
+    try {
+      return conn.exec(sql);
+    } catch (error) {
+      throw error;
+    }
+  },
+  pragma: (pragma: string) => {
+    const conn = connectionPool.connections[0];
+    if (!conn) throw new Error('No database connection available');
+    return conn.pragma(pragma);
+  },
+  close: () => connectionPool.close(),
+  transaction: (operations: (db: Database.Database) => any) => {
+    const conn = connectionPool.connections[0];
+    if (!conn) throw new Error('No database connection available');
+    const transaction = conn.transaction(operations);
+    return transaction(conn);
+  },
+  getStats: () => connectionPool.getStats()
+};
+
+// Export async database interface for modern services
+export const asyncDb: AsyncDatabaseConnection = {
+  prepare: (sql: string): AsyncPreparedStatement => {
     return {
       run: async (...params: any[]) => {
         return connectionPool.withConnection((conn) => {
@@ -171,7 +223,7 @@ export const db: any = {
       try {
         return conn.exec(sql);
       } catch (error) {
-        throw error; // Ensure errors are properly propagated
+        throw error;
       }
     });
   },

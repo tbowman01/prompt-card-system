@@ -10,7 +10,7 @@ interface TestResultsProps {
   onClear?: () => void;
 }
 
-export default function TestResults({ execution, onClear }: TestResultsProps) {
+export function TestResults({ execution, onClear }: TestResultsProps) {
   const [expandedResults, setExpandedResults] = useState<Set<number>>(new Set());
 
   const toggleExpanded = (testId: number) => {

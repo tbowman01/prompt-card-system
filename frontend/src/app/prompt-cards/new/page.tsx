@@ -1,5 +1,6 @@
 'use client';
 
+import React from 'react';
 import PromptCardForm from '@/components/PromptCard/PromptCardForm';
 
 export default function NewPromptCardPage() {

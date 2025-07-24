@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { TestResults } from '@/components/TestExecution/TestResults'
-import { TestResult } from '@/types'
+import { TestExecution, TestResult } from '@/types'
 
 const mockTestResults: TestResult[] = [
   {
@@ -65,9 +65,22 @@ const mockTestResults: TestResult[] = [
   },
 ]
 
+const mockExecution: TestExecution = {
+  id: 'test-exec-1',
+  prompt_card_id: 1,
+  status: 'completed',
+  test_results: mockTestResults,
+  total_tests: 3,
+  passed_tests: 1,
+  failed_tests: 1,
+  execution_time_ms: 2200,
+  model_used: 'gpt-4',
+  created_at: '2024-01-01T00:00:00Z',
+}
+
 describe('TestResults', () => {
   it('renders test results correctly', () => {
-    render(<TestResults results={mockTestResults} />)
+    render(<TestResults execution={mockExecution} />)
 
     // Check for all test case names
     expect(screen.getByText('Friendly response test')).toBeInTheDocument()
@@ -76,7 +89,7 @@ describe('TestResults', () => {
   })
 
   it('displays passed test with correct styling', () => {
-    render(<TestResults results={[mockTestResults[0]]} />)
+    render(<TestResults execution={{...mockExecution, test_results: [mockTestResults[0]]}} />)
 
     const passedTest = screen.getByText('Friendly response test').closest('div')
     expect(passedTest).toHaveClass('border-green-200')
@@ -84,7 +97,7 @@ describe('TestResults', () => {
   })
 
   it('displays failed test with correct styling', () => {
-    render(<TestResults results={[mockTestResults[1]]} />)
+    render(<TestResults execution={{...mockExecution, test_results: [mockTestResults[1]]}} />)
 
     const failedTest = screen.getByText('Professional response test').closest('div')
     expect(failedTest).toHaveClass('border-red-200')
@@ -92,7 +105,7 @@ describe('TestResults', () => {
   })
 
   it('displays error test with correct styling', () => {
-    render(<TestResults results={[mockTestResults[2]]} />)
+    render(<TestResults execution={{...mockExecution, test_results: [mockTestResults[2]]}} />)
 
     const errorTest = screen.getByText('Error test case').closest('div')
     expect(errorTest).toHaveClass('border-yellow-200')
@@ -100,21 +113,21 @@ describe('TestResults', () => {
   })
 
   it('shows execution times', () => {
-    render(<TestResults results={mockTestResults} />)
+    render(<TestResults execution={mockExecution} />)
 
     expect(screen.getByText('1.25s')).toBeInTheDocument() // 1250ms formatted
     expect(screen.getByText('0.95s')).toBeInTheDocument() // 950ms formatted
   })
 
   it('displays model information', () => {
-    render(<TestResults results={mockTestResults} />)
+    render(<TestResults execution={mockExecution} />)
 
     const modelBadges = screen.getAllByText('gpt-4')
     expect(modelBadges).toHaveLength(3) // All tests use gpt-4
   })
 
   it('shows assertion results for passed tests', () => {
-    render(<TestResults results={[mockTestResults[0]]} />)
+    render(<TestResults execution={{...mockExecution, test_results: [mockTestResults[0]]}} />)
 
     expect(screen.getByText('Should apologize')).toBeInTheDocument()
     expect(screen.getByText('Should not be angry')).toBeInTheDocument()
@@ -125,7 +138,7 @@ describe('TestResults', () => {
   })
 
   it('shows assertion results for failed tests', () => {
-    render(<TestResults results={[mockTestResults[1]]} />)
+    render(<TestResults execution={{...mockExecution, test_results: [mockTestResults[1]]}} />)
 
     expect(screen.getByText('Should mention returns')).toBeInTheDocument()
     
@@ -134,21 +147,21 @@ describe('TestResults', () => {
   })
 
   it('displays error messages when present', () => {
-    render(<TestResults results={[mockTestResults[1], mockTestResults[2]]} />)
+    render(<TestResults execution={{...mockExecution, test_results: [mockTestResults[1], mockTestResults[2]]}} />)
 
     expect(screen.getByText('Response did not contain required terms')).toBeInTheDocument()
     expect(screen.getByText('Network timeout occurred')).toBeInTheDocument()
   })
 
   it('shows actual and expected output', () => {
-    render(<TestResults results={[mockTestResults[0]]} />)
+    render(<TestResults execution={{...mockExecution, test_results: [mockTestResults[0]]}} />)
 
     expect(screen.getByText(/I apologize for the inconvenience/)).toBeInTheDocument()
     expect(screen.getByText('Professional and empathetic response')).toBeInTheDocument()
   })
 
   it('handles empty results gracefully', () => {
-    render(<TestResults results={[]} />)
+    render(<TestResults execution={{...mockExecution, test_results: []}} />)
 
     expect(screen.getByText('No test results available')).toBeInTheDocument()
   })
@@ -164,14 +177,14 @@ describe('TestResults', () => {
       execution_time_ms: 5500, // Should show as 5.5s
     }
 
-    render(<TestResults results={[quickTest, slowTest]} />)
+    render(<TestResults execution={{...mockExecution, test_results: [quickTest, slowTest]}} />)
 
     expect(screen.getByText('150ms')).toBeInTheDocument()
     expect(screen.getByText('5.5s')).toBeInTheDocument()
   })
 
   it('provides summary statistics', () => {
-    render(<TestResults results={mockTestResults} />)
+    render(<TestResults execution={mockExecution} />)
 
     // Should show overall statistics
     expect(screen.getByText(/Total: 3/)).toBeInTheDocument()
@@ -181,7 +194,7 @@ describe('TestResults', () => {
   })
 
   it('is accessible with proper ARIA attributes', () => {
-    render(<TestResults results={mockTestResults} />)
+    render(<TestResults execution={mockExecution} />)
 
     // Check for proper headings
     expect(screen.getByRole('heading', { level: 3 })).toBeInTheDocument()
@@ -197,7 +210,7 @@ describe('TestResults', () => {
   })
 
   it('allows expanding/collapsing detailed results', () => {
-    render(<TestResults results={[mockTestResults[0]]} />)
+    render(<TestResults execution={{...mockExecution, test_results: [mockTestResults[0]]}} />)
 
     // Should have collapsible sections for detailed output
     const detailButtons = screen.getAllByRole('button', { name: /details|expand|show/i })

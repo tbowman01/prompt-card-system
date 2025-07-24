@@ -3,6 +3,7 @@ import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
 import request from 'supertest';
+import { TestTimeouts } from '../jest.timeouts';
 
 const execAsync = promisify(exec);
 
@@ -34,11 +35,12 @@ interface PerformanceBaseline {
 }
 
 describe('Docker Performance Baseline Establishment', () => {
+  // Set timeout for performance baseline tests
+  jest.setTimeout(TestTimeouts.PERFORMANCE);
   let baseline: PerformanceBaseline;
   const baselineFile = path.join(__dirname, '../../../performance-baseline.json');
 
-  beforeAll(async function() {
-    this.timeout(300000); // 5 minutes for comprehensive baseline
+  beforeAll(async () => {
     
     console.log('📊 Establishing Docker Performance Baseline...');
     console.log('🔄 This comprehensive test will take several minutes...');

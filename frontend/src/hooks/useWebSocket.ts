@@ -45,6 +45,7 @@ export interface WebSocketConfig {
 export interface UseWebSocketReturn {
   socket: Socket | null;
   isConnected: boolean;
+  connected: boolean; // Alias for isConnected for backward compatibility
   connect: () => void;
   disconnect: () => void;
   subscribeToTest: (executionId: string) => void;
@@ -54,6 +55,9 @@ export interface UseWebSocketReturn {
   cancelExecution: (executionId: string, reason: string) => void;
   getProgress: (executionId: string) => void;
   getActiveExecutions: () => void;
+  messages: Array<any>; // For message history
+  error: string | null; // For error tracking
+  sendMessage: (event: string, data: any) => void; // For sending messages
 }
 
 export const useWebSocket = (
@@ -61,6 +65,8 @@ export const useWebSocket = (
   config: WebSocketConfig = {}
 ): UseWebSocketReturn => {
   const [isConnected, setIsConnected] = useState(false);
+  const [messages, setMessages] = useState<Array<any>>([]);
+  const [error, setError] = useState<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -89,6 +95,7 @@ export const useWebSocket = (
     socketRef.current.on('connect', () => {
       console.log('WebSocket connected');
       setIsConnected(true);
+      setError(null); // Clear error on successful connection
       
       // Clear any pending reconnection timeout
       if (reconnectTimeoutRef.current) {
@@ -115,6 +122,16 @@ export const useWebSocket = (
     socketRef.current.on('connect_error', (error) => {
       console.error('WebSocket connection error:', error);
       setIsConnected(false);
+      setError(error.message || 'Connection error');
+    });
+
+    socketRef.current.on('error', (error) => {
+      console.error('WebSocket error:', error);
+      setError(error.message || error);
+    });
+
+    socketRef.current.on('message', (message) => {
+      setMessages(prev => [...prev, message]);
     });
 
     socketRef.current.on('reconnect', (attemptNumber) => {
@@ -201,6 +218,12 @@ export const useWebSocket = (
     }
   };
 
+  const sendMessage = (event: string, data: any) => {
+    if (socketRef.current && isConnected) {
+      socketRef.current.emit(event, data);
+    }
+  };
+
   // Auto-connect on mount if enabled
   useEffect(() => {
     if (autoConnect) {
@@ -215,6 +238,7 @@ export const useWebSocket = (
   return {
     socket: socketRef.current,
     isConnected,
+    connected: isConnected, // Backward compatibility alias
     connect,
     disconnect,
     subscribeToTest,
@@ -223,7 +247,10 @@ export const useWebSocket = (
     unsubscribeFromProgress,
     cancelExecution,
     getProgress,
-    getActiveExecutions
+    getActiveExecutions,
+    messages,
+    error,
+    sendMessage
   };
 };
 
