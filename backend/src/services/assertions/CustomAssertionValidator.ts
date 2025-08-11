@@ -189,7 +189,7 @@ export class CustomAssertionValidator {
       
       // Context information
       prompt: context?.prompt || '',
-      variables: { ...context?.variables } || {},
+      variables: context?.variables ? { ...context.variables } : {},
       model: context?.model || '',
       executionTime: context?.executionTime || 0,
       

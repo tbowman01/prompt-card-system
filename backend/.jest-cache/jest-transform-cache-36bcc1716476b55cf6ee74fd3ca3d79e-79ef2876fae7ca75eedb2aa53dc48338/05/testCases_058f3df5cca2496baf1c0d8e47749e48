@@ -1,0 +1,190 @@
+36df2bea6d5d54ec9c9a743b201f0b1a
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+Object.defineProperty(exports, "testCaseRoutes", {
+    enumerable: true,
+    get: function() {
+        return router;
+    }
+});
+const _express = require("express");
+const _connection = require("../database/connection");
+const _joi = /*#__PURE__*/ _interop_require_default(require("joi"));
+function _interop_require_default(obj) {
+    return obj && obj.__esModule ? obj : {
+        default: obj
+    };
+}
+const router = (0, _express.Router)();
+// Validation schema for test case
+const testCaseSchema = _joi.default.object({
+    prompt_card_id: _joi.default.number().integer().positive().required(),
+    name: _joi.default.string().min(1).max(255).required(),
+    input_variables: _joi.default.object().required(),
+    expected_output: _joi.default.string().allow('').optional(),
+    assertions: _joi.default.array().items(_joi.default.object({
+        type: _joi.default.string().valid('contains', 'not-contains', 'equals', 'not-equals', 'regex', 'length').required(),
+        value: _joi.default.alternatives().try(_joi.default.string(), _joi.default.number()).required(),
+        description: _joi.default.string().optional()
+    })).optional()
+});
+// Get all test cases for a prompt card
+router.get('/prompt-cards/:promptCardId/test-cases', (req, res)=>{
+    try {
+        const { promptCardId } = req.params;
+        // Verify prompt card exists
+        const promptCard = _connection.db.prepare('SELECT id FROM prompt_cards WHERE id = ?').get(promptCardId);
+        if (!promptCard) {
+            return res.status(404).json({
+                success: false,
+                error: 'Prompt card not found'
+            });
+        }
+        const testCases = _connection.db.prepare(`
+      SELECT * FROM test_cases 
+      WHERE prompt_card_id = ? 
+      ORDER BY created_at DESC
+    `).all(promptCardId);
+        return res.json({
+            success: true,
+            data: testCases.map((tc)=>({
+                    ...tc,
+                    input_variables: JSON.parse(tc.input_variables),
+                    assertions: JSON.parse(tc.assertions || '[]')
+                }))
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to fetch test cases'
+        });
+    }
+});
+// Get specific test case
+router.get('/:id', (req, res)=>{
+    try {
+        const { id } = req.params;
+        const testCase = _connection.db.prepare('SELECT * FROM test_cases WHERE id = ?').get(id);
+        if (!testCase) {
+            return res.status(404).json({
+                success: false,
+                error: 'Test case not found'
+            });
+        }
+        return res.json({
+            success: true,
+            data: {
+                ...testCase,
+                input_variables: JSON.parse(testCase.input_variables),
+                assertions: JSON.parse(testCase.assertions || '[]')
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to fetch test case'
+        });
+    }
+});
+// Create new test case
+router.post('/', (req, res)=>{
+    try {
+        const { error, value } = testCaseSchema.validate(req.body);
+        if (error) {
+            return res.status(400).json({
+                success: false,
+                error: error.details[0].message
+            });
+        }
+        const { prompt_card_id, name, input_variables, expected_output, assertions } = value;
+        // Verify prompt card exists
+        const promptCard = _connection.db.prepare('SELECT id FROM prompt_cards WHERE id = ?').get(prompt_card_id);
+        if (!promptCard) {
+            return res.status(404).json({
+                success: false,
+                error: 'Prompt card not found'
+            });
+        }
+        const result = _connection.db.prepare(`
+      INSERT INTO test_cases (prompt_card_id, name, input_variables, expected_output, assertions)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(prompt_card_id, name, JSON.stringify(input_variables), expected_output || null, JSON.stringify(assertions || []));
+        const newTestCase = _connection.db.prepare('SELECT * FROM test_cases WHERE id = ?').get(result.lastInsertRowid);
+        return res.status(201).json({
+            success: true,
+            data: {
+                ...newTestCase,
+                input_variables: JSON.parse(newTestCase.input_variables),
+                assertions: JSON.parse(newTestCase.assertions || '[]')
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to create test case'
+        });
+    }
+});
+// Update test case
+router.put('/:id', (req, res)=>{
+    try {
+        const { id } = req.params;
+        const { error, value } = testCaseSchema.validate(req.body);
+        if (error) {
+            return res.status(400).json({
+                success: false,
+                error: error.details[0].message
+            });
+        }
+        const { prompt_card_id, name, input_variables, expected_output, assertions } = value;
+        const result = _connection.db.prepare(`
+      UPDATE test_cases 
+      SET prompt_card_id = ?, name = ?, input_variables = ?, expected_output = ?, assertions = ?
+      WHERE id = ?
+    `).run(prompt_card_id, name, JSON.stringify(input_variables), expected_output || null, JSON.stringify(assertions || []), id);
+        if (result.changes === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Test case not found'
+            });
+        }
+        const updatedTestCase = _connection.db.prepare('SELECT * FROM test_cases WHERE id = ?').get(id);
+        return res.json({
+            success: true,
+            data: {
+                ...updatedTestCase,
+                input_variables: JSON.parse(updatedTestCase.input_variables),
+                assertions: JSON.parse(updatedTestCase.assertions || '[]')
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to update test case'
+        });
+    }
+});
+// Delete test case
+router.delete('/:id', (req, res)=>{
+    try {
+        const { id } = req.params;
+        const result = _connection.db.prepare('DELETE FROM test_cases WHERE id = ?').run(id);
+        if (result.changes === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Test case not found'
+            });
+        }
+        return res.json({
+            success: true,
+            message: 'Test case deleted successfully'
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to delete test case'
+        });
+    }
+});

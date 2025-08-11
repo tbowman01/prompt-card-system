@@ -1,0 +1,454 @@
+name: 🔍 Pull Request Quality Check
+
+on:
+  pull_request:
+    types: [opened, edited, ready_for_review, synchronize]
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  pr_validation:
+    name: 🔎 Validate PR Requirements
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft != true
+    
+    steps:
+      - name: 🏗️ Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: 📋 Check PR Template Completion
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const pr = context.payload.pull_request;
+            const body = pr.body || '';
+            
+            const requiredSections = [
+              '### 🎯 Description',
+              '### 🧪 Type of Change', 
+              '### 🔍 Changes Made',
+              '### 🧪 Testing',
+              '### 📋 Quality Checklist'
+            ];
+            
+            const checkboxes = [
+              'Code follows project style guidelines',
+              'Self-review completed',
+              'All existing tests pass'
+            ];
+            
+            let missingElements = [];
+            let score = 0;
+            let totalScore = requiredSections.length + checkboxes.length;
+            
+            // Check required sections
+            for (const section of requiredSections) {
+              if (body.includes(section)) {
+                score++;
+              } else {
+                missingElements.push(`Missing section: ${section}`);
+              }
+            }
+            
+            // Check important checkboxes
+            for (const checkbox of checkboxes) {
+              if (body.includes(`[x]`) && body.includes(checkbox)) {
+                score++;
+              } else if (body.includes(checkbox)) {
+                missingElements.push(`Unchecked: ${checkbox}`);
+              } else {
+                missingElements.push(`Missing checkbox: ${checkbox}`);
+              }
+            }
+            
+            const completionPercentage = Math.round((score / totalScore) * 100);
+            
+            let status = completionPercentage >= 80 ? 'success' : 
+                        completionPercentage >= 60 ? 'warning' : 'failure';
+                        
+            let message = `📊 **PR Template Completion: ${completionPercentage}%**\n\n`;
+            
+            if (status === 'success') {
+              message += `✅ **Excellent!** Your PR template is well-completed.\n\n`;
+            } else if (status === 'warning') {
+              message += `⚠️ **Good progress!** Consider completing a few more sections.\n\n`;
+            } else {
+              message += `❌ **Incomplete PR template.** Please fill out the required sections.\n\n`;
+            }
+            
+            if (missingElements.length > 0) {
+              message += `**Missing or incomplete elements:**\n`;
+              for (const element of missingElements) {
+                message += `- ${element}\n`;
+              }
+              message += `\n`;
+            }
+            
+            message += `**Tips for a great PR:**\n`;
+            message += `- Provide clear description of changes\n`;
+            message += `- Include testing details\n`;
+            message += `- Check off completed quality items\n`;
+            message += `- Link related issues\n`;
+            message += `- Add appropriate labels\n\n`;
+            
+            message += `---\n*Automated PR Quality Check*`;
+            
+            // Find existing bot comment to update
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number
+            });
+            
+            const botComment = comments.find(comment => 
+              comment.user.login === 'github-actions[bot]' &&
+              comment.body.includes('PR Template Completion')
+            );
+            
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: message
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                body: message
+              });
+            }
+            
+            // Set status check
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: pr.head.sha,
+              state: status === 'failure' ? 'failure' : 'success',
+              target_url: pr.html_url,
+              description: `PR Template: ${completionPercentage}% complete`,
+              context: 'PR Quality / Template Completion'
+            });
+            
+      - name: 🔗 Validate Issue Link
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const pr = context.payload.pull_request;
+            const body = pr.body || '';
+            const title = pr.title || '';
+            
+            // Check for issue references
+            const issuePatterns = [
+              /closes?\s+#(\d+)/gi,
+              /fixes?\s+#(\d+)/gi,
+              /resolves?\s+#(\d+)/gi,
+              /#(\d+)/g
+            ];
+            
+            let linkedIssues = [];
+            for (const pattern of issuePatterns) {
+              const matches = [...body.matchAll(pattern)];
+              for (const match of matches) {
+                if (match[1] && !linkedIssues.includes(match[1])) {
+                  linkedIssues.push(match[1]);
+                }
+              }
+            }
+            
+            let status = 'success';
+            let message = '';
+            
+            if (linkedIssues.length === 0) {
+              status = 'failure';
+              message = 'No linked issues found. Please link the related issue using "Closes #123" or similar.';
+            } else {
+              message = `✅ Linked to issue(s): ${linkedIssues.map(id => `#${id}`).join(', ')}`;
+              
+              // Validate that linked issues exist and are open
+              for (const issueId of linkedIssues) {
+                try {
+                  const { data: issue } = await github.rest.issues.get({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: parseInt(issueId)
+                  });
+                  
+                  if (issue.state === 'closed') {
+                    message += `\n⚠️ Warning: Issue #${issueId} is already closed.`;
+                  }
+                } catch (error) {
+                  status = 'failure';
+                  message += `\n❌ Error: Issue #${issueId} not found.`;
+                }
+              }
+            }
+            
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: pr.head.sha,
+              state: status,
+              target_url: pr.html_url,
+              description: linkedIssues.length > 0 ? `Linked to ${linkedIssues.length} issue(s)` : 'No linked issues',
+              context: 'PR Quality / Issue Linking'
+            });
+            
+            console.log('Issue linking validation:', message);
+            
+      - name: 📏 Analyze PR Size and Complexity
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const pr = context.payload.pull_request;
+            
+            // Get PR files
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number
+            });
+            
+            let stats = {
+              filesChanged: files.length,
+              additions: pr.additions,
+              deletions: pr.deletions,
+              changes: pr.additions + pr.deletions
+            };
+            
+            // Categorize by complexity
+            let complexity = 'small';
+            let status = 'success';
+            let recommendations = [];
+            
+            if (stats.changes > 1000 || stats.filesChanged > 20) {
+              complexity = 'extra-large';
+              status = 'failure';
+              recommendations.push('Consider breaking this PR into smaller, focused PRs');
+              recommendations.push('Large PRs are harder to review and more likely to introduce bugs');
+            } else if (stats.changes > 500 || stats.filesChanged > 10) {
+              complexity = 'large';
+              status = 'warning';
+              recommendations.push('Consider if this PR can be split into smaller parts');
+              recommendations.push('Ensure comprehensive testing for large changes');
+            } else if (stats.changes > 100 || stats.filesChanged > 5) {
+              complexity = 'medium';
+              recommendations.push('Good size for thorough review');
+            } else {
+              recommendations.push('Great size for quick review and testing');
+            }
+            
+            // File type analysis
+            let fileTypes = {
+              code: 0,
+              tests: 0,
+              docs: 0,
+              config: 0,
+              other: 0
+            };
+            
+            for (const file of files) {
+              const filename = file.filename.toLowerCase();
+              if (filename.includes('test') || filename.includes('spec')) {
+                fileTypes.tests++;
+              } else if (filename.endsWith('.md') || filename.includes('doc')) {
+                fileTypes.docs++;
+              } else if (filename.includes('config') || filename.includes('.json') || filename.includes('.yml') || filename.includes('.yaml')) {
+                fileTypes.config++;
+              } else if (filename.endsWith('.js') || filename.endsWith('.ts') || filename.endsWith('.jsx') || filename.endsWith('.tsx')) {
+                fileTypes.code++;
+              } else {
+                fileTypes.other++;
+              }
+            }
+            
+            // Test coverage analysis
+            if (fileTypes.code > 0 && fileTypes.tests === 0) {
+              recommendations.push('⚠️ No test files modified - consider adding tests for new code');
+            } else if (fileTypes.tests > 0) {
+              recommendations.push('✅ Great job including test updates!');
+            }
+            
+            let message = `📊 **PR Size Analysis**\n\n`;
+            message += `**Complexity:** ${complexity.toUpperCase()}\n`;
+            message += `**Files Changed:** ${stats.filesChanged}\n`;
+            message += `**Lines Added:** +${stats.additions}\n`;
+            message += `**Lines Deleted:** -${stats.deletions}\n`;
+            message += `**Total Changes:** ${stats.changes}\n\n`;
+            
+            message += `**File Breakdown:**\n`;
+            message += `- 💻 Code files: ${fileTypes.code}\n`;
+            message += `- 🧪 Test files: ${fileTypes.tests}\n`;
+            message += `- 📚 Documentation: ${fileTypes.docs}\n`;
+            message += `- ⚙️ Configuration: ${fileTypes.config}\n`;
+            message += `- 📁 Other: ${fileTypes.other}\n\n`;
+            
+            if (recommendations.length > 0) {
+              message += `**Recommendations:**\n`;
+              for (const rec of recommendations) {
+                message += `- ${rec}\n`;
+              }
+            }
+            
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: pr.head.sha,
+              state: status,
+              target_url: pr.html_url,
+              description: `${complexity} PR (${stats.filesChanged} files, ${stats.changes} changes)`,
+              context: 'PR Quality / Size Analysis'
+            });
+            
+            console.log('PR size analysis completed:', complexity, stats);
+            
+  auto_assign_reviewers:
+    name: 👥 Auto-Assign Reviewers
+    runs-on: ubuntu-latest
+    if: github.event.action == 'opened' || github.event.action == 'ready_for_review'
+    
+    steps:
+      - name: 🏗️ Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: 🎯 Assign Reviewers Based on Files
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const pr = context.payload.pull_request;
+            
+            // Get changed files
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number
+            });
+            
+            let suggestedReviewers = new Set();
+            let labels = [];
+            
+            // Analyze files to suggest reviewers and labels
+            for (const file of files) {
+              const path = file.filename.toLowerCase();
+              
+              if (path.includes('frontend/') || path.includes('.tsx') || path.includes('.jsx')) {
+                // suggestedReviewers.add('frontend-team-lead');
+                labels.push('component:frontend');
+              }
+              
+              if (path.includes('backend/') || path.includes('api/') || path.endsWith('.ts') && !path.includes('frontend')) {
+                // suggestedReviewers.add('backend-team-lead');
+                labels.push('component:backend');
+              }
+              
+              if (path.includes('test') || path.includes('spec')) {
+                // suggestedReviewers.add('qa-lead');
+                labels.push('component:testing');
+              }
+              
+              if (path.includes('docker') || path.includes('ci') || path.includes('.yml') || path.includes('.yaml')) {
+                // suggestedReviewers.add('devops-lead');
+                labels.push('component:infrastructure');
+              }
+              
+              if (path.includes('security') || path.includes('auth')) {
+                // suggestedReviewers.add('security-lead');
+                labels.push('type:security');
+              }
+              
+              if (path.includes('database') || path.includes('migration')) {
+                // suggestedReviewers.add('database-lead');
+                labels.push('component:database');
+              }
+            }
+            
+            // Remove duplicates from labels
+            labels = [...new Set(labels)];
+            
+            // Add appropriate labels to PR
+            if (labels.length > 0) {
+              try {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr.number,
+                  labels: labels
+                });
+                console.log('Added labels:', labels);
+              } catch (error) {
+                console.log('Error adding labels:', error.message);
+              }
+            }
+            
+            // For now, we'll just suggest reviewers in a comment instead of auto-assigning
+            if (suggestedReviewers.size > 0) {
+              const reviewerList = Array.from(suggestedReviewers).map(r => `@${r}`).join(', ');
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                body: `🤖 **Auto-Review Assignment**\n\nBased on the files changed, I recommend requesting reviews from: ${reviewerList}\n\n*This is an automated suggestion based on file analysis.*`
+              });
+            }
+            
+            console.log('Reviewer analysis completed');
+            
+  quality_summary:
+    name: 📊 Generate Quality Summary
+    runs-on: ubuntu-latest
+    needs: [pr_validation]
+    if: always()
+    
+    steps:
+      - name: 📋 Create Quality Summary
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const pr = context.payload.pull_request;
+            
+            // This would normally pull results from previous jobs
+            // For now, we'll create a general quality summary
+            
+            let summary = `🔍 **Pull Request Quality Summary**\n\n`;
+            summary += `**PR Information:**\n`;
+            summary += `- **Title:** ${pr.title}\n`;
+            summary += `- **Author:** @${pr.user.login}\n`;
+            summary += `- **Branch:** ${pr.head.ref} → ${pr.base.ref}\n`;
+            summary += `- **Status:** ${pr.draft ? 'Draft' : 'Ready for Review'}\n\n`;
+            
+            summary += `**Quality Checks:**\n`;
+            summary += `- ✅ PR template validation completed\n`;
+            summary += `- ✅ Issue linking checked\n`;
+            summary += `- ✅ Size and complexity analyzed\n`;
+            summary += `- ✅ Auto-labeling applied\n\n`;
+            
+            summary += `**Next Steps:**\n`;
+            summary += `1. 👀 Wait for reviewer assignment\n`;
+            summary += `2. 🧪 Ensure all CI checks pass\n`;
+            summary += `3. 💬 Address any review feedback\n`;
+            summary += `4. ✅ Get approval for merge\n\n`;
+            
+            summary += `**Tips for Success:**\n`;
+            summary += `- Keep discussions focused and constructive\n`;
+            summary += `- Respond promptly to reviewer feedback\n`;
+            summary += `- Update tests and documentation as needed\n`;
+            summary += `- Ensure all automated checks pass\n\n`;
+            
+            summary += `---\n*Automated Quality Check System*`;
+            
+            console.log('Quality summary generated');
+            
+            // Note: In a real implementation, you might want to create or update a comment
+            // with this summary, or use it for other reporting purposes

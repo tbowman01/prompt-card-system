@@ -24,9 +24,12 @@ export default async function globalSetup(): Promise<void> {
   
   // Initialize test database
   try {
-    initializeDatabase();
+    console.log('Initializing database...');
+    await initializeDatabase();
+    console.log('Database initialized successfully');
     console.log('✅ Test database initialized');
   } catch (error) {
+    console.error('Error initializing database:', error);
     console.error('❌ Failed to initialize test database:', error);
   }
   

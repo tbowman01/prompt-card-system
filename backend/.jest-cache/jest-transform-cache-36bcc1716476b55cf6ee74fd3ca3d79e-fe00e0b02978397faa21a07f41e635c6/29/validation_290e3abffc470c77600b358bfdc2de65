@@ -1,0 +1,335 @@
+8fa9cd3a5060ebeaf49f591d18bbb1e8
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+function _export(target, all) {
+    for(var name in all)Object.defineProperty(target, name, {
+        enumerable: true,
+        get: Object.getOwnPropertyDescriptor(all, name).get
+    });
+}
+_export(exports, {
+    get handleValidationErrors () {
+        return handleValidationErrors;
+    },
+    get limitRequestSize () {
+        return limitRequestSize;
+    },
+    get sanitizeInput () {
+        return sanitizeInput;
+    },
+    get sanitizeRequestBody () {
+        return sanitizeRequestBody;
+    },
+    get validatePromptCard () {
+        return validatePromptCard;
+    },
+    get validatePromptCardExpressValidator () {
+        return validatePromptCardExpressValidator;
+    },
+    get validateTestCase () {
+        return validateTestCase;
+    },
+    get validateTestCaseExpressValidator () {
+        return validateTestCaseExpressValidator;
+    },
+    get validation () {
+        return validation;
+    }
+});
+const _joi = /*#__PURE__*/ _interop_require_default(require("joi"));
+const _expressvalidator = require("express-validator");
+const _sanitizehtml = /*#__PURE__*/ _interop_require_default(require("sanitize-html"));
+function _interop_require_default(obj) {
+    return obj && obj.__esModule ? obj : {
+        default: obj
+    };
+}
+function validation(schema) {
+    return (req, res, next)=>{
+        const { error, value } = schema.validate(req.body);
+        if (error) {
+            res.status(400).json({
+                success: false,
+                error: 'Validation error',
+                details: error.details.map((detail)=>({
+                        field: detail.path.join('.'),
+                        message: detail.message
+                    }))
+            });
+            return;
+        }
+        req.body = value;
+        next();
+    };
+}
+// Validation schema for prompt cards
+const promptCardSchema = _joi.default.object({
+    title: _joi.default.string().required().min(1).max(255).pattern(/^[a-zA-Z0-9\s\-_.,!?()]+$/) // Allow only safe characters
+    .messages({
+        'string.pattern.base': 'Title contains invalid characters'
+    }),
+    description: _joi.default.string().allow('').max(1000).pattern(/^[a-zA-Z0-9\s\-_.,!?()\n\r]*$/) // Allow safe characters and newlines
+    .messages({
+        'string.pattern.base': 'Description contains invalid characters'
+    }),
+    prompt_template: _joi.default.string().required().min(1).max(10000) // Reasonable limit for prompt templates
+    .custom((value, helpers)=>{
+        // Check for potential injection patterns
+        const dangerousPatterns = [
+            /<script[^>]*>.*?<\/script>/gi,
+            /javascript:/gi,
+            /on\w+\s*=/gi,
+            /eval\s*\(/gi,
+            /Function\s*\(/gi
+        ];
+        for (const pattern of dangerousPatterns){
+            if (pattern.test(value)) {
+                return helpers.error('any.invalid', {
+                    message: 'Prompt template contains potentially dangerous content'
+                });
+            }
+        }
+        return value;
+    }),
+    variables: _joi.default.array().items(_joi.default.string().max(100).pattern(/^[a-zA-Z0-9_]+$/)) // Variable names should be alphanumeric
+    .default([]).max(50) // Limit number of variables
+});
+// Enhanced validation schema for test cases with security rules
+const testCaseSchema = _joi.default.object({
+    prompt_card_id: _joi.default.number().integer().positive().required().max(1000000),
+    name: _joi.default.string().required().min(1).max(255).pattern(/^[a-zA-Z0-9\s\-_.,!?()]+$/).messages({
+        'string.pattern.base': 'Test case name contains invalid characters'
+    }),
+    input_variables: _joi.default.object().required().pattern(/^[a-zA-Z0-9_]+$/, _joi.default.string().max(1000)) // Key validation and value size limit
+    .max(20),
+    expected_output: _joi.default.string().allow('').max(50000) // Reasonable limit for expected output
+    .custom((value, helpers)=>{
+        if (value && value.length > 0) {
+            // Sanitize HTML content
+            const sanitized = (0, _sanitizehtml.default)(value, {
+                allowedTags: [
+                    'p',
+                    'br',
+                    'strong',
+                    'em',
+                    'u',
+                    'ol',
+                    'ul',
+                    'li'
+                ],
+                allowedAttributes: {}
+            });
+            return sanitized;
+        }
+        return value;
+    }),
+    assertions: _joi.default.array().items(_joi.default.object({
+        type: _joi.default.string().valid('equals', 'contains', 'regex', 'length', 'semantic_similarity').required(),
+        value: _joi.default.alternatives().try(_joi.default.string().max(1000), _joi.default.number()),
+        threshold: _joi.default.number().min(0).max(1)
+    })).default([]).max(10) // Limit number of assertions
+});
+function validatePromptCard(req, res, next) {
+    const { error, value } = promptCardSchema.validate(req.body);
+    if (error) {
+        res.status(400).json({
+            success: false,
+            error: 'Validation error',
+            details: error.details.map((detail)=>({
+                    field: detail.path.join('.'),
+                    message: detail.message
+                }))
+        });
+        return;
+    }
+    req.body = value;
+    next();
+}
+const sanitizeInput = (input)=>{
+    if (typeof input !== 'string') return input;
+    // Sanitize HTML content
+    const sanitized = (0, _sanitizehtml.default)(input, {
+        allowedTags: [],
+        allowedAttributes: {}
+    });
+    return sanitized.trim();
+};
+const sanitizeRequestBody = (req, res, next)=>{
+    const sanitizeObject = (obj)=>{
+        if (typeof obj === 'string') {
+            return sanitizeInput(obj);
+        } else if (Array.isArray(obj)) {
+            return obj.map(sanitizeObject);
+        } else if (obj && typeof obj === 'object') {
+            const sanitized = {};
+            for (const [key, value] of Object.entries(obj)){
+                sanitized[key] = sanitizeObject(value);
+            }
+            return sanitized;
+        }
+        return obj;
+    };
+    if (req.body && typeof req.body === 'object') {
+        req.body = sanitizeObject(req.body);
+    }
+    next();
+};
+const limitRequestSize = (maxSize = 1024 * 1024)=>{
+    return (req, res, next)=>{
+        const contentLength = parseInt(req.get('content-length') || '0', 10);
+        if (contentLength > maxSize) {
+            res.status(413).json({
+                success: false,
+                error: 'Request entity too large',
+                maxSize: maxSize,
+                receivedSize: contentLength
+            });
+            return;
+        }
+        next();
+    };
+};
+const validatePromptCardExpressValidator = [
+    (0, _expressvalidator.body)('title').isLength({
+        min: 1,
+        max: 255
+    }).matches(/^[a-zA-Z0-9\s\-_.,!?()]+$/).withMessage('Title contains invalid characters'),
+    (0, _expressvalidator.body)('description').optional().isLength({
+        max: 1000
+    }).matches(/^[a-zA-Z0-9\s\-_.,!?()\n\r]*$/).withMessage('Description contains invalid characters'),
+    (0, _expressvalidator.body)('prompt_template').isLength({
+        min: 1,
+        max: 10000
+    }).custom((value)=>{
+        const dangerousPatterns = [
+            /<script[^>]*>.*?<\/script>/gi,
+            /javascript:/gi,
+            /on\w+\s*=/gi,
+            /eval\s*\(/gi,
+            /Function\s*\(/gi
+        ];
+        for (const pattern of dangerousPatterns){
+            if (pattern.test(value)) {
+                throw new Error('Prompt template contains potentially dangerous content');
+            }
+        }
+        return true;
+    }),
+    (0, _expressvalidator.body)('variables').optional().isArray({
+        max: 50
+    }).custom((variables)=>{
+        if (!Array.isArray(variables)) return true;
+        for (const variable of variables){
+            if (typeof variable !== 'string' || !/^[a-zA-Z0-9_]+$/.test(variable) || variable.length > 100) {
+                throw new Error('Invalid variable name format');
+            }
+        }
+        return true;
+    })
+];
+const validateTestCaseExpressValidator = [
+    (0, _expressvalidator.body)('prompt_card_id').isInt({
+        min: 1,
+        max: 1000000
+    }).withMessage('Invalid prompt card ID'),
+    (0, _expressvalidator.body)('name').isLength({
+        min: 1,
+        max: 255
+    }).matches(/^[a-zA-Z0-9\s\-_.,!?()]+$/).withMessage('Test case name contains invalid characters'),
+    (0, _expressvalidator.body)('input_variables').isObject().custom((variables)=>{
+        if (Object.keys(variables).length > 20) {
+            throw new Error('Too many input variables');
+        }
+        for (const [key, value] of Object.entries(variables)){
+            if (!/^[a-zA-Z0-9_]+$/.test(key)) {
+                throw new Error(`Invalid variable name: ${key}`);
+            }
+            if (typeof value === 'string' && value.length > 1000) {
+                throw new Error(`Variable value too long: ${key}`);
+            }
+        }
+        return true;
+    }),
+    (0, _expressvalidator.body)('expected_output').optional().isLength({
+        max: 50000
+    }).customSanitizer((value)=>{
+        if (typeof value === 'string' && value.length > 0) {
+            return (0, _sanitizehtml.default)(value, {
+                allowedTags: [
+                    'p',
+                    'br',
+                    'strong',
+                    'em',
+                    'u',
+                    'ol',
+                    'ul',
+                    'li'
+                ],
+                allowedAttributes: {}
+            });
+        }
+        return value;
+    }),
+    (0, _expressvalidator.body)('assertions').optional().isArray({
+        max: 10
+    }).custom((assertions)=>{
+        if (!Array.isArray(assertions)) return true;
+        const validTypes = [
+            'equals',
+            'contains',
+            'regex',
+            'length',
+            'semantic_similarity'
+        ];
+        for (const assertion of assertions){
+            if (!assertion.type || !validTypes.includes(assertion.type)) {
+                throw new Error('Invalid assertion type');
+            }
+            if (assertion.value !== undefined) {
+                if (typeof assertion.value === 'string' && assertion.value.length > 1000) {
+                    throw new Error('Assertion value too long');
+                }
+            }
+            if (assertion.threshold !== undefined) {
+                if (typeof assertion.threshold !== 'number' || assertion.threshold < 0 || assertion.threshold > 1) {
+                    throw new Error('Invalid threshold value');
+                }
+            }
+        }
+        return true;
+    })
+];
+const handleValidationErrors = (req, res, next)=>{
+    const errors = (0, _expressvalidator.validationResult)(req);
+    if (!errors.isEmpty()) {
+        res.status(400).json({
+            success: false,
+            error: 'Validation error',
+            details: errors.array().map((error)=>({
+                    field: error.type === 'field' ? error.path : 'unknown',
+                    message: error.msg,
+                    value: error.type === 'field' ? error.value : undefined
+                }))
+        });
+        return;
+    }
+    next();
+};
+function validateTestCase(req, res, next) {
+    const { error, value } = testCaseSchema.validate(req.body);
+    if (error) {
+        res.status(400).json({
+            success: false,
+            error: 'Validation error',
+            details: error.details.map((detail)=>({
+                    field: detail.path.join('.'),
+                    message: detail.message
+                }))
+        });
+        return;
+    }
+    req.body = value;
+    next();
+}

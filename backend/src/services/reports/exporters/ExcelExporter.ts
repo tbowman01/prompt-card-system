@@ -1,5 +1,6 @@
 import * as ExcelJS from 'exceljs';
 import { ReportData, ReportExportOptions, ChartData, TableData, MetricData } from '../../../types/reports';
+import { ChartConfiguration, ChartData as ChartJSData } from 'chart.js';
 import { ChartJSNodeCanvas } from 'chartjs-node-canvas';
 
 export class ExcelExporter {
@@ -262,24 +263,20 @@ export class ExcelExporter {
       try {
         // Generate chart image
         const chartData = section.content as ChartData;
-        const chartBuffer = await this.chartRenderer.renderToBuffer({
+        const chartConfig: ChartConfiguration = {
           type: 'line',
-          data: chartData,
-          options: {
-            responsive: false,
-            plugins: {
-              legend: {
-                display: true,
-                position: 'top'
-              }
-            },
-            scales: {
-              y: {
-                beginAtZero: true
-              }
-            }
-          }
-        });
+          data: {
+            labels: chartData.labels,
+            datasets: chartData.datasets.map(dataset => ({
+              label: dataset.label,
+              data: dataset.data,
+              backgroundColor: dataset.backgroundColor,
+              borderColor: dataset.borderColor,
+              borderWidth: dataset.borderWidth
+            }))
+          },
+        };
+        const chartBuffer = await this.chartRenderer.renderToBuffer(chartConfig);
 
         // Add chart as image
         const imageId = workbook.addImage({
@@ -288,8 +285,8 @@ export class ExcelExporter {
         });
 
         worksheet.addImage(imageId, {
-          tl: { col: 0, row: row - 1 },
-          br: { col: 7, row: row + 19 }
+          tl: { col: 0, row: row - 1, nativeCol: 0, nativeColOff: 0, nativeRow: 0, nativeRowOff: 0 } as any,
+          br: { col: 7, row: row + 19, nativeCol: 0, nativeColOff: 0, nativeRow: 0, nativeRowOff: 0 } as any
         });
 
         // Add chart data table

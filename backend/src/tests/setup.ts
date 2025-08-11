@@ -1,5 +1,6 @@
 // Test setup for backend tests
 import 'reflect-metadata';
+import { TestTimeouts } from './jest.timeouts';
 
 // Mock environment variables for testing
 process.env.NODE_ENV = 'test';
@@ -25,8 +26,8 @@ afterAll(() => {
   Object.assign(console, originalConsole);
 });
 
-// Global test timeout
-jest.setTimeout(30000);
+// Global test timeout - default to integration timeout
+jest.setTimeout(TestTimeouts.INTEGRATION);
 
 // Mock fetch for Node.js environment
 global.fetch = jest.fn();

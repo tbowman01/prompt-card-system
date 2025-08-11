@@ -1,0 +1,207 @@
+# syntax=docker/dockerfile:1.7-labs
+# Multi-platform optimized frontend Dockerfile with advanced BuildKit features
+
+# ================================
+# OPTIMIZED MULTI-STAGE BUILD
+# ================================
+
+# Base image with security updates and multi-arch support
+FROM --platform=$BUILDPLATFORM node:20-alpine AS base
+ARG BUILDPLATFORM
+ARG TARGETPLATFORM
+
+# Enable BuildKit experimental features
+# syntax=docker/dockerfile:experimental
+
+# Security updates and basic tools
+RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
+    apk update && apk upgrade && \
+    apk add --no-cache \
+    libc6-compat \
+    dumb-init \
+    curl \
+    ca-certificates \
+    tzdata \
+    && rm -rf /var/cache/apk/* \
+    && update-ca-certificates
+
+# Optimize for specific architecture
+RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
+      echo "Optimizing for ARM64"; \
+    elif [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
+      echo "Optimizing for AMD64"; \
+    fi
+
+WORKDIR /app
+
+# ================================
+# DEPENDENCY CACHING LAYER
+# ================================
+FROM base AS deps
+ARG TARGETPLATFORM
+
+# Copy package files with enhanced caching
+COPY --link package*.json ./
+
+# Optimized npm configuration with platform-specific optimizations
+ENV npm_config_cache=/app/.npm-cache
+ENV npm_config_prefer_offline=true
+ENV npm_config_no_audit=true
+ENV npm_config_no_fund=true
+ENV npm_config_maxsockets=50
+
+# Advanced npm installation with build cache and cross-compilation support
+RUN --mount=type=cache,target=/app/.npm-cache,sharing=locked \
+    --mount=type=cache,target=/root/.npm,sharing=locked \
+    npm ci --only=production --ignore-scripts \
+    --platform=$TARGETPLATFORM \
+    --target_arch=$(echo $TARGETPLATFORM | cut -d'/' -f2) \
+    && npm cache clean --force
+
+# ================================
+# BUILD OPTIMIZATION LAYER
+# ================================
+FROM base AS build-deps
+ARG TARGETPLATFORM
+
+# Copy package files
+COPY --link package*.json ./
+COPY --link tsconfig.json ./
+COPY --link next.config.js ./
+COPY --link tailwind.config.js ./
+COPY --link postcss.config.js ./
+
+# Install build dependencies with enhanced caching
+RUN --mount=type=cache,target=/app/.npm-cache,sharing=locked \
+    --mount=type=cache,target=/root/.npm,sharing=locked \
+    npm ci --ignore-scripts \
+    --platform=$TARGETPLATFORM \
+    --target_arch=$(echo $TARGETPLATFORM | cut -d'/' -f2)
+
+# ================================
+# SOURCE CODE PREPARATION
+# ================================
+FROM build-deps AS source
+ARG TARGETPLATFORM
+
+# Enhanced .dockerignore patterns - only copy what we need
+COPY --link . .
+
+# Remove unnecessary files to optimize build context
+RUN --mount=type=cache,target=/tmp/cleanup \
+    find . -name "*.md" -not -path "./README.md" -delete && \
+    find . -name "*.test.*" -delete && \
+    find . -name "*.spec.*" -delete && \
+    rm -rf \
+    .git \
+    .github \
+    coverage \
+    __tests__ \
+    docs \
+    .vscode \
+    .idea \
+    *.log \
+    .DS_Store
+
+# ================================
+# BUILD STAGE WITH OPTIMIZATIONS
+# ================================
+FROM source AS builder
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
+
+# Build environment variables for optimization
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV CI=true
+
+# Platform-specific Node.js optimizations
+ENV NODE_OPTIONS="--max-old-space-size=4096 --max-semi-space-size=256"
+
+# Use BuildKit cache mounts for Next.js build cache
+RUN --mount=type=cache,target=/app/.next/cache,sharing=locked \
+    --mount=type=cache,target=/app/node_modules/.cache,sharing=locked \
+    npm run build
+
+# Optimize build output with compression
+RUN --mount=type=cache,target=/tmp/build-cache \
+    if [ -d ".next/standalone" ]; then \
+        echo "Standalone build detected"; \
+        find .next/standalone -name "*.js" -exec gzip -k {} \; ; \
+        find .next/static -name "*.js" -exec gzip -k {} \; ; \
+        find .next/static -name "*.css" -exec gzip -k {} \; ; \
+    fi
+
+# ================================
+# RUNTIME PREPARATION
+# ================================
+FROM base AS runtime-prep
+ARG TARGETPLATFORM
+
+# Create optimized user with minimal privileges
+RUN addgroup --system --gid 1001 nextjs && \
+    adduser --system --uid 1001 nextjs
+
+# Create required directories with proper permissions
+RUN mkdir -p /app/.next/cache /app/.next/static /app/public && \
+    chown -R nextjs:nextjs /app
+
+# ================================
+# PRODUCTION STAGE (MINIMAL)
+# ================================
+FROM runtime-prep AS production
+ARG TARGETPLATFORM
+
+# Copy production dependencies from deps stage
+COPY --from=deps --chown=nextjs:nextjs /app/node_modules ./node_modules
+
+# Copy built application with optimized copying
+COPY --from=builder --chown=nextjs:nextjs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nextjs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nextjs /app/public ./public
+COPY --from=builder --chown=nextjs:nextjs /app/package*.json ./
+
+# Security and performance configurations
+RUN chmod -R 755 /app && \
+    find /app -type d -exec chmod 755 {} \; && \
+    find /app -type f -exec chmod 644 {} \; && \
+    chmod +x /usr/bin/dumb-init
+
+# Switch to non-root user
+USER nextjs
+
+# Environment variables for production
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV HOSTNAME="0.0.0.0"
+ENV PORT=3000
+
+# Expose port
+EXPOSE 3000
+
+# Enhanced health check with faster intervals
+HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:3000/api/health || exit 1
+
+# Use dumb-init for proper signal handling
+ENTRYPOINT ["dumb-init", "--"]
+
+# Optimized Node.js startup with platform-specific flags
+CMD ["node", \
+     "--max-old-space-size=2048", \
+     "--max-semi-space-size=128", \
+     "--optimize-for-size", \
+     "--enable-source-maps", \
+     "server.js"]
+
+# ================================
+# METADATA AND LABELS
+# ================================
+LABEL maintainer="Docker Specialist <docker@promptcard.io>"
+LABEL org.opencontainers.image.title="Prompt Card Frontend"
+LABEL org.opencontainers.image.description="Optimized Next.js frontend for AI prompt management"
+LABEL org.opencontainers.image.version="1.0.0"
+LABEL org.opencontainers.image.architecture=$TARGETPLATFORM
+LABEL docker.optimization.level="advanced"
+LABEL docker.buildkit.cache="enabled"
+LABEL docker.multi-platform="true"

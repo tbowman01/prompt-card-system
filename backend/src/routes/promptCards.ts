@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import { db } from '../database/connection';
 import { validatePromptCard } from '../middleware/validation';
 import { PromptCard, CreatePromptCardRequest } from '../types/promptCard';
@@ -7,7 +7,7 @@ import { TestCase } from '../types/testCase';
 const router = Router();
 
 // Get all prompt cards with pagination
-router.get('/', (req, res) => {
+router.get('/', (req: Request, res: Response) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
@@ -73,7 +73,7 @@ router.get('/', (req, res) => {
 });
 
 // Get specific prompt card with test cases
-router.get('/:id', (req, res) => {
+router.get('/:id', (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     
@@ -115,7 +115,7 @@ router.get('/:id', (req, res) => {
 });
 
 // Create new prompt card
-router.post('/', validatePromptCard, (req, res) => {
+router.post('/', validatePromptCard, (req: Request, res: Response) => {
   try {
     const { title, description, prompt_template, variables } = req.body as CreatePromptCardRequest;
     
@@ -144,7 +144,7 @@ router.post('/', validatePromptCard, (req, res) => {
 });
 
 // Update prompt card
-router.put('/:id', validatePromptCard, (req, res) => {
+router.put('/:id', validatePromptCard, (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { title, description, prompt_template, variables } = req.body as CreatePromptCardRequest;
@@ -182,7 +182,7 @@ router.put('/:id', validatePromptCard, (req, res) => {
 });
 
 // Delete prompt card
-router.delete('/:id', (req, res) => {
+router.delete('/:id', (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     

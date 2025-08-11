@@ -1,0 +1,363 @@
+c745fc8bb93ef4c475b8b7067d3161d4
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+Object.defineProperty(exports, "enhancedHealthRoutes", {
+    enumerable: true,
+    get: function() {
+        return router;
+    }
+});
+const _express = require("express");
+const _connection = require("../database/connection");
+const _security = require("../services/security");
+const _redis = require("redis");
+const _axios = /*#__PURE__*/ _interop_require_default(require("axios"));
+const _os = /*#__PURE__*/ _interop_require_default(require("os"));
+function _interop_require_default(obj) {
+    return obj && obj.__esModule ? obj : {
+        default: obj
+    };
+}
+const router = (0, _express.Router)();
+// Utility function to perform health check with timeout
+async function performHealthCheck(name, checkFn, timeout = 5000) {
+    const startTime = Date.now();
+    try {
+        const result = await Promise.race([
+            checkFn(),
+            new Promise((_, reject)=>setTimeout(()=>reject(new Error('Health check timeout')), timeout))
+        ]);
+        return {
+            ...result,
+            responseTime: Date.now() - startTime
+        };
+    } catch (error) {
+        return {
+            status: 'unhealthy',
+            message: error instanceof Error ? error.message : 'Unknown error',
+            responseTime: Date.now() - startTime
+        };
+    }
+}
+// Database health check
+async function checkDatabase() {
+    try {
+        const result = _connection.db.prepare('SELECT 1 as healthy').get();
+        // Get database stats
+        const stats = {
+            promptCards: _connection.db.prepare('SELECT COUNT(*) as count FROM prompt_cards').get(),
+            testCases: _connection.db.prepare('SELECT COUNT(*) as count FROM test_cases').get(),
+            testExecutions: _connection.db.prepare('SELECT COUNT(*) as count FROM test_executions').get()
+        };
+        return {
+            status: result?.healthy === 1 ? 'healthy' : 'unhealthy',
+            details: {
+                type: 'SQLite',
+                path: process.env.DATABASE_PATH,
+                stats
+            }
+        };
+    } catch (error) {
+        return {
+            status: 'unhealthy',
+            message: error instanceof Error ? error.message : 'Database connection failed'
+        };
+    }
+}
+// Redis health check
+async function checkRedis() {
+    const redisUrl = process.env.REDIS_URL || 'redis://redis:6379';
+    try {
+        const client = (0, _redis.createClient)({
+            url: redisUrl
+        });
+        await client.connect();
+        const pingResult = await client.ping();
+        const info = await client.info('server');
+        await client.disconnect();
+        // Extract version from info
+        const versionMatch = info.match(/redis_version:(.+)/);
+        const version = versionMatch ? versionMatch[1].trim() : 'unknown';
+        return {
+            status: pingResult === 'PONG' ? 'healthy' : 'unhealthy',
+            details: {
+                url: redisUrl,
+                version,
+                ping: pingResult
+            }
+        };
+    } catch (error) {
+        return {
+            status: 'unhealthy',
+            message: `Redis connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            details: {
+                url: redisUrl
+            }
+        };
+    }
+}
+// Ollama/LLM health check
+async function checkOllama() {
+    const ollamaUrl = process.env.OLLAMA_BASE_URL || 'http://ollama:11434';
+    try {
+        // Check Ollama API version
+        const versionResponse = await _axios.default.get(`${ollamaUrl}/api/version`, {
+            timeout: 3000
+        });
+        // Get available models
+        const modelsResponse = await _axios.default.get(`${ollamaUrl}/api/tags`, {
+            timeout: 3000
+        });
+        const models = modelsResponse.data.models || [];
+        // Try a simple generation with the first available model
+        let generationTest = null;
+        if (models.length > 0) {
+            try {
+                const testResponse = await _axios.default.post(`${ollamaUrl}/api/generate`, {
+                    model: models[0].name,
+                    prompt: 'Respond with OK',
+                    stream: false,
+                    options: {
+                        num_predict: 5
+                    }
+                }, {
+                    timeout: 5000
+                });
+                generationTest = testResponse.data.response?.includes('OK') ? 'passed' : 'failed';
+            } catch (e) {
+                generationTest = 'failed';
+            }
+        }
+        return {
+            status: models.length > 0 ? 'healthy' : 'degraded',
+            message: models.length === 0 ? 'No models available' : undefined,
+            details: {
+                url: ollamaUrl,
+                version: versionResponse.data.version,
+                modelCount: models.length,
+                models: models.map((m)=>({
+                        name: m.name,
+                        size: m.size,
+                        modified: m.modified_at
+                    })),
+                generationTest
+            }
+        };
+    } catch (error) {
+        return {
+            status: 'unhealthy',
+            message: `Ollama connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            details: {
+                url: ollamaUrl
+            }
+        };
+    }
+}
+// WebSocket health check
+async function checkWebSocket(io) {
+    try {
+        if (!io) {
+            return {
+                status: 'unhealthy',
+                message: 'WebSocket server not initialized'
+            };
+        }
+        const sockets = await io.fetchSockets();
+        return {
+            status: 'healthy',
+            details: {
+                engine: io.engine.constructor.name,
+                connectedClients: sockets.length,
+                transports: io.engine.opts.transports
+            }
+        };
+    } catch (error) {
+        return {
+            status: 'unhealthy',
+            message: error instanceof Error ? error.message : 'WebSocket check failed'
+        };
+    }
+}
+// System health check
+async function checkSystem() {
+    try {
+        const uptime = process.uptime();
+        const memoryUsage = process.memoryUsage();
+        const loadAverage = _os.default.loadavg();
+        // Check memory usage
+        const totalMemory = _os.default.totalmem();
+        const freeMemory = _os.default.freemem();
+        const usedMemoryPercent = (totalMemory - freeMemory) / totalMemory * 100;
+        // Determine health based on metrics
+        let status = 'healthy';
+        if (usedMemoryPercent > 90) {
+            status = 'unhealthy';
+        } else if (usedMemoryPercent > 80 || loadAverage[0] > _os.default.cpus().length * 2) {
+            status = 'degraded';
+        }
+        return {
+            status,
+            details: {
+                uptime: Math.floor(uptime),
+                memory: {
+                    rss: Math.floor(memoryUsage.rss / 1024 / 1024),
+                    heapTotal: Math.floor(memoryUsage.heapTotal / 1024 / 1024),
+                    heapUsed: Math.floor(memoryUsage.heapUsed / 1024 / 1024),
+                    external: Math.floor(memoryUsage.external / 1024 / 1024),
+                    systemUsedPercent: Math.floor(usedMemoryPercent)
+                },
+                cpu: {
+                    loadAverage,
+                    cores: _os.default.cpus().length
+                },
+                platform: _os.default.platform(),
+                nodeVersion: process.version
+            }
+        };
+    } catch (error) {
+        return {
+            status: 'unhealthy',
+            message: error instanceof Error ? error.message : 'System check failed'
+        };
+    }
+}
+// Security health check
+async function checkSecurity() {
+    try {
+        const securityMetrics = _security.securityMonitor.getSecurityMetrics();
+        const alertStats = _security.alertingSystem.getAlertStatistics();
+        const complianceMetrics = _security.complianceChecker.getComplianceMetrics();
+        // Determine health based on security metrics
+        let status = 'healthy';
+        if (securityMetrics.criticalVulnerabilities > 0 || alertStats.critical > 0) {
+            status = 'unhealthy';
+        } else if (securityMetrics.threatLevel === 'high' || complianceMetrics.criticalIssues > 0) {
+            status = 'degraded';
+        }
+        return {
+            status,
+            details: {
+                securityScore: securityMetrics.securityScore,
+                threatLevel: securityMetrics.threatLevel,
+                criticalVulnerabilities: securityMetrics.criticalVulnerabilities,
+                eventsLast24h: securityMetrics.eventsLast24h,
+                complianceScore: complianceMetrics.currentScore,
+                criticalAlerts: alertStats.critical,
+                lastScanTimestamp: securityMetrics.lastScanTimestamp
+            }
+        };
+    } catch (error) {
+        return {
+            status: 'unhealthy',
+            message: error instanceof Error ? error.message : 'Security check failed'
+        };
+    }
+}
+// Comprehensive health check endpoint
+router.get('/', async (req, res)=>{
+    const detailed = req.query.detailed === 'true';
+    const startTime = Date.now();
+    try {
+        // Run all health checks in parallel
+        const [database, redis, ollama, websocket, system, security] = await Promise.all([
+            performHealthCheck('database', checkDatabase),
+            performHealthCheck('redis', checkRedis),
+            performHealthCheck('ollama', checkOllama),
+            performHealthCheck('websocket', ()=>checkWebSocket(req.app.get('io'))),
+            performHealthCheck('system', checkSystem),
+            performHealthCheck('security', checkSecurity)
+        ]);
+        const services = {
+            database,
+            redis,
+            ollama,
+            websocket,
+            system,
+            security
+        };
+        // Calculate overall status
+        const statuses = Object.values(services).map((s)=>s.status);
+        let overallStatus = 'healthy';
+        if (statuses.includes('unhealthy')) {
+            overallStatus = 'unhealthy';
+        } else if (statuses.includes('degraded')) {
+            overallStatus = 'degraded';
+        }
+        const response = {
+            status: overallStatus,
+            timestamp: new Date().toISOString(),
+            totalResponseTime: Date.now() - startTime,
+            environment: process.env.NODE_ENV || 'development',
+            services: detailed ? services : Object.fromEntries(Object.entries(services).map(([key, value])=>[
+                    key,
+                    {
+                        status: value.status,
+                        message: value.message,
+                        responseTime: value.responseTime
+                    }
+                ]))
+        };
+        const statusCode = overallStatus === 'healthy' ? 200 : overallStatus === 'degraded' ? 200 : 503;
+        res.status(statusCode).json(response);
+    } catch (error) {
+        res.status(500).json({
+            status: 'unhealthy',
+            error: error instanceof Error ? error.message : 'Health check failed',
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+// Individual service health checks
+router.get('/database', async (req, res)=>{
+    const result = await performHealthCheck('database', checkDatabase);
+    res.status(result.status === 'healthy' ? 200 : 503).json(result);
+});
+router.get('/redis', async (req, res)=>{
+    const result = await performHealthCheck('redis', checkRedis);
+    res.status(result.status === 'healthy' ? 200 : 503).json(result);
+});
+router.get('/ollama', async (req, res)=>{
+    const result = await performHealthCheck('ollama', checkOllama);
+    res.status(result.status === 'healthy' ? 200 : 503).json(result);
+});
+router.get('/websocket', async (req, res)=>{
+    const result = await performHealthCheck('websocket', ()=>checkWebSocket(req.app.get('io')));
+    res.status(result.status === 'healthy' ? 200 : 503).json(result);
+});
+router.get('/system', async (req, res)=>{
+    const result = await performHealthCheck('system', checkSystem);
+    res.status(result.status === 'healthy' ? 200 : 503).json(result);
+});
+router.get('/security', async (req, res)=>{
+    const result = await performHealthCheck('security', checkSecurity);
+    res.status(result.status === 'healthy' ? 200 : 503).json(result);
+});
+// Readiness check (for k8s/docker)
+router.get('/ready', async (req, res)=>{
+    // Check only critical services for readiness
+    const [database, ollama, security] = await Promise.all([
+        performHealthCheck('database', checkDatabase),
+        performHealthCheck('ollama', checkOllama),
+        performHealthCheck('security', checkSecurity)
+    ]);
+    const isReady = database.status === 'healthy' && (ollama.status === 'healthy' || ollama.status === 'degraded') && security.status !== 'unhealthy';
+    res.status(isReady ? 200 : 503).json({
+        ready: isReady,
+        services: {
+            database,
+            ollama,
+            security
+        }
+    });
+});
+// Liveness check (for k8s/docker)
+router.get('/live', (req, res)=>{
+    // Simple liveness check - just verify the process is running
+    res.status(200).json({
+        alive: true,
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime()
+    });
+});

@@ -1,0 +1,228 @@
+7383467ff61281699633c9e2758c21bf
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+function _export(target, all) {
+    for(var name in all)Object.defineProperty(target, name, {
+        enumerable: true,
+        get: Object.getOwnPropertyDescriptor(all, name).get
+    });
+}
+_export(exports, {
+    get csrfProtection () {
+        return csrfProtection;
+    },
+    get enhancedHelmetConfig () {
+        return enhancedHelmetConfig;
+    },
+    get generateCSRFToken () {
+        return generateCSRFToken;
+    },
+    get getCSRFToken () {
+        return getCSRFToken;
+    },
+    get requestId () {
+        return requestId;
+    },
+    get securityHeaders () {
+        return securityHeaders;
+    },
+    get securityLogger () {
+        return securityLogger;
+    },
+    get validateCSRFToken () {
+        return validateCSRFToken;
+    }
+});
+const _helmet = /*#__PURE__*/ _interop_require_default(require("helmet"));
+const _crypto = require("crypto");
+function _interop_require_default(obj) {
+    return obj && obj.__esModule ? obj : {
+        default: obj
+    };
+}
+const csrfTokens = {};
+const CSRF_TOKEN_EXPIRY = 60 * 60 * 1000; // 1 hour
+const generateCSRFToken = (sessionId)=>{
+    const token = (0, _crypto.randomBytes)(32).toString('hex');
+    const expires = Date.now() + CSRF_TOKEN_EXPIRY;
+    csrfTokens[sessionId] = {
+        token,
+        expires
+    };
+    // Clean up expired tokens
+    cleanupExpiredCSRFTokens();
+    return token;
+};
+const validateCSRFToken = (sessionId, token)=>{
+    const stored = csrfTokens[sessionId];
+    if (!stored || stored.expires < Date.now()) {
+        delete csrfTokens[sessionId];
+        return false;
+    }
+    return stored.token === token;
+};
+// Clean up expired CSRF tokens
+const cleanupExpiredCSRFTokens = ()=>{
+    const now = Date.now();
+    Object.keys(csrfTokens).forEach((sessionId)=>{
+        if (csrfTokens[sessionId].expires < now) {
+            delete csrfTokens[sessionId];
+        }
+    });
+};
+const csrfProtection = (req, res, next)=>{
+    // Skip CSRF for GET, HEAD, OPTIONS requests
+    if ([
+        'GET',
+        'HEAD',
+        'OPTIONS'
+    ].includes(req.method)) {
+        next();
+        return;
+    }
+    // Skip CSRF for API endpoints that use Bearer token authentication
+    if (req.headers.authorization?.startsWith('Bearer ')) {
+        next();
+        return;
+    }
+    const sessionId = req.headers['x-session-id'];
+    const csrfToken = req.headers['x-csrf-token'];
+    if (!sessionId || !csrfToken || !validateCSRFToken(sessionId, csrfToken)) {
+        res.status(403).json({
+            success: false,
+            error: 'Invalid or missing CSRF token',
+            code: 'CSRF_TOKEN_INVALID'
+        });
+        return;
+    }
+    next();
+};
+const getCSRFToken = (req, res)=>{
+    const sessionId = req.headers['x-session-id'] || (0, _crypto.randomBytes)(16).toString('hex');
+    const token = generateCSRFToken(sessionId);
+    res.json({
+        success: true,
+        data: {
+            csrfToken: token,
+            sessionId: sessionId
+        }
+    });
+};
+const enhancedHelmetConfig = (0, _helmet.default)({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: [
+                "'self'"
+            ],
+            scriptSrc: [
+                "'self'",
+                "'unsafe-inline'",
+                "https://cdnjs.cloudflare.com"
+            ],
+            styleSrc: [
+                "'self'",
+                "'unsafe-inline'",
+                "https://fonts.googleapis.com"
+            ],
+            fontSrc: [
+                "'self'",
+                "https://fonts.gstatic.com",
+                "data:"
+            ],
+            imgSrc: [
+                "'self'",
+                "data:",
+                "https:",
+                "blob:"
+            ],
+            connectSrc: [
+                "'self'",
+                "ws:",
+                "wss:",
+                "http://localhost:*"
+            ],
+            mediaSrc: [
+                "'self'"
+            ],
+            objectSrc: [
+                "'none'"
+            ],
+            frameSrc: [
+                "'none'"
+            ],
+            baseUri: [
+                "'self'"
+            ],
+            formAction: [
+                "'self'"
+            ],
+            frameAncestors: [
+                "'none'"
+            ]
+        }
+    },
+    crossOriginEmbedderPolicy: {
+        policy: 'credentialless'
+    },
+    crossOriginOpenerPolicy: {
+        policy: 'same-origin'
+    },
+    crossOriginResourcePolicy: {
+        policy: 'cross-origin'
+    },
+    dnsPrefetchControl: {
+        allow: false
+    },
+    frameguard: {
+        action: 'deny'
+    },
+    hidePoweredBy: true,
+    hsts: {
+        maxAge: 31536000,
+        includeSubDomains: true,
+        preload: true
+    },
+    ieNoOpen: true,
+    noSniff: true,
+    originAgentCluster: true,
+    permittedCrossDomainPolicies: false,
+    referrerPolicy: {
+        policy: 'no-referrer'
+    },
+    xssFilter: true
+});
+const requestId = (req, res, next)=>{
+    const requestId = req.headers['x-request-id'] || (0, _crypto.randomBytes)(16).toString('hex');
+    req.headers['x-request-id'] = requestId;
+    res.setHeader('x-request-id', requestId);
+    next();
+};
+const securityLogger = (req, res, next)=>{
+    const startTime = Date.now();
+    const logData = {
+        timestamp: new Date().toISOString(),
+        method: req.method,
+        url: req.url,
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+        requestId: req.headers['x-request-id']
+    };
+    console.log('Security Log - Request:', JSON.stringify(logData));
+    next();
+};
+const securityHeaders = (req, res, next)=>{
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.removeHeader('X-Powered-By');
+    next();
+};
+// Clean up security resources periodically
+setInterval(()=>{
+    cleanupExpiredCSRFTokens();
+}, 60 * 60 * 1000); // Clean up every hour

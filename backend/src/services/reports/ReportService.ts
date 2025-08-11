@@ -20,7 +20,7 @@ export class ReportService extends EventEmitter {
   private reportGenerator: ReportGenerator;
   private pdfExporter: PDFExporter;
   private excelExporter: ExcelExporter;
-  private db: Database;
+  private db: any;
   private reportCache: Map<string, ReportData>;
   private generationQueue: Map<string, Promise<ReportData>>;
   private static instance: ReportService;
@@ -30,10 +30,19 @@ export class ReportService extends EventEmitter {
     this.reportGenerator = new ReportGenerator();
     this.pdfExporter = new PDFExporter();
     this.excelExporter = new ExcelExporter();
-    this.db = initializeDatabase();
     this.reportCache = new Map();
     this.generationQueue = new Map();
-    this.initializeDatabase();
+    
+    // Initialize database first, then set up tables
+    this.initializeDb().then(() => {
+      this.initializeDatabase();
+    }).catch(error => {
+      console.error('Failed to initialize ReportService database:', error);
+    });
+  }
+
+  private async initializeDb(): Promise<void> {
+    this.db = await initializeDatabase();
   }
 
   /**

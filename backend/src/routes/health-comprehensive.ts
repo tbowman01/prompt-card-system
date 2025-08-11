@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { Request, Response } from 'express';
 import { performance } from 'perf_hooks';
 import sqlite3 from 'better-sqlite3';
 import Redis from 'ioredis';
@@ -477,7 +477,7 @@ export const trackMetrics = (req: express.Request, res: express.Response, next: 
 };
 
 // Comprehensive health check endpoint
-router.get('/comprehensive', async (req, res) => {
+router.get('/comprehensive', async (req: Request, res: Response) => {
   try {
     const start = performance.now();
     
@@ -559,7 +559,7 @@ router.get('/comprehensive', async (req, res) => {
 });
 
 // Simple health check for load balancers
-router.get('/ready', async (req, res) => {
+router.get('/ready', async (req: Request, res: Response) => {
   try {
     // Quick checks for readiness
     const critical = await Promise.all([
@@ -583,7 +583,7 @@ router.get('/ready', async (req, res) => {
 });
 
 // Liveness probe
-router.get('/live', (req, res) => {
+router.get('/live', (req: Request, res: Response) => {
   res.status(200).json({
     status: 'alive',
     timestamp: new Date().toISOString(),

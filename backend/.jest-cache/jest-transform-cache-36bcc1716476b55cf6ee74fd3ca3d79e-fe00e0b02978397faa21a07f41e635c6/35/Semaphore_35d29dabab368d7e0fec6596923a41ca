@@ -1,0 +1,126 @@
+a1e85fdafedbbf7b8e5627ea1052c07d
+/**
+ * Semaphore implementation for controlling concurrency
+ */ "use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+function _export(target, all) {
+    for(var name in all)Object.defineProperty(target, name, {
+        enumerable: true,
+        get: Object.getOwnPropertyDescriptor(all, name).get
+    });
+}
+_export(exports, {
+    get ResourceSemaphore () {
+        return ResourceSemaphore;
+    },
+    get Semaphore () {
+        return Semaphore;
+    }
+});
+function _define_property(obj, key, value) {
+    if (key in obj) {
+        Object.defineProperty(obj, key, {
+            value: value,
+            enumerable: true,
+            configurable: true,
+            writable: true
+        });
+    } else {
+        obj[key] = value;
+    }
+    return obj;
+}
+class Semaphore {
+    /**
+   * Acquire a permit, resolving when one becomes available
+   */ async acquire() {
+        return new Promise((resolve, reject)=>{
+            if (this.currentCount < this.maxCount) {
+                this.currentCount++;
+                const release = this.createReleaseFunction();
+                resolve(release);
+            } else {
+                this.waitingQueue.push({
+                    resolve: ()=>{
+                        this.currentCount++;
+                        const release = this.createReleaseFunction();
+                        resolve(release);
+                    },
+                    reject
+                });
+            }
+        });
+    }
+    /**
+   * Try to acquire a permit without waiting
+   */ tryAcquire() {
+        if (this.currentCount < this.maxCount) {
+            this.currentCount++;
+            return this.createReleaseFunction();
+        }
+        return null;
+    }
+    /**
+   * Get current number of acquired permits
+   */ getCurrentCount() {
+        return this.currentCount;
+    }
+    /**
+   * Get number of waiting requests
+   */ getWaitingCount() {
+        return this.waitingQueue.length;
+    }
+    /**
+   * Get available permits
+   */ getAvailableCount() {
+        return this.maxCount - this.currentCount;
+    }
+    createReleaseFunction() {
+        let released = false;
+        return ()=>{
+            if (released) {
+                throw new Error('Semaphore permit already released');
+            }
+            released = true;
+            this.currentCount--;
+            if (this.waitingQueue.length > 0) {
+                const waiter = this.waitingQueue.shift();
+                waiter.resolve();
+            }
+        };
+    }
+    constructor(maxCount){
+        _define_property(this, "currentCount", void 0);
+        _define_property(this, "maxCount", void 0);
+        _define_property(this, "waitingQueue", []);
+        this.currentCount = 0;
+        this.maxCount = maxCount;
+    }
+}
+class ResourceSemaphore extends Semaphore {
+    async acquire() {
+        // Check resources before acquiring
+        const hasResources = await this.resourceChecker();
+        if (!hasResources) {
+            throw new Error('Insufficient system resources');
+        }
+        return super.acquire();
+    }
+    startResourceMonitoring() {
+        setInterval(async ()=>{
+            const hasResources = await this.resourceChecker();
+            if (!hasResources && this.getCurrentCount() > 0) {
+                // Log resource constraint but don't interrupt running tasks
+                console.warn('System resources constrained, new tasks will be queued');
+            }
+        }, this.checkInterval);
+    }
+    constructor(maxCount, resourceChecker, checkInterval = 1000){
+        super(maxCount), _define_property(this, "resourceChecker", void 0), _define_property(this, "checkInterval", void 0);
+        this.resourceChecker = resourceChecker;
+        this.checkInterval = checkInterval;
+        this.startResourceMonitoring();
+    }
+}

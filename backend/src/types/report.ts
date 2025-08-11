@@ -23,7 +23,7 @@ export interface ReportData {
   testExecutionTrends: ExecutionTrend[];
   modelPerformance: ModelPerformance[];
   assertionTypeStats: AssertionTypeStats[];
-  detailedResults?: TestExecutionResult[];
+  detailedResults?: any[]; // TestExecutionResult[] imported below
 }
 
 export interface PromptCardStats {

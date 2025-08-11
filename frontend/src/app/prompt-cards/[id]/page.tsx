@@ -1,5 +1,6 @@
 'use client';
 
+import React from 'react';
 import { useParams } from 'next/navigation';
 import PromptCardForm from '@/components/PromptCard/PromptCardForm';
 

@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import { db } from '../database/connection';
 import { TestCase, CreateTestCaseRequest } from '../types/testCase';
 import Joi from 'joi';
@@ -21,7 +21,7 @@ const testCaseSchema = Joi.object({
 });
 
 // Get all test cases for a prompt card
-router.get('/prompt-cards/:promptCardId/test-cases', (req, res) => {
+router.get('/prompt-cards/:promptCardId/test-cases', (req: Request, res: Response) => {
   try {
     const { promptCardId } = req.params;
     
@@ -57,7 +57,7 @@ router.get('/prompt-cards/:promptCardId/test-cases', (req, res) => {
 });
 
 // Get specific test case
-router.get('/:id', (req, res) => {
+router.get('/:id', (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     
@@ -87,7 +87,7 @@ router.get('/:id', (req, res) => {
 });
 
 // Create new test case
-router.post('/', (req, res) => {
+router.post('/', (req: Request, res: Response) => {
   try {
     const { error, value } = testCaseSchema.validate(req.body);
     if (error) {
@@ -138,7 +138,7 @@ router.post('/', (req, res) => {
 });
 
 // Update test case
-router.put('/:id', (req, res) => {
+router.put('/:id', (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { error, value } = testCaseSchema.validate(req.body);
@@ -191,7 +191,7 @@ router.put('/:id', (req, res) => {
 });
 
 // Delete test case
-router.delete('/:id', (req, res) => {
+router.delete('/:id', (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     

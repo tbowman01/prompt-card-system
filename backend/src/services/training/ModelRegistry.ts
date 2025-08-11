@@ -244,7 +244,7 @@ export class ModelRegistry extends EventEmitter {
       const versions = this.modelVersions.get(modelId) || [];
       versions.push({
         version: updatedModel.version,
-        changelog: updates.changelog || 'Model updated',
+        changelog: 'Model updated',
         created_at: new Date(),
         performance_delta: this.calculatePerformanceDelta(existingModel, updatedModel),
         backward_compatible: true // Should be determined by analysis

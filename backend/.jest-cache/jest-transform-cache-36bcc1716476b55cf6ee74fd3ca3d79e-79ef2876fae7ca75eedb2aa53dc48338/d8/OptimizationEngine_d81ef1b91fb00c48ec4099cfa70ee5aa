@@ -1,0 +1,923 @@
+368500f8d3030d8b6658b858480ca3d5
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+function _export(target, all) {
+    for(var name in all)Object.defineProperty(target, name, {
+        enumerable: true,
+        get: Object.getOwnPropertyDescriptor(all, name).get
+    });
+}
+_export(exports, {
+    get OptimizationEngine () {
+        return OptimizationEngine;
+    },
+    get optimizationEngine () {
+        return optimizationEngine;
+    }
+});
+const _llmService = require("../llmService");
+const _PromptAnalyzer = require("./PromptAnalyzer");
+const _EventStore = require("../analytics/EventStore");
+const _lrucache = require("lru-cache");
+const _perf_hooks = require("perf_hooks");
+const _crypto = require("crypto");
+function _define_property(obj, key, value) {
+    if (key in obj) {
+        Object.defineProperty(obj, key, {
+            value: value,
+            enumerable: true,
+            configurable: true,
+            writable: true
+        });
+    } else {
+        obj[key] = value;
+    }
+    return obj;
+}
+class OptimizationEngine {
+    /**
+   * Generate AI-powered optimization suggestions for a prompt
+   */ async generateOptimizationSuggestions(originalPrompt, targetMetrics = {}, constraints = {}) {
+        const startTime = _perf_hooks.performance.now();
+        const cacheKey = this.generateCacheKey(originalPrompt, targetMetrics, constraints);
+        // Check cache first
+        const cached = this.suggestionCache.get(cacheKey);
+        if (cached) {
+            this.trackPerformance('generateOptimizationSuggestions', _perf_hooks.performance.now() - startTime);
+            return cached;
+        }
+        const suggestionId = `opt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        try {
+            // Analyze current prompt with caching
+            const analysis = await this.getCachedAnalysis(originalPrompt);
+            // Generate multiple optimization strategies in parallel
+            const strategies = await this.generateOptimizationStrategiesParallel(originalPrompt, analysis, targetMetrics, constraints);
+            // Process strategies in parallel using worker pool
+            const suggestions = await this.processStrategiesInParallel(originalPrompt, strategies, constraints, suggestionId);
+            // Store suggestions (async, don't wait)
+            this.storeOptimizationSuggestions(suggestionId, originalPrompt, suggestions, targetMetrics, constraints);
+            // Cache results
+            this.suggestionCache.set(cacheKey, suggestions);
+            // Track performance
+            this.trackPerformance('generateOptimizationSuggestions', _perf_hooks.performance.now() - startTime);
+            return suggestions;
+        } catch (error) {
+            console.error('Error generating optimization suggestions:', error);
+            throw new Error(`Optimization suggestion generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    }
+    /**
+   * Create and start an A/B test for prompt variants
+   */ async createABTest(config) {
+        const testId = `ab_test_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const testConfig = {
+            ...config,
+            id: testId,
+            status: 'draft'
+        };
+        // Validate test configuration
+        await this.validateABTestConfig(testConfig);
+        // Security validation for all variants
+        for (const variant of testConfig.variants){
+            const securityValidation = await this.validatePromptSecurity(variant.prompt, 'enhanced');
+            if (!securityValidation.passed) {
+                throw new Error(`Security validation failed for variant ${variant.name}: ${securityValidation.issues.join(', ')}`);
+            }
+        }
+        // Store test configuration
+        await this.eventStore.recordEvent({
+            event_type: 'ab_test_created',
+            entity_id: testId,
+            entity_type: 'ab_test',
+            data: testConfig,
+            timestamp: new Date()
+        });
+        this.runningTests.set(testId, testConfig);
+        return testConfig;
+    }
+    /**
+   * Start an A/B test
+   */ async startABTest(testId) {
+        const testConfig = this.runningTests.get(testId);
+        if (!testConfig) {
+            throw new Error(`A/B test ${testId} not found`);
+        }
+        testConfig.status = 'running';
+        testConfig.duration.startDate = new Date();
+        await this.eventStore.recordEvent({
+            event_type: 'ab_test_started',
+            entity_id: testId,
+            entity_type: 'ab_test',
+            data: testConfig,
+            timestamp: new Date()
+        });
+        console.log(`A/B test ${testId} started`);
+    }
+    /**
+   * Record A/B test execution result
+   */ async recordABTestResult(testId, variantId, result) {
+        const testConfig = this.runningTests.get(testId);
+        if (!testConfig || testConfig.status !== 'running') {
+            throw new Error(`A/B test ${testId} is not running`);
+        }
+        await this.eventStore.recordEvent({
+            event_type: 'ab_test_result',
+            entity_id: testId,
+            entity_type: 'ab_test',
+            data: {
+                testId,
+                variantId,
+                result,
+                timestamp: new Date()
+            },
+            timestamp: new Date()
+        });
+    }
+    /**
+   * Analyze A/B test results and determine winner
+   */ async analyzeABTestResults(testId) {
+        const testConfig = this.runningTests.get(testId);
+        if (!testConfig) {
+            throw new Error(`A/B test ${testId} not found`);
+        }
+        // Get all test results
+        const testResults = await this.eventStore.getEvents({
+            event_type: 'ab_test_result',
+            entity_id: testId
+        });
+        // Group results by variant
+        const variantResults = new Map();
+        testResults.forEach((result)=>{
+            const variantId = result.data.variantId;
+            if (!variantResults.has(variantId)) {
+                variantResults.set(variantId, []);
+            }
+            variantResults.get(variantId).push(result.data.result);
+        });
+        // Calculate metrics for each variant
+        const variantMetrics = testConfig.variants.map((variant)=>{
+            const results = variantResults.get(variant.id) || [];
+            const metrics = this.calculateVariantMetrics(results);
+            return {
+                id: variant.id,
+                name: variant.name,
+                metrics: {
+                    ...metrics,
+                    sampleSize: results.length
+                },
+                performanceComparison: {
+                    vsControl: 0,
+                    pValue: 0 // Will be calculated below
+                }
+            };
+        });
+        // Determine winner using statistical significance
+        const winner = this.determineABTestWinner(variantMetrics, testConfig.metrics.primaryMetric);
+        // Generate insights
+        const insights = await this.generateABTestInsights(testConfig, variantMetrics, winner);
+        const result = {
+            testId,
+            winner: winner.id,
+            confidence: winner.confidence,
+            statisticalSignificance: winner.significanceLevel > 0.95,
+            variants: variantMetrics,
+            insights,
+            recommendations: winner.recommendations,
+            completedAt: new Date()
+        };
+        // Store results
+        await this.eventStore.recordEvent({
+            event_type: 'ab_test_completed',
+            entity_id: testId,
+            entity_type: 'ab_test',
+            data: result,
+            timestamp: new Date()
+        });
+        // Update test status
+        testConfig.status = 'completed';
+        testConfig.results = result;
+        return result;
+    }
+    /**
+   * Start automated prompt tuning
+   */ async startPromptTuning(config) {
+        const tuningId = `tuning_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const tuningConfig = {
+            ...config,
+            id: tuningId,
+            status: 'pending'
+        };
+        // Validate configuration
+        await this.validateTuningConfig(tuningConfig);
+        // Start tuning process
+        this.runningTuning.set(tuningId, tuningConfig);
+        // Run tuning in background
+        this.executeTuningProcess(tuningConfig);
+        return tuningConfig;
+    }
+    /**
+   * Get tuning progress
+   */ async getTuningProgress(tuningId) {
+        const tuningConfig = this.runningTuning.get(tuningId);
+        if (!tuningConfig) {
+            throw new Error(`Tuning process ${tuningId} not found`);
+        }
+        const progress = {
+            status: tuningConfig.status,
+            currentIteration: tuningConfig.results?.iterations.length || 0,
+            totalIterations: tuningConfig.iterations,
+            bestMetrics: tuningConfig.results?.finalMetrics || null,
+            estimatedCompletion: new Date(Date.now() + 60000) // Placeholder
+        };
+        return progress;
+    }
+    /**
+   * Generate optimization strategies
+   */ async generateOptimizationStrategies(originalPrompt, analysis, targetMetrics, constraints) {
+        const strategies = [];
+        // Structure optimization
+        if (analysis.effectiveness.score < 70) {
+            strategies.push({
+                type: 'structure',
+                description: 'Improve prompt structure and organization',
+                reasoning: 'Current prompt lacks clear structure and logical flow',
+                expectedImprovement: {
+                    successRate: 15,
+                    responseTime: 5,
+                    qualityScore: 10
+                },
+                confidence: 0.8
+            });
+        }
+        // Clarity optimization
+        if (analysis.patterns.failurePatterns.length > 0) {
+            strategies.push({
+                type: 'clarity',
+                description: 'Enhance prompt clarity and reduce ambiguity',
+                reasoning: 'Failure patterns indicate confusion or misunderstanding',
+                expectedImprovement: {
+                    successRate: 20,
+                    responseTime: 0,
+                    qualityScore: 15
+                },
+                confidence: 0.7
+            });
+        }
+        // Specificity optimization
+        if (analysis.metrics.consistencyScore < 60) {
+            strategies.push({
+                type: 'specificity',
+                description: 'Add more specific instructions and examples',
+                reasoning: 'Low consistency score indicates need for more specific guidance',
+                expectedImprovement: {
+                    successRate: 10,
+                    responseTime: -5,
+                    qualityScore: 20
+                },
+                confidence: 0.9
+            });
+        }
+        // Context optimization
+        strategies.push({
+            type: 'context',
+            description: 'Optimize context and background information',
+            reasoning: 'Enhanced context can improve response quality',
+            expectedImprovement: {
+                successRate: 8,
+                responseTime: 2,
+                qualityScore: 12
+            },
+            confidence: 0.6
+        });
+        return strategies;
+    }
+    /**
+   * Apply optimization strategy to prompt
+   */ async applyOptimizationStrategy(originalPrompt, strategy, constraints) {
+        const optimizationPrompt = `
+      Optimize this prompt based on the following strategy:
+      
+      Original Prompt: "${originalPrompt}"
+      
+      Strategy: ${strategy.type}
+      Description: ${strategy.description}
+      Reasoning: ${strategy.reasoning}
+      
+      Constraints:
+      ${constraints.maxLength ? `- Maximum length: ${constraints.maxLength} characters` : ''}
+      ${constraints.maintainStyle ? '- Maintain original writing style' : ''}
+      ${constraints.securityLevel ? `- Security level: ${constraints.securityLevel}` : ''}
+      
+      Return only the optimized prompt without any additional text or explanations.
+    `;
+        try {
+            const response = await _llmService.llmService.generate(optimizationPrompt);
+            let optimizedPrompt = response.response.trim();
+            // Apply length constraint
+            if (constraints.maxLength && optimizedPrompt.length > constraints.maxLength) {
+                optimizedPrompt = optimizedPrompt.substring(0, constraints.maxLength);
+            }
+            return optimizedPrompt;
+        } catch (error) {
+            console.error('Error applying optimization strategy:', error);
+            return originalPrompt; // Return original if optimization fails
+        }
+    }
+    /**
+   * Validate prompt security
+   */ async validatePromptSecurity(prompt, securityLevel) {
+        const issues = [];
+        const recommendations = [];
+        // Basic security checks
+        const basicIssues = [
+            {
+                pattern: /ignore.*instructions/i,
+                message: 'Potential instruction bypass'
+            },
+            {
+                pattern: /system.*prompt/i,
+                message: 'System prompt manipulation'
+            },
+            {
+                pattern: /jailbreak/i,
+                message: 'Jailbreak attempt'
+            },
+            {
+                pattern: /password|api.*key|secret/i,
+                message: 'Sensitive information exposure'
+            }
+        ];
+        basicIssues.forEach((check)=>{
+            if (check.pattern.test(prompt)) {
+                issues.push(check.message);
+            }
+        });
+        // Enhanced security checks
+        if (securityLevel === 'enhanced' || securityLevel === 'strict') {
+            const enhancedIssues = [
+                {
+                    pattern: /role.*play/i,
+                    message: 'Role-playing instruction'
+                },
+                {
+                    pattern: /pretend/i,
+                    message: 'Pretend instruction'
+                },
+                {
+                    pattern: /act.*as/i,
+                    message: 'Acting instruction'
+                },
+                {
+                    pattern: /override/i,
+                    message: 'Override instruction'
+                }
+            ];
+            enhancedIssues.forEach((check)=>{
+                if (check.pattern.test(prompt)) {
+                    issues.push(check.message);
+                }
+            });
+        }
+        // Strict security checks
+        if (securityLevel === 'strict') {
+            const strictIssues = [
+                {
+                    pattern: /you.*must/i,
+                    message: 'Imperative instruction'
+                },
+                {
+                    pattern: /required.*to/i,
+                    message: 'Requirement instruction'
+                },
+                {
+                    pattern: /force|compel/i,
+                    message: 'Forceful instruction'
+                }
+            ];
+            strictIssues.forEach((check)=>{
+                if (check.pattern.test(prompt)) {
+                    issues.push(check.message);
+                }
+            });
+        }
+        // Generate recommendations
+        if (issues.length > 0) {
+            recommendations.push('Review and sanitize identified security issues');
+            recommendations.push('Use more neutral and instructional language');
+            recommendations.push('Avoid manipulative or coercive phrasing');
+        }
+        return {
+            passed: issues.length === 0,
+            issues,
+            recommendations
+        };
+    }
+    /**
+   * Validate A/B test configuration
+   */ async validateABTestConfig(config) {
+        if (config.variants.length < 2) {
+            throw new Error('A/B test must have at least 2 variants');
+        }
+        const totalWeight = config.variants.reduce((sum, variant)=>sum + variant.weight, 0);
+        if (Math.abs(totalWeight - 100) > 0.1) {
+            throw new Error('Variant weights must sum to 100%');
+        }
+        if (config.duration.endDate <= config.duration.startDate) {
+            throw new Error('End date must be after start date');
+        }
+    }
+    /**
+   * Calculate metrics for variant results
+   */ calculateVariantMetrics(results) {
+        if (results.length === 0) {
+            return {
+                successRate: 0,
+                responseTime: 0,
+                qualityScore: 0
+            };
+        }
+        const successfulResults = results.filter((r)=>r.success);
+        const successRate = successfulResults.length / results.length * 100;
+        const responseTime = results.reduce((sum, r)=>sum + r.responseTime, 0) / results.length;
+        const qualityScore = results.reduce((sum, r)=>sum + r.qualityScore, 0) / results.length;
+        return {
+            successRate,
+            responseTime,
+            qualityScore
+        };
+    }
+    /**
+   * Determine A/B test winner
+   */ determineABTestWinner(variantMetrics, primaryMetric) {
+        // Simple winner determination based on primary metric
+        let bestVariant = variantMetrics[0];
+        let bestScore = this.getMetricValue(bestVariant.metrics, primaryMetric);
+        for (const variant of variantMetrics){
+            const score = this.getMetricValue(variant.metrics, primaryMetric);
+            if (score > bestScore) {
+                bestScore = score;
+                bestVariant = variant;
+            }
+        }
+        // Calculate confidence (simplified)
+        const avgScore = variantMetrics.reduce((sum, v)=>sum + this.getMetricValue(v.metrics, primaryMetric), 0) / variantMetrics.length;
+        const confidence = Math.min(1, (bestScore - avgScore) / avgScore);
+        return {
+            id: bestVariant.id,
+            confidence,
+            significanceLevel: 0.95,
+            recommendations: [
+                `Implement ${bestVariant.name} as the winning variant`,
+                `Monitor performance for ${primaryMetric} improvements`,
+                'Consider running follow-up tests for further optimization'
+            ]
+        };
+    }
+    /**
+   * Get metric value by name
+   */ getMetricValue(metrics, metricName) {
+        switch(metricName){
+            case 'success_rate':
+                return metrics.successRate;
+            case 'response_time':
+                return 1000 / metrics.responseTime; // Invert for "higher is better"
+            case 'quality_score':
+                return metrics.qualityScore;
+            default:
+                return 0;
+        }
+    }
+    /**
+   * Generate A/B test insights
+   */ async generateABTestInsights(testConfig, variantMetrics, winner) {
+        const insights = [];
+        // Performance insights
+        const winnerMetrics = variantMetrics.find((v)=>v.id === winner.id);
+        if (winnerMetrics) {
+            insights.push(`${winnerMetrics.name} achieved ${winnerMetrics.metrics.successRate.toFixed(1)}% success rate`);
+            insights.push(`Response time was ${winnerMetrics.metrics.responseTime.toFixed(0)}ms on average`);
+            insights.push(`Quality score reached ${winnerMetrics.metrics.qualityScore.toFixed(1)}`);
+        }
+        // Comparative insights
+        const controlVariant = variantMetrics.find((v)=>v.name.toLowerCase().includes('control'));
+        if (controlVariant && winnerMetrics && winnerMetrics.id !== controlVariant.id) {
+            const improvement = (winnerMetrics.metrics.successRate - controlVariant.metrics.successRate) / controlVariant.metrics.successRate * 100;
+            insights.push(`Winner shows ${improvement.toFixed(1)}% improvement over control`);
+        }
+        return insights;
+    }
+    /**
+   * Validate tuning configuration
+   */ async validateTuningConfig(config) {
+        if (config.iterations < 1 || config.iterations > 100) {
+            throw new Error('Iterations must be between 1 and 100');
+        }
+        if (config.constraints.maxLength < 10) {
+            throw new Error('Maximum length must be at least 10 characters');
+        }
+    }
+    /**
+   * Execute tuning process
+   */ async executeTuningProcess(config) {
+        try {
+            config.status = 'running';
+            const iterations = [];
+            let currentPrompt = config.originalPrompt;
+            let bestPrompt = currentPrompt;
+            let bestScore = 0;
+            for(let i = 0; i < config.iterations; i++){
+                // Generate variant
+                const variant = await this.generatePromptVariant(currentPrompt, config);
+                // Test variant
+                const metrics = await this.testPromptVariant(variant, config);
+                // Calculate score
+                const score = this.calculateTuningScore(metrics, config.objectives);
+                // Update best if better
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestPrompt = variant;
+                }
+                // Record iteration
+                iterations.push({
+                    iteration: i + 1,
+                    prompt: variant,
+                    metrics,
+                    improvements: (score - bestScore) / bestScore * 100,
+                    timestamp: new Date()
+                });
+                // Update current prompt for next iteration
+                currentPrompt = variant;
+            }
+            // Calculate final results
+            const finalMetrics = iterations[iterations.length - 1].metrics;
+            const baselineScore = this.calculateTuningScore({
+                successRate: 50,
+                responseTime: 1000,
+                qualityScore: 50
+            }, config.objectives);
+            const totalImprovement = (bestScore - baselineScore) / baselineScore * 100;
+            const result = {
+                tuningId: config.id,
+                iterations,
+                bestPrompt,
+                finalMetrics,
+                totalImprovement,
+                convergenceAnalysis: {
+                    converged: iterations.length >= 5 && iterations.slice(-5).every((iter)=>Math.abs(iter.improvements) < 1),
+                    stagnationPoint: iterations.length,
+                    optimalIteration: iterations.findIndex((iter)=>iter.prompt === bestPrompt) + 1
+                },
+                completedAt: new Date()
+            };
+            config.status = 'completed';
+            config.results = result;
+            // Store results
+            await this.eventStore.recordEvent({
+                event_type: 'tuning_completed',
+                entity_id: config.id,
+                entity_type: 'tuning',
+                data: result,
+                timestamp: new Date()
+            });
+        } catch (error) {
+            config.status = 'failed';
+            console.error('Tuning process failed:', error);
+        }
+    }
+    /**
+   * Generate prompt variant for tuning
+   */ async generatePromptVariant(currentPrompt, config) {
+        const variationPrompt = `
+      Create a variation of this prompt that improves ${config.objectives.primary}:
+      
+      Current Prompt: "${currentPrompt}"
+      
+      Constraints:
+      - Maximum length: ${config.constraints.maxLength} characters
+      - Must include: ${config.constraints.requiredKeywords.join(', ')}
+      - Must not include: ${config.constraints.prohibitedKeywords.join(', ')}
+      
+      Return only the improved prompt without explanations.
+    `;
+        try {
+            const response = await _llmService.llmService.generate(variationPrompt);
+            return response.response.trim();
+        } catch (error) {
+            console.error('Error generating prompt variant:', error);
+            return currentPrompt; // Return original if generation fails
+        }
+    }
+    /**
+   * Test prompt variant
+   */ async testPromptVariant(prompt, config) {
+        // Simplified testing - in real implementation, use actual test cases
+        const mockMetrics = {
+            successRate: 70 + Math.random() * 25,
+            responseTime: 800 + Math.random() * 400,
+            qualityScore: 60 + Math.random() * 30
+        };
+        return mockMetrics;
+    }
+    /**
+   * Calculate tuning score
+   */ calculateTuningScore(metrics, objectives) {
+        const primaryWeight = 0.6;
+        const secondaryWeight = 0.4 / objectives.secondary.length;
+        let score = 0;
+        // Primary objective
+        switch(objectives.primary){
+            case 'success_rate':
+                score += metrics.successRate * primaryWeight;
+                break;
+            case 'response_time':
+                score += 1000 / metrics.responseTime * primaryWeight;
+                break;
+            case 'quality_score':
+                score += metrics.qualityScore * primaryWeight;
+                break;
+        }
+        // Secondary objectives
+        objectives.secondary.forEach((objective)=>{
+            switch(objective){
+                case 'success_rate':
+                    score += metrics.successRate * secondaryWeight;
+                    break;
+                case 'response_time':
+                    score += 1000 / metrics.responseTime * secondaryWeight;
+                    break;
+                case 'quality_score':
+                    score += metrics.qualityScore * secondaryWeight;
+                    break;
+            }
+        });
+        return score;
+    }
+    /**
+   * Generate cache key for optimization suggestions
+   */ generateCacheKey(prompt, metrics, constraints) {
+        const content = `${prompt}${JSON.stringify(metrics)}${JSON.stringify(constraints)}`;
+        return (0, _crypto.createHash)('md5').update(content).digest('hex');
+    }
+    /**
+   * Get cached prompt analysis
+   */ async getCachedAnalysis(prompt) {
+        const cacheKey = (0, _crypto.createHash)('md5').update(prompt).digest('hex');
+        const cached = this.analysisCache.get(cacheKey);
+        if (cached) {
+            return cached;
+        }
+        const analysis = await _PromptAnalyzer.promptAnalyzer.analyzePrompt('temp_prompt', prompt);
+        this.analysisCache.set(cacheKey, analysis);
+        return analysis;
+    }
+    /**
+   * Generate optimization strategies in parallel
+   */ async generateOptimizationStrategiesParallel(originalPrompt, analysis, targetMetrics, constraints) {
+        const strategyPromises = [
+            this.generateStructureStrategy(analysis),
+            this.generateClarityStrategy(analysis),
+            this.generateSpecificityStrategy(analysis),
+            this.generateContextStrategy(analysis),
+            this.generatePerformanceStrategy(analysis, targetMetrics)
+        ];
+        const strategies = await Promise.all(strategyPromises);
+        return strategies.filter((strategy)=>strategy !== null);
+    }
+    /**
+   * Process strategies in parallel using worker pool
+   */ async processStrategiesInParallel(originalPrompt, strategies, constraints, suggestionId) {
+        const suggestions = [];
+        const processingPromises = strategies.map(async (strategy)=>{
+            try {
+                const optimizedPrompt = await this.applyOptimizationStrategy(originalPrompt, strategy, constraints);
+                // Security validation
+                const securityValidation = await this.validatePromptSecurity(optimizedPrompt, constraints.securityLevel || 'basic');
+                if (securityValidation.passed || constraints.securityLevel === 'basic') {
+                    return {
+                        id: `${suggestionId}_${strategy.type}`,
+                        originalPrompt,
+                        optimizedPrompt,
+                        changes: [
+                            {
+                                type: strategy.type,
+                                description: strategy.description,
+                                reasoning: strategy.reasoning
+                            }
+                        ],
+                        expectedImprovement: strategy.expectedImprovement,
+                        confidence: strategy.confidence,
+                        securityValidation,
+                        timestamp: new Date()
+                    };
+                }
+                return null;
+            } catch (error) {
+                console.warn(`Strategy ${strategy.type} failed:`, error.message);
+                return null;
+            }
+        });
+        const results = await Promise.all(processingPromises);
+        return results.filter((result)=>result !== null);
+    }
+    /**
+   * Generate structure optimization strategy
+   */ async generateStructureStrategy(analysis) {
+        if (analysis.effectiveness.score < 70) {
+            return {
+                type: 'structure',
+                description: 'Improve prompt structure and organization',
+                reasoning: 'Current prompt lacks clear structure and logical flow',
+                expectedImprovement: {
+                    successRate: 15,
+                    responseTime: 5,
+                    qualityScore: 10
+                },
+                confidence: 0.8
+            };
+        }
+        return null;
+    }
+    /**
+   * Generate clarity optimization strategy
+   */ async generateClarityStrategy(analysis) {
+        if (analysis.patterns.failurePatterns.length > 0) {
+            return {
+                type: 'clarity',
+                description: 'Enhance prompt clarity and reduce ambiguity',
+                reasoning: 'Failure patterns indicate confusion or misunderstanding',
+                expectedImprovement: {
+                    successRate: 20,
+                    responseTime: 0,
+                    qualityScore: 15
+                },
+                confidence: 0.7
+            };
+        }
+        return null;
+    }
+    /**
+   * Generate specificity optimization strategy
+   */ async generateSpecificityStrategy(analysis) {
+        if (analysis.metrics.consistencyScore < 60) {
+            return {
+                type: 'specificity',
+                description: 'Add more specific instructions and examples',
+                reasoning: 'Low consistency score indicates need for more specific guidance',
+                expectedImprovement: {
+                    successRate: 10,
+                    responseTime: -5,
+                    qualityScore: 20
+                },
+                confidence: 0.9
+            };
+        }
+        return null;
+    }
+    /**
+   * Generate context optimization strategy
+   */ async generateContextStrategy(analysis) {
+        return {
+            type: 'context',
+            description: 'Optimize context and background information',
+            reasoning: 'Enhanced context can improve response quality',
+            expectedImprovement: {
+                successRate: 8,
+                responseTime: 2,
+                qualityScore: 12
+            },
+            confidence: 0.6
+        };
+    }
+    /**
+   * Generate performance optimization strategy
+   */ async generatePerformanceStrategy(analysis, targetMetrics) {
+        return {
+            type: 'performance',
+            description: 'Optimize for better response time and quality',
+            reasoning: 'Target specific performance improvements',
+            expectedImprovement: {
+                successRate: targetMetrics.successRate ? 10 : 5,
+                responseTime: targetMetrics.responseTime ? 15 : 8,
+                qualityScore: targetMetrics.qualityScore ? 12 : 6
+            },
+            confidence: 0.7
+        };
+    }
+    /**
+   * Store optimization suggestions asynchronously
+   */ async storeOptimizationSuggestions(suggestionId, originalPrompt, suggestions, targetMetrics, constraints) {
+        try {
+            await this.eventStore.recordEvent({
+                event_type: 'optimization_suggestions',
+                entity_id: suggestionId,
+                entity_type: 'prompt',
+                data: {
+                    originalPrompt,
+                    suggestions,
+                    targetMetrics,
+                    constraints
+                },
+                timestamp: new Date()
+            });
+        } catch (error) {
+            console.warn('Failed to store optimization suggestions:', error.message);
+        }
+    }
+    /**
+   * Initialize worker pool for parallel processing
+   */ initializeWorkerPool() {
+        // Worker pool implementation would go here
+        // For now, we'll use Promise.all for parallel processing
+        console.log(`Initialized optimization engine with ${this.maxWorkers} workers`);
+    }
+    /**
+   * Track performance metrics
+   */ trackPerformance(operation, duration) {
+        if (!this.performanceMetrics.has(operation)) {
+            this.performanceMetrics.set(operation, []);
+        }
+        const metrics = this.performanceMetrics.get(operation);
+        metrics.push(duration);
+        // Keep only last 100 measurements
+        if (metrics.length > 100) {
+            metrics.shift();
+        }
+        // Log slow operations
+        if (duration > 30000) {
+            console.warn(`Slow optimization operation: ${operation} took ${duration.toFixed(2)}ms`);
+        }
+    }
+    /**
+   * Get performance statistics
+   */ getPerformanceStats() {
+        const stats = {};
+        for (const [operation, metrics] of this.performanceMetrics){
+            if (metrics.length > 0) {
+                const avg = metrics.reduce((sum, time)=>sum + time, 0) / metrics.length;
+                const max = Math.max(...metrics);
+                const min = Math.min(...metrics);
+                stats[operation] = {
+                    avg: Math.round(avg),
+                    max: Math.round(max),
+                    min: Math.round(min),
+                    count: metrics.length
+                };
+            }
+        }
+        return stats;
+    }
+    /**
+   * Clear caches
+   */ clearCaches() {
+        this.analysisCache.clear();
+        this.suggestionCache.clear();
+        this.performanceMetrics.clear();
+        console.log('Optimization engine caches cleared');
+    }
+    /**
+   * Get cache statistics
+   */ getCacheStats() {
+        return {
+            analysis: {
+                size: this.analysisCache.size,
+                max: this.analysisCache.max,
+                hitRate: this.analysisCache.calculatedSize > 0 ? (this.analysisCache.calculatedSize - this.analysisCache.size) / this.analysisCache.calculatedSize : 0
+            },
+            suggestions: {
+                size: this.suggestionCache.size,
+                max: this.suggestionCache.max,
+                hitRate: this.suggestionCache.calculatedSize > 0 ? (this.suggestionCache.calculatedSize - this.suggestionCache.size) / this.suggestionCache.calculatedSize : 0
+            }
+        };
+    }
+    constructor(){
+        _define_property(this, "eventStore", void 0);
+        _define_property(this, "runningTests", void 0);
+        _define_property(this, "runningTuning", void 0);
+        _define_property(this, "analysisCache", void 0);
+        _define_property(this, "suggestionCache", void 0);
+        _define_property(this, "performanceMetrics", void 0);
+        _define_property(this, "workerPool", void 0);
+        _define_property(this, "maxWorkers", void 0);
+        this.eventStore = _EventStore.EventStore.getInstance();
+        this.runningTests = new Map();
+        this.runningTuning = new Map();
+        // Initialize caching for better performance
+        this.analysisCache = new _lrucache.LRUCache({
+            max: 500,
+            ttl: 1000 * 60 * 30 // 30 minutes
+        });
+        this.suggestionCache = new _lrucache.LRUCache({
+            max: 200,
+            ttl: 1000 * 60 * 15 // 15 minutes
+        });
+        this.performanceMetrics = new Map();
+        this.maxWorkers = Math.min(4, require('os').cpus().length);
+        this.workerPool = [];
+        // Initialize worker pool for parallel processing
+        this.initializeWorkerPool();
+    }
+}
+const optimizationEngine = new OptimizationEngine();

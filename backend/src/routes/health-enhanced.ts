@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import { db } from '../database/connection';
 import { llmService } from '../services/llmService';
 import { performanceMonitor } from '../services/performance/PerformanceMonitor';
@@ -279,7 +279,7 @@ async function checkSecurity(): Promise<HealthCheckResult> {
 }
 
 // Comprehensive health check endpoint
-router.get('/', async (req, res) => {
+router.get('/', async (req: Request, res: Response) => {
   const detailed = req.query.detailed === 'true';
   const startTime = Date.now();
   
@@ -341,38 +341,38 @@ router.get('/', async (req, res) => {
 });
 
 // Individual service health checks
-router.get('/database', async (req, res) => {
+router.get('/database', async (req: Request, res: Response) => {
   const result = await performHealthCheck('database', checkDatabase);
   res.status(result.status === 'healthy' ? 200 : 503).json(result);
 });
 
-router.get('/redis', async (req, res) => {
+router.get('/redis', async (req: Request, res: Response) => {
   const result = await performHealthCheck('redis', checkRedis);
   res.status(result.status === 'healthy' ? 200 : 503).json(result);
 });
 
-router.get('/ollama', async (req, res) => {
+router.get('/ollama', async (req: Request, res: Response) => {
   const result = await performHealthCheck('ollama', checkOllama);
   res.status(result.status === 'healthy' ? 200 : 503).json(result);
 });
 
-router.get('/websocket', async (req, res) => {
+router.get('/websocket', async (req: Request, res: Response) => {
   const result = await performHealthCheck('websocket', () => checkWebSocket(req.app.get('io')));
   res.status(result.status === 'healthy' ? 200 : 503).json(result);
 });
 
-router.get('/system', async (req, res) => {
+router.get('/system', async (req: Request, res: Response) => {
   const result = await performHealthCheck('system', checkSystem);
   res.status(result.status === 'healthy' ? 200 : 503).json(result);
 });
 
-router.get('/security', async (req, res) => {
+router.get('/security', async (req: Request, res: Response) => {
   const result = await performHealthCheck('security', checkSecurity);
   res.status(result.status === 'healthy' ? 200 : 503).json(result);
 });
 
 // Readiness check (for k8s/docker)
-router.get('/ready', async (req, res) => {
+router.get('/ready', async (req: Request, res: Response) => {
   // Check only critical services for readiness
   const [database, ollama, security] = await Promise.all([
     performHealthCheck('database', checkDatabase),
@@ -391,7 +391,7 @@ router.get('/ready', async (req, res) => {
 });
 
 // Liveness check (for k8s/docker)
-router.get('/live', (req, res) => {
+router.get('/live', (req: Request, res: Response) => {
   // Simple liveness check - just verify the process is running
   res.status(200).json({
     alive: true,

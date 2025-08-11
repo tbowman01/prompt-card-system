@@ -1,0 +1,532 @@
+d352e2bf45d8a6d9fcdd3af07762edf5
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+function _export(target, all) {
+    for(var name in all)Object.defineProperty(target, name, {
+        enumerable: true,
+        get: Object.getOwnPropertyDescriptor(all, name).get
+    });
+}
+_export(exports, {
+    get AlertSeverity () {
+        return AlertSeverity;
+    },
+    get AlertType () {
+        return AlertType;
+    },
+    get AlertingSystem () {
+        return AlertingSystem;
+    },
+    get alertingSystem () {
+        return alertingSystem;
+    }
+});
+const _events = require("events");
+const _HealthOrchestrator = require("./HealthOrchestrator");
+const _CircuitBreaker = require("./CircuitBreaker");
+function _define_property(obj, key, value) {
+    if (key in obj) {
+        Object.defineProperty(obj, key, {
+            value: value,
+            enumerable: true,
+            configurable: true,
+            writable: true
+        });
+    } else {
+        obj[key] = value;
+    }
+    return obj;
+}
+var AlertSeverity = /*#__PURE__*/ function(AlertSeverity) {
+    AlertSeverity["INFO"] = "info";
+    AlertSeverity["WARNING"] = "warning";
+    AlertSeverity["CRITICAL"] = "critical";
+    return AlertSeverity;
+}({});
+var AlertType = /*#__PURE__*/ function(AlertType) {
+    AlertType["SERVICE_DOWN"] = "service_down";
+    AlertType["SERVICE_DEGRADED"] = "service_degraded";
+    AlertType["SERVICE_RECOVERED"] = "service_recovered";
+    AlertType["HIGH_RESPONSE_TIME"] = "high_response_time";
+    AlertType["CIRCUIT_BREAKER_OPENED"] = "circuit_breaker_opened";
+    AlertType["CIRCUIT_BREAKER_CLOSED"] = "circuit_breaker_closed";
+    AlertType["SYSTEM_UNHEALTHY"] = "system_unhealthy";
+    AlertType["DEPENDENCY_FAILURE"] = "dependency_failure";
+    return AlertType;
+}({});
+class AlertingSystem extends _events.EventEmitter {
+    async initialize() {
+        if (this.isInitialized) return;
+        console.log('🚨 Initializing Alerting System...');
+        // Listen to health orchestrator events
+        _HealthOrchestrator.healthOrchestrator.on('serviceStatusChanged', this.handleServiceStatusChange.bind(this));
+        _HealthOrchestrator.healthOrchestrator.on('criticalServiceDown', this.handleCriticalServiceDown.bind(this));
+        _HealthOrchestrator.healthOrchestrator.on('fullHealthCheckComplete', this.handleFullHealthCheck.bind(this));
+        // Listen to circuit breaker events
+        _CircuitBreaker.circuitBreakerRegistry.on('breakerOpened', this.handleCircuitBreakerOpened.bind(this));
+        _CircuitBreaker.circuitBreakerRegistry.on('breakerClosed', this.handleCircuitBreakerClosed.bind(this));
+        // Start cleanup process
+        this.startCleanupProcess();
+        this.isInitialized = true;
+        console.log('✅ Alerting System initialized');
+    }
+    initializeDefaultRules() {
+        // Critical service down rule
+        this.addAlertRule({
+            id: 'critical-service-down',
+            name: 'Critical Service Down',
+            type: "service_down",
+            severity: "critical",
+            enabled: true,
+            conditions: {
+                services: [
+                    'database',
+                    'ollama',
+                    'frontend',
+                    'backend'
+                ]
+            },
+            actions: {
+                // Configure these based on your notification preferences
+                webhook: process.env.ALERT_WEBHOOK_URL
+            }
+        });
+        // High response time rule
+        this.addAlertRule({
+            id: 'high-response-time',
+            name: 'High Response Time',
+            type: "high_response_time",
+            severity: "warning",
+            enabled: true,
+            conditions: {
+                thresholds: {
+                    responseTime: 10000 // 10 seconds
+                },
+                cooldownPeriod: 5 // 5 minutes
+            },
+            actions: {
+                webhook: process.env.ALERT_WEBHOOK_URL
+            }
+        });
+        // Circuit breaker opened rule
+        this.addAlertRule({
+            id: 'circuit-breaker-opened',
+            name: 'Circuit Breaker Opened',
+            type: "circuit_breaker_opened",
+            severity: "critical",
+            enabled: true,
+            conditions: {
+                cooldownPeriod: 1 // 1 minute
+            },
+            actions: {
+                webhook: process.env.ALERT_WEBHOOK_URL
+            }
+        });
+        // System unhealthy rule
+        this.addAlertRule({
+            id: 'system-unhealthy',
+            name: 'System Unhealthy',
+            type: "system_unhealthy",
+            severity: "critical",
+            enabled: true,
+            conditions: {
+                cooldownPeriod: 10 // 10 minutes
+            },
+            actions: {
+                webhook: process.env.ALERT_WEBHOOK_URL
+            }
+        });
+    }
+    handleServiceStatusChange(event) {
+        const { serviceName, previousStatus, newStatus, responseTime, message } = event;
+        // Check for service down/recovery
+        if (previousStatus !== 'unhealthy' && newStatus === 'unhealthy') {
+            this.checkAndCreateAlert({
+                type: "service_down",
+                service: serviceName,
+                message: `Service ${serviceName} is down: ${message}`,
+                details: {
+                    previousStatus,
+                    newStatus,
+                    responseTime
+                }
+            });
+        } else if (previousStatus === 'unhealthy' && newStatus === 'healthy') {
+            this.checkAndCreateAlert({
+                type: "service_recovered",
+                service: serviceName,
+                message: `Service ${serviceName} has recovered`,
+                details: {
+                    previousStatus,
+                    newStatus,
+                    responseTime
+                }
+            });
+        } else if (previousStatus !== 'degraded' && newStatus === 'degraded') {
+            this.checkAndCreateAlert({
+                type: "service_degraded",
+                service: serviceName,
+                message: `Service ${serviceName} is degraded: ${message}`,
+                details: {
+                    previousStatus,
+                    newStatus,
+                    responseTime
+                }
+            });
+        }
+        // Check for high response time
+        if (responseTime > 0) {
+            const rule = this.alertRules.get('high-response-time');
+            if (rule?.enabled && rule.conditions.thresholds?.responseTime) {
+                if (responseTime > rule.conditions.thresholds.responseTime) {
+                    this.checkAndCreateAlert({
+                        type: "high_response_time",
+                        service: serviceName,
+                        message: `High response time for ${serviceName}: ${responseTime}ms`,
+                        details: {
+                            responseTime,
+                            threshold: rule.conditions.thresholds.responseTime
+                        }
+                    });
+                }
+            }
+        }
+    }
+    handleCriticalServiceDown(event) {
+        const { serviceName, message, details } = event;
+        this.checkAndCreateAlert({
+            type: "service_down",
+            service: serviceName,
+            message: `Critical service ${serviceName} is down: ${message}`,
+            details,
+            forceSeverity: "critical"
+        });
+    }
+    handleFullHealthCheck(event) {
+        const { systemHealth } = event;
+        if (systemHealth.overallStatus === 'unhealthy') {
+            this.checkAndCreateAlert({
+                type: "system_unhealthy",
+                service: 'system',
+                message: `System is unhealthy: ${systemHealth.unhealthyServices} unhealthy services`,
+                details: {
+                    totalServices: systemHealth.totalServices,
+                    healthyServices: systemHealth.healthyServices,
+                    unhealthyServices: systemHealth.unhealthyServices,
+                    degradedServices: systemHealth.degradedServices
+                }
+            });
+        }
+    }
+    handleCircuitBreakerOpened(event) {
+        const { serviceName, failureCount, reason } = event;
+        this.checkAndCreateAlert({
+            type: "circuit_breaker_opened",
+            service: serviceName,
+            message: `Circuit breaker opened for ${serviceName}: ${reason}`,
+            details: {
+                failureCount,
+                reason
+            }
+        });
+    }
+    handleCircuitBreakerClosed(event) {
+        const { serviceName, reason } = event;
+        this.checkAndCreateAlert({
+            type: "circuit_breaker_closed",
+            service: serviceName,
+            message: `Circuit breaker closed for ${serviceName}: ${reason}`,
+            details: {
+                reason
+            },
+            forceSeverity: "info"
+        });
+    }
+    checkAndCreateAlert(params) {
+        if (!this.config.enabled) return;
+        const rule = this.findMatchingRule(params.type, params.service);
+        if (!rule?.enabled) return;
+        // Check cooldown period
+        const cooldownKey = `${params.type}-${params.service}`;
+        const lastAlert = this.lastAlerts.get(cooldownKey);
+        const cooldownPeriod = rule.conditions.cooldownPeriod || this.config.defaultCooldownPeriod;
+        if (lastAlert) {
+            const timeSinceLastAlert = Date.now() - lastAlert.getTime();
+            const cooldownMs = cooldownPeriod * 60 * 1000;
+            if (timeSinceLastAlert < cooldownMs) {
+                console.log(`Alert suppressed due to cooldown: ${params.type} for ${params.service}`);
+                return;
+            }
+        }
+        // Check rate limiting
+        const hourKey = Math.floor(Date.now() / (60 * 60 * 1000));
+        const countKey = `${hourKey}-${params.service}`;
+        const hourlyCount = this.alertCounts.get(countKey) || 0;
+        if (hourlyCount >= this.config.maxAlertsPerHour) {
+            console.log(`Alert rate limit exceeded for ${params.service}`);
+            return;
+        }
+        // Create alert
+        const alert = this.createAlert({
+            ...params,
+            severity: params.forceSeverity || rule.severity
+        });
+        // Update tracking
+        this.lastAlerts.set(cooldownKey, new Date());
+        this.alertCounts.set(countKey, hourlyCount + 1);
+        // Send notifications
+        this.sendNotifications(alert, rule);
+        console.log(`🚨 Alert created: ${alert.type} for ${alert.service} - ${alert.message}`);
+    }
+    findMatchingRule(type, service) {
+        for (const rule of this.alertRules.values()){
+            if (rule.type === type) {
+                if (!rule.conditions.services || rule.conditions.services.includes(service)) {
+                    return rule;
+                }
+            }
+        }
+        return undefined;
+    }
+    createAlert(params) {
+        const alert = {
+            id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            type: params.type,
+            severity: params.severity,
+            service: params.service,
+            message: params.message,
+            details: params.details,
+            timestamp: new Date(),
+            acknowledged: false
+        };
+        this.alerts.set(alert.id, alert);
+        this.emit('alertCreated', alert);
+        return alert;
+    }
+    async sendNotifications(alert, rule) {
+        try {
+            // Webhook notification
+            if (rule.actions.webhook) {
+                await this.sendWebhookNotification(alert, rule.actions.webhook);
+            }
+            // Slack notification (if configured)
+            if (rule.actions.slack) {
+                await this.sendSlackNotification(alert, rule.actions.slack);
+            }
+            // Email notification (if configured)
+            if (rule.actions.email && rule.actions.email.length > 0) {
+                await this.sendEmailNotification(alert, rule.actions.email);
+            }
+        } catch (error) {
+            console.error('Failed to send alert notification:', error);
+        }
+    }
+    async sendWebhookNotification(alert, webhookUrl) {
+        try {
+            const payload = {
+                alert: {
+                    id: alert.id,
+                    type: alert.type,
+                    severity: alert.severity,
+                    service: alert.service,
+                    message: alert.message,
+                    timestamp: alert.timestamp.toISOString()
+                },
+                system: 'prompt-card-health-monitor'
+            };
+            const response = await fetch(webhookUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+            if (!response.ok) {
+                throw new Error(`Webhook failed: ${response.status} ${response.statusText}`);
+            }
+        } catch (error) {
+            console.error('Webhook notification failed:', error);
+        }
+    }
+    async sendSlackNotification(alert, slackConfig) {
+        try {
+            const color = {
+                ["info"]: '#36a64f',
+                ["warning"]: '#ffeb3b',
+                ["critical"]: '#f44336'
+            }[alert.severity];
+            const payload = {
+                channel: slackConfig.channel,
+                attachments: [
+                    {
+                        color,
+                        title: `${alert.severity.toUpperCase()}: ${alert.type.replace('_', ' ').toUpperCase()}`,
+                        text: alert.message,
+                        fields: [
+                            {
+                                title: 'Service',
+                                value: alert.service,
+                                short: true
+                            },
+                            {
+                                title: 'Time',
+                                value: alert.timestamp.toISOString(),
+                                short: true
+                            }
+                        ]
+                    }
+                ]
+            };
+            const response = await fetch(slackConfig.webhook, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+            if (!response.ok) {
+                throw new Error(`Slack notification failed: ${response.status} ${response.statusText}`);
+            }
+        } catch (error) {
+            console.error('Slack notification failed:', error);
+        }
+    }
+    async sendEmailNotification(alert, emails) {
+        // Email implementation would depend on your email service
+        // This is a placeholder for the email notification logic
+        console.log(`Email notification sent to ${emails.join(', ')} for alert: ${alert.message}`);
+    }
+    addAlertRule(rule) {
+        this.alertRules.set(rule.id, rule);
+        console.log(`Alert rule added: ${rule.name}`);
+    }
+    removeAlertRule(ruleId) {
+        const removed = this.alertRules.delete(ruleId);
+        if (removed) {
+            console.log(`Alert rule removed: ${ruleId}`);
+        }
+        return removed;
+    }
+    updateAlertRule(ruleId, updates) {
+        const rule = this.alertRules.get(ruleId);
+        if (!rule) return false;
+        const updatedRule = {
+            ...rule,
+            ...updates
+        };
+        this.alertRules.set(ruleId, updatedRule);
+        console.log(`Alert rule updated: ${ruleId}`);
+        return true;
+    }
+    acknowledgeAlert(alertId) {
+        const alert = this.alerts.get(alertId);
+        if (!alert) return false;
+        alert.acknowledged = true;
+        this.alerts.set(alertId, alert);
+        this.emit('alertAcknowledged', alert);
+        return true;
+    }
+    resolveAlert(alertId) {
+        const alert = this.alerts.get(alertId);
+        if (!alert) return false;
+        alert.resolvedAt = new Date();
+        this.alerts.set(alertId, alert);
+        this.emit('alertResolved', alert);
+        return true;
+    }
+    getAlerts(filters) {
+        let alerts = Array.from(this.alerts.values());
+        if (filters) {
+            if (filters.service) {
+                alerts = alerts.filter((a)=>a.service === filters.service);
+            }
+            if (filters.severity) {
+                alerts = alerts.filter((a)=>a.severity === filters.severity);
+            }
+            if (filters.acknowledged !== undefined) {
+                alerts = alerts.filter((a)=>a.acknowledged === filters.acknowledged);
+            }
+            if (filters.resolved !== undefined) {
+                const hasResolved = (alert)=>!!alert.resolvedAt;
+                alerts = alerts.filter((a)=>hasResolved(a) === filters.resolved);
+            }
+        }
+        // Sort by timestamp (newest first)
+        alerts.sort((a, b)=>b.timestamp.getTime() - a.timestamp.getTime());
+        if (filters?.limit) {
+            alerts = alerts.slice(0, filters.limit);
+        }
+        return alerts;
+    }
+    getAlertRules() {
+        return Array.from(this.alertRules.values());
+    }
+    getAlertStats() {
+        const alerts = Array.from(this.alerts.values());
+        const stats = {
+            total: alerts.length,
+            bySeverity: {
+                ["info"]: 0,
+                ["warning"]: 0,
+                ["critical"]: 0
+            },
+            byService: {},
+            acknowledged: 0,
+            resolved: 0
+        };
+        for (const alert of alerts){
+            stats.bySeverity[alert.severity]++;
+            stats.byService[alert.service] = (stats.byService[alert.service] || 0) + 1;
+            if (alert.acknowledged) stats.acknowledged++;
+            if (alert.resolvedAt) stats.resolved++;
+        }
+        return stats;
+    }
+    startCleanupProcess() {
+        // Clean up old alerts daily
+        setInterval(()=>{
+            this.cleanupOldAlerts();
+        }, 24 * 60 * 60 * 1000); // 24 hours
+    }
+    cleanupOldAlerts() {
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - this.config.retentionDays);
+        let removedCount = 0;
+        for (const [id, alert] of this.alerts){
+            if (alert.timestamp < cutoffDate) {
+                this.alerts.delete(id);
+                removedCount++;
+            }
+        }
+        if (removedCount > 0) {
+            console.log(`Cleaned up ${removedCount} old alerts`);
+        }
+    }
+    updateConfig(newConfig) {
+        this.config = {
+            ...this.config,
+            ...newConfig
+        };
+        console.log('Alerting system configuration updated');
+    }
+    async shutdown() {
+        console.log('Shutting down alerting system...');
+        this.isInitialized = false;
+        this.removeAllListeners();
+        console.log('Alerting system shutdown complete');
+    }
+    constructor(config = {}){
+        super(), _define_property(this, "alerts", new Map()), _define_property(this, "alertRules", new Map()), _define_property(this, "config", void 0), _define_property(this, "alertCounts", new Map()), _define_property(this, "lastAlerts", new Map()), _define_property(this, "isInitialized", false);
+        this.config = {
+            enabled: true,
+            defaultCooldownPeriod: 15,
+            maxAlertsPerHour: 10,
+            retentionDays: 30,
+            ...config
+        };
+        this.initializeDefaultRules();
+    }
+}
+const alertingSystem = new AlertingSystem();

@@ -1,10 +1,10 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import { db } from '../database/connection';
 
 const router = Router();
 
 // Health check endpoint
-router.get('/', (req, res) => {
+router.get('/', (req: Request, res: Response) => {
   try {
     // Check database connection
     const dbCheck = db.prepare('SELECT 1').get();
@@ -34,7 +34,7 @@ router.get('/', (req, res) => {
 });
 
 // Database status endpoint
-router.get('/db', (req, res) => {
+router.get('/db', (req: Request, res: Response) => {
   try {
     const promptCardCount = db.prepare('SELECT COUNT(*) as count FROM prompt_cards').get() as { count: number };
     const testCaseCount = db.prepare('SELECT COUNT(*) as count FROM test_cases').get() as { count: number };

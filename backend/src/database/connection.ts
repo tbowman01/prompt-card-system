@@ -2,6 +2,9 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 
+// Import database types
+import type { DatabaseConnection, AsyncDatabaseConnection, PreparedStatement, AsyncPreparedStatement } from '../types/database';
+
 const DATABASE_PATH = process.env.DATABASE_PATH || path.join(__dirname, '../../data/database.sqlite');
 
 // Connection pool configuration
@@ -142,9 +145,58 @@ class DatabaseConnectionPool {
 // Create global connection pool
 const connectionPool = new DatabaseConnectionPool(DATABASE_PATH, poolConfig);
 
-// Export legacy db interface for backward compatibility
-export const db: any = {
-  prepare: (sql: string) => {
+// Export properly typed db interface
+export const db: DatabaseConnection = {
+  prepare: (sql: string): PreparedStatement => {
+    // Return sync interface for existing code compatibility
+    const stmt = {
+      run: (...params: any[]) => {
+        // Synchronous wrapper around async pool
+        const conn = connectionPool.connections[0]; // Use first available connection
+        if (!conn) throw new Error('No database connection available');
+        return conn.prepare(sql).run(...params);
+      },
+      get: (...params: any[]) => {
+        const conn = connectionPool.connections[0];
+        if (!conn) throw new Error('No database connection available');
+        return conn.prepare(sql).get(...params);
+      },
+      all: (...params: any[]) => {
+        const conn = connectionPool.connections[0];
+        if (!conn) throw new Error('No database connection available');
+        return conn.prepare(sql).all(...params);
+      }
+    };
+    return stmt;
+  },
+  exec: (sql: string) => {
+    // Synchronous exec for compatibility
+    const conn = connectionPool.connections[0];
+    if (!conn) throw new Error('No database connection available');
+    try {
+      return conn.exec(sql);
+    } catch (error) {
+      throw error;
+    }
+  },
+  pragma: (pragma: string) => {
+    const conn = connectionPool.connections[0];
+    if (!conn) throw new Error('No database connection available');
+    return conn.pragma(pragma);
+  },
+  close: () => connectionPool.close(),
+  transaction: (operations: (db: Database.Database) => any) => {
+    const conn = connectionPool.connections[0];
+    if (!conn) throw new Error('No database connection available');
+    const transaction = conn.transaction(operations);
+    return transaction(conn);
+  },
+  getStats: () => connectionPool.getStats()
+};
+
+// Export async database interface for modern services
+export const asyncDb: AsyncDatabaseConnection = {
+  prepare: (sql: string): AsyncPreparedStatement => {
     return {
       run: async (...params: any[]) => {
         return connectionPool.withConnection((conn) => {
@@ -167,7 +219,13 @@ export const db: any = {
     };
   },
   exec: async (sql: string) => {
-    return connectionPool.withConnection((conn) => conn.exec(sql));
+    return connectionPool.withConnection((conn) => {
+      try {
+        return conn.exec(sql);
+      } catch (error) {
+        throw error;
+      }
+    });
   },
   pragma: async (pragma: string) => {
     return connectionPool.withConnection((conn) => conn.pragma(pragma));
@@ -253,6 +311,34 @@ export async function initializeDatabase(): Promise<any> {
       )
     `);
 
+    // Create assertion_types table for advanced assertion system
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS assertion_types (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE NOT NULL,
+        description TEXT NOT NULL,
+        parameters TEXT NOT NULL, -- JSON
+        examples TEXT NOT NULL, -- JSON
+        validator_code TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Create assertion execution stats table
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS assertion_execution_stats (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        assertion_type TEXT NOT NULL,
+        total_executions INTEGER DEFAULT 0,
+        successful_executions INTEGER DEFAULT 0,
+        failed_executions INTEGER DEFAULT 0,
+        total_execution_time INTEGER DEFAULT 0,
+        last_executed DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(assertion_type)
+      )
+    `);
+
     // Create indexes for better performance
     await db.exec(`
       CREATE INDEX IF NOT EXISTS idx_prompt_cards_title ON prompt_cards(title);
@@ -261,6 +347,8 @@ export async function initializeDatabase(): Promise<any> {
       CREATE INDEX IF NOT EXISTS idx_test_results_execution_id ON test_results(execution_id);
       CREATE INDEX IF NOT EXISTS idx_test_queue_status ON test_execution_queue(status);
       CREATE INDEX IF NOT EXISTS idx_test_queue_priority ON test_execution_queue(priority DESC);
+      CREATE INDEX IF NOT EXISTS idx_assertion_types_name ON assertion_types(name);
+      CREATE INDEX IF NOT EXISTS idx_assertion_stats_type ON assertion_execution_stats(assertion_type);
     `);
 
     console.log('Database initialized successfully');

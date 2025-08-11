@@ -55,7 +55,7 @@ export interface DashboardMetrics {
 
 export class AnalyticsEngine {
   private eventStore: EventStore;
-  private db: Database;
+  private db: any;
   private static instance: AnalyticsEngine;
   private queryCache: LRUCache<string, any>;
   private preparedStatements: Map<string, any>;
@@ -63,7 +63,6 @@ export class AnalyticsEngine {
 
   private constructor() {
     this.eventStore = EventStore.getInstance();
-    this.db = initializeDatabase();
     
     // Initialize performance optimizations
     this.queryCache = new LRUCache({
@@ -74,11 +73,20 @@ export class AnalyticsEngine {
     this.preparedStatements = new Map();
     this.performanceMetrics = new Map();
     
-    // Pre-compile frequently used queries
-    this.prepareOptimizedQueries();
-    
-    // Set up database optimizations
-    this.optimizeDatabase();
+    // Initialize database first, then prepare queries
+    this.initializeDb().then(() => {
+      // Pre-compile frequently used queries after db is initialized
+      this.prepareOptimizedQueries();
+      
+      // Set up database optimizations
+      this.optimizeDatabase();
+    }).catch(error => {
+      console.error('Failed to initialize AnalyticsEngine database:', error);
+    });
+  }
+
+  private async initializeDb(): Promise<void> {
+    this.db = await initializeDatabase();
   }
 
   public static getInstance(): AnalyticsEngine {

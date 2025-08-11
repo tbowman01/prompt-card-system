@@ -11,8 +11,8 @@ describe('Analytics Dashboard Integration Tests', () => {
   const testSessionId = 'test-session-analytics-456';
 
   beforeEach(async () => {
-    eventStore = new EventStore();
-    analyticsEngine = new AnalyticsEngine(eventStore);
+    eventStore = EventStore.getInstance();
+    analyticsEngine = AnalyticsEngine.getInstance();
     
     // Initialize analytics with test data
     await eventStore.recordEvent({
@@ -38,10 +38,10 @@ describe('Analytics Dashboard Integration Tests', () => {
         .expect(200);
 
       assert(response.body.success === true);
-      expect(response.body.data).to.have.property('metrics');
-      expect(response.body.data).to.have.property('performance');
-      expect(response.body.data).to.have.property('costAnalysis');
-      expect(response.body.data).to.have.property('timeSeriesData');
+      expect(response.body.data).toHaveProperty('metrics');
+      expect(response.body.data).toHaveProperty('performance');
+      expect(response.body.data).toHaveProperty('costAnalysis');
+      expect(response.body.data).toHaveProperty('timeSeriesData');
     });
 
     it('should handle real-time analytics updates', async () => {
@@ -82,9 +82,9 @@ describe('Analytics Dashboard Integration Tests', () => {
         .expect(200);
 
       assert(response.body.success === true);
-      expect(response.body.data).to.have.property('activeTests');
-      expect(response.body.data).to.have.property('recentCompletions');
-      expect(response.body.data).to.have.property('averageExecutionTime');
+      expect(response.body.data).toHaveProperty('activeTests');
+      expect(response.body.data).toHaveProperty('recentCompletions');
+      expect(response.body.data).toHaveProperty('averageExecutionTime');
     });
   });
 
@@ -118,11 +118,12 @@ describe('Analytics Dashboard Integration Tests', () => {
         .expect(200);
 
       assert(response.body.success === true);
-      expect(response.body.data).to.have.property('averageExecutionTime');
-      expect(response.body.data).to.have.property('successRate');
-      expect(response.body.data).to.have.property('tokenUsageStats');
-      expect(response.body.data.averageExecutionTime).to.be.a('number');
-      expect(response.body.data.successRate).to.be.within(0, 1);
+      expect(response.body.data).toHaveProperty('averageExecutionTime');
+      expect(response.body.data).toHaveProperty('successRate');
+      expect(response.body.data).toHaveProperty('tokenUsageStats');
+      expect(typeof response.body.data.averageExecutionTime).toBe('number');
+      expect(response.body.data.successRate).toBeGreaterThanOrEqual(0);
+      expect(response.body.data.successRate).toBeLessThanOrEqual(1);
     });
   });
 
@@ -156,9 +157,9 @@ describe('Analytics Dashboard Integration Tests', () => {
         .expect(200);
 
       assert(response.body.success === true);
-      expect(response.body.data).to.have.property('totalCost');
-      expect(response.body.data).to.have.property('costBreakdown');
-      expect(response.body.data.totalCost).to.be.approximately(0.060, 0.001);
+      expect(response.body.data).toHaveProperty('totalCost');
+      expect(response.body.data).toHaveProperty('costBreakdown');
+      expect(response.body.data.totalCost).toBeCloseTo(0.060, 3);
     });
   });
 });

@@ -1,0 +1,213 @@
+d4c2df29d042223068b4382a3207e0e9
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+function _export(target, all) {
+    for(var name in all)Object.defineProperty(target, name, {
+        enumerable: true,
+        get: Object.getOwnPropertyDescriptor(all, name).get
+    });
+}
+_export(exports, {
+    get default () {
+        return _default;
+    },
+    get llmService () {
+        return llmService;
+    }
+});
+const _axios = /*#__PURE__*/ _interop_require_default(require("axios"));
+const _assertions = require("./assertions");
+function _define_property(obj, key, value) {
+    if (key in obj) {
+        Object.defineProperty(obj, key, {
+            value: value,
+            enumerable: true,
+            configurable: true,
+            writable: true
+        });
+    } else {
+        obj[key] = value;
+    }
+    return obj;
+}
+function _interop_require_default(obj) {
+    return obj && obj.__esModule ? obj : {
+        default: obj
+    };
+}
+class LLMService {
+    /**
+   * Generate text using Ollama LLM
+   */ async generate(prompt, model, options) {
+        try {
+            const request = {
+                model: model || this.defaultModel,
+                prompt,
+                stream: false,
+                options: {
+                    temperature: 0.7,
+                    ...options
+                }
+            };
+            const response = await _axios.default.post(`${this.baseUrl}/api/generate`, request, {
+                timeout: 60000,
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            return response.data;
+        } catch (error) {
+            if (_axios.default.isAxiosError(error)) {
+                throw new Error(`LLM Service Error: ${error.response?.data?.error || error.message}`);
+            }
+            throw new Error(`LLM Service Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    }
+    /**
+   * Check if Ollama service is available
+   */ async healthCheck() {
+        try {
+            const response = await _axios.default.get(`${this.baseUrl}/api/tags`, {
+                timeout: 5000
+            });
+            return response.status === 200;
+        } catch (error) {
+            return false;
+        }
+    }
+    /**
+   * Get available models
+   */ async getModels() {
+        try {
+            const response = await _axios.default.get(`${this.baseUrl}/api/tags`, {
+                timeout: 10000
+            });
+            return response.data.models?.map((model)=>model.name) || [];
+        } catch (error) {
+            throw new Error(`Failed to fetch models: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    }
+    /**
+   * Substitute variables in prompt template
+   */ substituteVariables(template, variables) {
+        let result = template;
+        // Replace variables in format {{variable_name}}
+        Object.entries(variables).forEach(([key, value])=>{
+            const regex = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'g');
+            result = result.replace(regex, String(value));
+        });
+        return result;
+    }
+    /**
+   * Initialize the LLM service with enhanced assertion engine
+   */ async initialize() {
+        try {
+            console.log('Initializing LLM Service with Enhanced Assertion Engine...');
+            await _assertions.assertionEngine.initialize();
+            console.log('✅ LLM Service initialized successfully');
+        } catch (error) {
+            console.error('❌ Failed to initialize LLM Service:', error);
+            throw error;
+        }
+    }
+    /**
+   * Validate assertions against LLM output using enhanced assertion engine
+   */ async validateAssertions(output, assertions, context) {
+        try {
+            const assertionContext = {
+                prompt: context?.prompt || '',
+                variables: context?.variables || {},
+                model: context?.model || this.defaultModel,
+                executionTime: context?.executionTime || 0
+            };
+            return await _assertions.assertionEngine.validateAssertions(output, assertions, assertionContext);
+        } catch (error) {
+            console.error('Error validating assertions:', error);
+            // Fallback to basic validation for compatibility
+            return this.validateAssertionsBasic(output, assertions);
+        }
+    }
+    /**
+   * Fallback basic assertion validation for compatibility
+   */ async validateAssertionsBasic(output, assertions) {
+        return assertions.map((assertion)=>{
+            try {
+                let passed = false;
+                switch(assertion.type){
+                    case 'contains':
+                        passed = output.toLowerCase().includes(String(assertion.value).toLowerCase());
+                        break;
+                    case 'not-contains':
+                        passed = !output.toLowerCase().includes(String(assertion.value).toLowerCase());
+                        break;
+                    case 'equals':
+                        passed = output.trim() === String(assertion.value).trim();
+                        break;
+                    case 'not-equals':
+                        passed = output.trim() !== String(assertion.value).trim();
+                        break;
+                    case 'regex':
+                        const regex = new RegExp(String(assertion.value));
+                        passed = regex.test(output);
+                        break;
+                    case 'length':
+                        if (typeof assertion.value === 'number') {
+                            passed = output.length === assertion.value;
+                        } else {
+                            // Support range: "10-20" or ">10" or "<100"
+                            const valueStr = String(assertion.value);
+                            if (valueStr.includes('-')) {
+                                const [min, max] = valueStr.split('-').map((v)=>parseInt(v.trim()));
+                                passed = output.length >= min && output.length <= max;
+                            } else if (valueStr.startsWith('>')) {
+                                const min = parseInt(valueStr.substring(1));
+                                passed = output.length > min;
+                            } else if (valueStr.startsWith('<')) {
+                                const max = parseInt(valueStr.substring(1));
+                                passed = output.length < max;
+                            } else {
+                                passed = output.length === parseInt(valueStr);
+                            }
+                        }
+                        break;
+                    default:
+                        return {
+                            assertion,
+                            passed: false,
+                            error: `Unsupported assertion type in basic validation: ${assertion.type}`
+                        };
+                }
+                return {
+                    assertion,
+                    passed
+                };
+            } catch (error) {
+                return {
+                    assertion,
+                    passed: false,
+                    error: error instanceof Error ? error.message : 'Basic assertion validation failed'
+                };
+            }
+        });
+    }
+    /**
+   * Get available assertion types from the engine
+   */ getAvailableAssertionTypes() {
+        return _assertions.assertionEngine.getRegisteredTypes();
+    }
+    /**
+   * Get assertion execution statistics
+   */ getAssertionStatistics() {
+        return _assertions.assertionEngine.getStatistics();
+    }
+    constructor(){
+        _define_property(this, "baseUrl", void 0);
+        _define_property(this, "defaultModel", void 0);
+        this.baseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
+        this.defaultModel = process.env.OLLAMA_DEFAULT_MODEL || 'llama3';
+    }
+}
+const llmService = new LLMService();
+const _default = llmService;

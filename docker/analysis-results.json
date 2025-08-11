@@ -1,0 +1,1157 @@
+{
+  "compose_files": {
+    "docker-compose.yml": {
+      "services": {
+        "frontend": {
+          "image": null,
+          "build": {
+            "context": "./frontend",
+            "dockerfile": "Dockerfile",
+            "args": [
+              "NODE_ENV=production"
+            ],
+            "cache_from": [
+              "node:20-alpine"
+            ]
+          },
+          "ports": [
+            "3000:3000"
+          ],
+          "volumes": [],
+          "environment": true,
+          "depends_on": [
+            "backend"
+          ],
+          "healthcheck": true,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        },
+        "backend": {
+          "image": null,
+          "build": {
+            "context": "./backend",
+            "dockerfile": "Dockerfile",
+            "args": [
+              "NODE_ENV=production"
+            ],
+            "cache_from": [
+              "node:20-alpine"
+            ]
+          },
+          "ports": [
+            "3001:3001"
+          ],
+          "volumes": [
+            "./data:/app/data"
+          ],
+          "environment": true,
+          "depends_on": {
+            "ollama": {
+              "condition": "service_healthy"
+            }
+          },
+          "healthcheck": true,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        },
+        "ollama": {
+          "image": "ollama/ollama:latest",
+          "build": null,
+          "ports": [
+            "11434:11434"
+          ],
+          "volumes": [
+            "ollama-data:/root/.ollama"
+          ],
+          "environment": true,
+          "depends_on": [],
+          "healthcheck": true,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "no"
+        },
+        "model-loader": {
+          "image": "ollama/ollama:latest",
+          "build": null,
+          "ports": [],
+          "volumes": [
+            "ollama-data:/root/.ollama"
+          ],
+          "environment": true,
+          "depends_on": {
+            "ollama": {
+              "condition": "service_healthy"
+            }
+          },
+          "healthcheck": false,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "no"
+        }
+      },
+      "volumes": [
+        "ollama-data",
+        "app-data"
+      ],
+      "networks": [
+        "app-network"
+      ],
+      "has_healthchecks": true,
+      "has_security_opts": false,
+      "has_resource_limits": false
+    },
+    "docker-compose.prod.yml": {
+      "services": {
+        "nginx": {
+          "image": "nginx:1.25-alpine",
+          "build": null,
+          "ports": [
+            "80:80",
+            "443:443"
+          ],
+          "volumes": [
+            "./nginx/nginx.conf:/etc/nginx/nginx.conf:ro",
+            "./nginx/ssl:/etc/nginx/ssl:ro",
+            "./nginx/logs:/var/log/nginx"
+          ],
+          "environment": false,
+          "depends_on": [
+            "frontend",
+            "backend"
+          ],
+          "healthcheck": true,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        },
+        "frontend": {
+          "image": null,
+          "build": {
+            "context": "./frontend",
+            "dockerfile": "Dockerfile",
+            "target": "production"
+          },
+          "ports": [],
+          "volumes": [
+            "frontend_static:/app/.next/static"
+          ],
+          "environment": true,
+          "depends_on": [],
+          "healthcheck": true,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        },
+        "backend": {
+          "image": null,
+          "build": {
+            "context": "./backend",
+            "dockerfile": "Dockerfile",
+            "target": "production"
+          },
+          "ports": [],
+          "volumes": [
+            "backend_uploads:/app/uploads",
+            "backend_logs:/app/logs"
+          ],
+          "environment": true,
+          "depends_on": [
+            "postgres",
+            "redis",
+            "ollama"
+          ],
+          "healthcheck": true,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        },
+        "postgres": {
+          "image": "postgres:16-alpine",
+          "build": null,
+          "ports": [],
+          "volumes": [
+            "postgres_data:/var/lib/postgresql/data",
+            "./database/init:/docker-entrypoint-initdb.d:ro",
+            "./database/backups:/backups"
+          ],
+          "environment": true,
+          "depends_on": [],
+          "healthcheck": true,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        },
+        "redis": {
+          "image": "redis:7.2-alpine",
+          "build": null,
+          "ports": [],
+          "volumes": [
+            "redis_data:/data",
+            "./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro"
+          ],
+          "environment": true,
+          "depends_on": [],
+          "healthcheck": true,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        },
+        "ollama": {
+          "image": "ollama/ollama:latest",
+          "build": null,
+          "ports": [],
+          "volumes": [
+            "ollama_models:/root/.ollama"
+          ],
+          "environment": true,
+          "depends_on": [],
+          "healthcheck": true,
+          "security_opt": false,
+          "deploy": true,
+          "restart": "unless-stopped"
+        },
+        "prometheus": {
+          "image": "prom/prometheus:v2.45.0",
+          "build": null,
+          "ports": [],
+          "volumes": [
+            "./monitoring/prometheus:/etc/prometheus:ro",
+            "prometheus_data:/prometheus"
+          ],
+          "environment": false,
+          "depends_on": [],
+          "healthcheck": true,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        },
+        "grafana": {
+          "image": "grafana/grafana:10.0.0",
+          "build": null,
+          "ports": [],
+          "volumes": [
+            "grafana_data:/var/lib/grafana",
+            "./monitoring/grafana:/etc/grafana/provisioning:ro"
+          ],
+          "environment": true,
+          "depends_on": [
+            "prometheus"
+          ],
+          "healthcheck": true,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        },
+        "loki": {
+          "image": "grafana/loki:2.9.15",
+          "build": null,
+          "ports": [],
+          "volumes": [
+            "./monitoring/loki:/etc/loki:ro",
+            "loki_data:/loki"
+          ],
+          "environment": false,
+          "depends_on": [],
+          "healthcheck": false,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        },
+        "promtail": {
+          "image": "grafana/promtail:2.9.0",
+          "build": null,
+          "ports": [],
+          "volumes": [
+            "/var/log:/var/log:ro",
+            "/var/lib/docker/containers:/var/lib/docker/containers:ro",
+            "./monitoring/promtail:/etc/promtail:ro"
+          ],
+          "environment": false,
+          "depends_on": [],
+          "healthcheck": false,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        },
+        "jaeger": {
+          "image": "jaegertracing/all-in-one:1.48",
+          "build": null,
+          "ports": [],
+          "volumes": [
+            "jaeger_data:/badger"
+          ],
+          "environment": true,
+          "depends_on": [],
+          "healthcheck": true,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        },
+        "backup": {
+          "image": "postgres:16-alpine",
+          "build": null,
+          "ports": [],
+          "volumes": [
+            "./database/backups:/backups",
+            "./scripts/backup.sh:/backup.sh:ro"
+          ],
+          "environment": true,
+          "depends_on": [
+            "postgres"
+          ],
+          "healthcheck": false,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        }
+      },
+      "volumes": [
+        "postgres_data",
+        "redis_data",
+        "ollama_models",
+        "prometheus_data",
+        "grafana_data",
+        "loki_data",
+        "jaeger_data",
+        "frontend_static",
+        "backend_uploads",
+        "backend_logs"
+      ],
+      "networks": [
+        "prompt-network"
+      ],
+      "has_healthchecks": true,
+      "has_security_opts": false,
+      "has_resource_limits": true
+    },
+    "docker-compose.dev.yml": {
+      "services": {
+        "frontend": {
+          "image": null,
+          "build": {
+            "context": "./frontend",
+            "dockerfile": "Dockerfile.dev"
+          },
+          "ports": [
+            "3000:3000"
+          ],
+          "volumes": [
+            "./frontend:/app",
+            "/app/node_modules",
+            "/app/.next"
+          ],
+          "environment": true,
+          "depends_on": [],
+          "healthcheck": true,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        },
+        "backend": {
+          "image": null,
+          "build": {
+            "context": "./backend",
+            "dockerfile": "Dockerfile.dev"
+          },
+          "ports": [
+            "3001:3001",
+            "9229:9229"
+          ],
+          "volumes": [
+            "./backend:/app",
+            "/app/node_modules",
+            "./data:/app/data",
+            "./backend/logs:/app/logs"
+          ],
+          "environment": true,
+          "depends_on": [
+            "ollama",
+            "redis"
+          ],
+          "healthcheck": true,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        },
+        "backend-cpu": {
+          "image": null,
+          "build": {
+            "context": "./backend",
+            "dockerfile": "Dockerfile.dev"
+          },
+          "ports": [
+            "3001:3001",
+            "9229:9229"
+          ],
+          "volumes": [
+            "./backend:/app",
+            "/app/node_modules",
+            "./data:/app/data",
+            "./backend/logs:/app/logs"
+          ],
+          "environment": true,
+          "depends_on": [
+            "ollama-cpu",
+            "redis"
+          ],
+          "healthcheck": true,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        },
+        "ollama": {
+          "image": "ollama/ollama:latest",
+          "build": null,
+          "ports": [
+            "11434:11434"
+          ],
+          "volumes": [
+            "ollama_models:/root/.ollama"
+          ],
+          "environment": true,
+          "depends_on": [],
+          "healthcheck": true,
+          "security_opt": false,
+          "deploy": true,
+          "restart": "unless-stopped"
+        },
+        "ollama-cpu": {
+          "image": "ollama/ollama:latest",
+          "build": null,
+          "ports": [
+            "11434:11434"
+          ],
+          "volumes": [
+            "ollama_models:/root/.ollama"
+          ],
+          "environment": true,
+          "depends_on": [],
+          "healthcheck": true,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        },
+        "redis": {
+          "image": "redis:7-alpine",
+          "build": null,
+          "ports": [
+            "6379:6379"
+          ],
+          "volumes": [
+            "redis_data:/data",
+            "./redis.conf:/usr/local/etc/redis/redis.conf"
+          ],
+          "environment": false,
+          "depends_on": [],
+          "healthcheck": true,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        },
+        "model-init": {
+          "image": "ollama/ollama:latest",
+          "build": null,
+          "ports": [],
+          "volumes": [
+            "./scripts:/scripts",
+            "ollama_models:/root/.ollama"
+          ],
+          "environment": true,
+          "depends_on": [],
+          "healthcheck": false,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "no"
+        },
+        "adminer": {
+          "image": "adminer:latest",
+          "build": null,
+          "ports": [
+            "8080:8080"
+          ],
+          "volumes": [
+            "./data:/var/lib/adminer/data"
+          ],
+          "environment": true,
+          "depends_on": [],
+          "healthcheck": false,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        },
+        "redis-commander": {
+          "image": "rediscommander/redis-commander:latest",
+          "build": null,
+          "ports": [
+            "8081:8081"
+          ],
+          "volumes": [],
+          "environment": true,
+          "depends_on": [
+            "redis"
+          ],
+          "healthcheck": false,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        },
+        "postgres": {
+          "image": "postgres:16-alpine",
+          "build": null,
+          "ports": [
+            "5432:5432"
+          ],
+          "volumes": [
+            "postgres_dev_data:/var/lib/postgresql/data",
+            "./database/init:/docker-entrypoint-initdb.d"
+          ],
+          "environment": true,
+          "depends_on": [],
+          "healthcheck": true,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        },
+        "pgadmin": {
+          "image": "dpage/pgadmin4:latest",
+          "build": null,
+          "ports": [
+            "8082:80"
+          ],
+          "volumes": [
+            "pgadmin_data:/var/lib/pgadmin"
+          ],
+          "environment": true,
+          "depends_on": [
+            "postgres"
+          ],
+          "healthcheck": false,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        },
+        "prometheus": {
+          "image": "prom/prometheus:latest",
+          "build": null,
+          "ports": [
+            "9090:9090"
+          ],
+          "volumes": [
+            "./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml",
+            "prometheus_data:/prometheus"
+          ],
+          "environment": false,
+          "depends_on": [],
+          "healthcheck": false,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        },
+        "grafana": {
+          "image": "grafana/grafana:latest",
+          "build": null,
+          "ports": [
+            "3002:3000"
+          ],
+          "volumes": [
+            "grafana_data:/var/lib/grafana",
+            "./monitoring/grafana:/etc/grafana/provisioning"
+          ],
+          "environment": true,
+          "depends_on": [
+            "prometheus"
+          ],
+          "healthcheck": false,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        }
+      },
+      "volumes": [
+        "ollama_models",
+        "redis_data",
+        "postgres_dev_data",
+        "pgadmin_data",
+        "prometheus_data",
+        "grafana_data"
+      ],
+      "networks": [
+        "prompt-card-network"
+      ],
+      "has_healthchecks": true,
+      "has_security_opts": false,
+      "has_resource_limits": true
+    },
+    "docker-compose.monitoring.yml": {
+      "services": {
+        "prometheus": {
+          "image": "prom/prometheus:v2.45.0",
+          "build": null,
+          "ports": [
+            "9090:9090"
+          ],
+          "volumes": [
+            "./monitoring/prometheus:/etc/prometheus",
+            "prometheus_data:/prometheus"
+          ],
+          "environment": false,
+          "depends_on": [],
+          "healthcheck": true,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        },
+        "grafana": {
+          "image": "grafana/grafana:10.0.0",
+          "build": null,
+          "ports": [
+            "3002:3000"
+          ],
+          "volumes": [
+            "grafana_data:/var/lib/grafana",
+            "./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards",
+            "./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources"
+          ],
+          "environment": true,
+          "depends_on": [
+            "prometheus"
+          ],
+          "healthcheck": true,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        },
+        "node-exporter": {
+          "image": "prom/node-exporter:v1.6.0",
+          "build": null,
+          "ports": [
+            "9100:9100"
+          ],
+          "volumes": [
+            "/:/host:ro,rslave"
+          ],
+          "environment": false,
+          "depends_on": [],
+          "healthcheck": false,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        },
+        "cadvisor": {
+          "image": "gcr.io/cadvisor/cadvisor:v0.47.0",
+          "build": null,
+          "ports": [
+            "8080:8080"
+          ],
+          "volumes": [
+            "/:/rootfs:ro",
+            "/var/run:/var/run:ro",
+            "/sys:/sys:ro",
+            "/var/lib/docker/:/var/lib/docker:ro",
+            "/dev/disk/:/dev/disk:ro"
+          ],
+          "environment": false,
+          "depends_on": [],
+          "healthcheck": false,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        },
+        "redis-exporter": {
+          "image": "oliver006/redis_exporter:v1.52.0",
+          "build": null,
+          "ports": [
+            "9121:9121"
+          ],
+          "volumes": [],
+          "environment": true,
+          "depends_on": [],
+          "healthcheck": false,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        },
+        "alertmanager": {
+          "image": "prom/alertmanager:v0.25.0",
+          "build": null,
+          "ports": [
+            "9093:9093"
+          ],
+          "volumes": [
+            "./monitoring/alertmanager:/etc/alertmanager",
+            "alertmanager_data:/alertmanager"
+          ],
+          "environment": false,
+          "depends_on": [],
+          "healthcheck": false,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        }
+      },
+      "volumes": [
+        "prometheus_data",
+        "grafana_data",
+        "alertmanager_data"
+      ],
+      "networks": [
+        "monitoring-network"
+      ],
+      "has_healthchecks": true,
+      "has_security_opts": false,
+      "has_resource_limits": false
+    },
+    "docker/docker-compose.optimized.yml": {
+      "services": {
+        "frontend": {
+          "image": "prompt-card-frontend:optimized",
+          "build": {
+            "platforms": [
+              "linux/amd64",
+              "linux/arm64"
+            ],
+            "cache_from": [
+              "type=gha,scope=build",
+              "type=local,src=/tmp/.buildx-cache"
+            ],
+            "cache_to": [
+              "type=gha,mode=max,scope=build",
+              "type=local,dest=/tmp/.buildx-cache"
+            ],
+            "driver_opts": {
+              "network": "host"
+            },
+            "args": [
+              "NODE_ENV=production",
+              "NEXT_TELEMETRY_DISABLED=1",
+              "BUILDPLATFORM=linux/amd64",
+              "TARGETPLATFORM=linux/amd64"
+            ],
+            "context": "../frontend",
+            "dockerfile": "../docker/Dockerfile.frontend.optimized",
+            "target": "production"
+          },
+          "ports": [
+            "3000:3000"
+          ],
+          "volumes": [
+            "frontend-cache:/app/.next/cache:ro"
+          ],
+          "environment": true,
+          "depends_on": {
+            "backend": {
+              "condition": "service_healthy"
+            }
+          },
+          "healthcheck": true,
+          "security_opt": true,
+          "deploy": true,
+          "restart": "unless-stopped"
+        },
+        "backend": {
+          "image": "prompt-card-backend:optimized",
+          "build": {
+            "platforms": [
+              "linux/amd64",
+              "linux/arm64"
+            ],
+            "cache_from": [
+              "type=gha,scope=build",
+              "type=local,src=/tmp/.buildx-cache"
+            ],
+            "cache_to": [
+              "type=gha,mode=max,scope=build",
+              "type=local,dest=/tmp/.buildx-cache"
+            ],
+            "driver_opts": {
+              "network": "host"
+            },
+            "args": [
+              "NODE_ENV=production",
+              "BUILDPLATFORM=linux/amd64",
+              "TARGETPLATFORM=linux/amd64"
+            ],
+            "context": "../backend",
+            "dockerfile": "../docker/Dockerfile.backend.optimized",
+            "target": "production"
+          },
+          "ports": [
+            "3001:3001"
+          ],
+          "volumes": [
+            "./data:/app/data",
+            "backend-cache:/app/cache",
+            "backend-logs:/app/logs"
+          ],
+          "environment": true,
+          "depends_on": {
+            "ollama": {
+              "condition": "service_healthy"
+            },
+            "redis": {
+              "condition": "service_healthy"
+            }
+          },
+          "healthcheck": true,
+          "security_opt": true,
+          "deploy": true,
+          "restart": "unless-stopped"
+        },
+        "ollama": {
+          "image": "ollama/ollama:latest",
+          "build": null,
+          "ports": [
+            "11434:11434"
+          ],
+          "volumes": [
+            "ollama-data:/root/.ollama",
+            "ollama-cache:/tmp/ollama-cache"
+          ],
+          "environment": true,
+          "depends_on": [],
+          "healthcheck": true,
+          "security_opt": true,
+          "deploy": true,
+          "restart": "unless-stopped"
+        },
+        "redis": {
+          "image": "redis:7-alpine",
+          "build": null,
+          "ports": [
+            "6379:6379"
+          ],
+          "volumes": [
+            "redis-data:/data",
+            "./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro"
+          ],
+          "environment": true,
+          "depends_on": [],
+          "healthcheck": true,
+          "security_opt": true,
+          "deploy": true,
+          "restart": "unless-stopped"
+        },
+        "model-loader": {
+          "image": "ollama/ollama:latest",
+          "build": null,
+          "ports": [],
+          "volumes": [
+            "ollama-data:/root/.ollama"
+          ],
+          "environment": true,
+          "depends_on": {
+            "ollama": {
+              "condition": "service_healthy"
+            }
+          },
+          "healthcheck": false,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "no"
+        },
+        "prometheus": {
+          "image": "prom/prometheus:latest",
+          "build": null,
+          "ports": [
+            "9090:9090"
+          ],
+          "volumes": [
+            "./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro",
+            "prometheus-data:/prometheus"
+          ],
+          "environment": false,
+          "depends_on": [],
+          "healthcheck": true,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        },
+        "nginx": {
+          "image": "nginx:alpine",
+          "build": null,
+          "ports": [
+            "80:80",
+            "443:443"
+          ],
+          "volumes": [
+            "./nginx/nginx.conf:/etc/nginx/nginx.conf:ro",
+            "./nginx/certs:/etc/nginx/certs:ro",
+            "nginx-cache:/var/cache/nginx"
+          ],
+          "environment": false,
+          "depends_on": [
+            "frontend",
+            "backend"
+          ],
+          "healthcheck": true,
+          "security_opt": false,
+          "deploy": false,
+          "restart": "unless-stopped"
+        }
+      },
+      "volumes": [
+        "ollama-data",
+        "redis-data",
+        "prometheus-data",
+        "frontend-cache",
+        "backend-cache",
+        "backend-logs",
+        "ollama-cache",
+        "nginx-cache"
+      ],
+      "networks": [
+        "app-network"
+      ],
+      "has_healthchecks": true,
+      "has_security_opts": true,
+      "has_resource_limits": true
+    }
+  },
+  "dockerfiles": {
+    ".devcontainer/Dockerfile": {
+      "stages": 1,
+      "base_images": [
+        "mcr.microsoft.com/devcontainers/base:ubuntu"
+      ],
+      "has_user": true,
+      "has_healthcheck": false,
+      "has_expose": false,
+      "has_entrypoint": false,
+      "security_features": [
+        "non-root-user"
+      ],
+      "optimization_features": []
+    },
+    "backend/Dockerfile": {
+      "stages": 3,
+      "base_images": [
+        "node:20-alpine",
+        "node:20-alpine",
+        "node:20-alpine"
+      ],
+      "has_user": true,
+      "has_healthcheck": true,
+      "has_expose": true,
+      "has_entrypoint": true,
+      "security_features": [
+        "non-root-user",
+        "health-check"
+      ],
+      "optimization_features": []
+    },
+    "backend/Dockerfile.dev": {
+      "stages": 1,
+      "base_images": [
+        "node:20-alpine"
+      ],
+      "has_user": true,
+      "has_healthcheck": true,
+      "has_expose": true,
+      "has_entrypoint": true,
+      "security_features": [
+        "non-root-user",
+        "health-check"
+      ],
+      "optimization_features": []
+    },
+    "backend/Dockerfile.prod": {
+      "stages": 4,
+      "base_images": [
+        "node:20-alpine",
+        "base",
+        "base",
+        "base"
+      ],
+      "has_user": true,
+      "has_healthcheck": true,
+      "has_expose": true,
+      "has_entrypoint": true,
+      "security_features": [
+        "non-root-user",
+        "health-check"
+      ],
+      "optimization_features": []
+    },
+    "docker/Dockerfile.backend.optimized": {
+      "stages": 7,
+      "base_images": [
+        "--platform=$BUILDPLATFORM",
+        "base",
+        "base",
+        "build-deps",
+        "source",
+        "base",
+        "runtime-prep"
+      ],
+      "has_user": true,
+      "has_healthcheck": true,
+      "has_expose": true,
+      "has_entrypoint": true,
+      "security_features": [
+        "non-root-user",
+        "health-check"
+      ],
+      "optimization_features": [
+        "build-cache",
+        "build-cache",
+        "build-cache",
+        "multi-platform",
+        "build-cache",
+        "build-cache",
+        "multi-platform",
+        "build-cache",
+        "build-cache",
+        "build-cache",
+        "build-cache",
+        "build-cache"
+      ]
+    },
+    "docker/Dockerfile.frontend.optimized": {
+      "stages": 7,
+      "base_images": [
+        "--platform=$BUILDPLATFORM",
+        "base",
+        "base",
+        "build-deps",
+        "source",
+        "base",
+        "runtime-prep"
+      ],
+      "has_user": true,
+      "has_healthcheck": true,
+      "has_expose": true,
+      "has_entrypoint": true,
+      "security_features": [
+        "non-root-user",
+        "health-check"
+      ],
+      "optimization_features": [
+        "build-cache",
+        "build-cache",
+        "build-cache",
+        "multi-platform",
+        "build-cache",
+        "build-cache",
+        "multi-platform",
+        "build-cache",
+        "build-cache",
+        "build-cache",
+        "build-cache"
+      ]
+    },
+    "frontend/Dockerfile": {
+      "stages": 3,
+      "base_images": [
+        "node:20-alpine",
+        "node:20-alpine",
+        "node:20-alpine"
+      ],
+      "has_user": true,
+      "has_healthcheck": true,
+      "has_expose": true,
+      "has_entrypoint": true,
+      "security_features": [
+        "non-root-user",
+        "health-check"
+      ],
+      "optimization_features": []
+    },
+    "frontend/Dockerfile.dev": {
+      "stages": 1,
+      "base_images": [
+        "node:20-alpine"
+      ],
+      "has_user": true,
+      "has_healthcheck": true,
+      "has_expose": true,
+      "has_entrypoint": true,
+      "security_features": [
+        "non-root-user",
+        "health-check"
+      ],
+      "optimization_features": []
+    },
+    "frontend/Dockerfile.prod": {
+      "stages": 4,
+      "base_images": [
+        "node:20-alpine",
+        "base",
+        "base",
+        "nginx:alpine"
+      ],
+      "has_user": true,
+      "has_healthcheck": true,
+      "has_expose": true,
+      "has_entrypoint": true,
+      "security_features": [
+        "non-root-user",
+        "health-check"
+      ],
+      "optimization_features": []
+    }
+  },
+  "monitoring": {
+    "prometheus": {
+      "exists": true,
+      "scrape_configs": 0
+    },
+    "grafana": {
+      "exists": true,
+      "dashboards": 1
+    },
+    "alertmanager": {
+      "exists": false,
+      "routes": 0
+    },
+    "jaeger": {
+      "configured": false
+    }
+  },
+  "security": {
+    "environment_files": {
+      ".env.production": {
+        "exists": true,
+        "default_secrets": [
+          "CHANGE_ME"
+        ],
+        "has_jwt_secret": true,
+        "has_db_password": true,
+        "has_redis_password": true
+      },
+      ".env.dev": {
+        "exists": true,
+        "default_secrets": [],
+        "has_jwt_secret": true,
+        "has_db_password": false,
+        "has_redis_password": false
+      },
+      ".env.example": {
+        "exists": false
+      }
+    },
+    "secrets_detected": [
+      "CHANGE_ME"
+    ],
+    "security_practices": []
+  },
+  "issues": [],
+  "recommendations": [
+    "Consider using multi-stage builds for all Dockerfiles to reduce image size",
+    "CRITICAL: Replace default passwords in environment files before production"
+  ],
+  "environment": {
+    "config_files": {
+      "nginx/nginx.conf": {
+        "exists": true
+      },
+      "redis.conf": {
+        "exists": true
+      },
+      "redis.prod.conf": {
+        "exists": true
+      }
+    }
+  }
+}

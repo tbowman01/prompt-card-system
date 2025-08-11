@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Request, Response, Application } from 'express';
 import { db } from '../database/connection';
 import { llmService } from '../services/llmService';
 import { v4 as uuidv4 } from 'uuid';
@@ -32,7 +32,7 @@ export interface BatchExecutionResult {
  * Execute a single test case
  * POST /api/test-cases/:id/execute
  */
-router.post('/:id/execute', async (req, res) => {
+router.post('/:id/execute', async (req: Request, res: Response): Promise<Response> => {
   const startTime = Date.now();
   let executionId = '';
 
@@ -155,7 +155,7 @@ router.post('/:id/execute', async (req, res) => {
  * Execute all test cases for a prompt card
  * POST /api/prompt-cards/:id/execute-all
  */
-router.post('/prompt-cards/:id/execute-all', async (req, res) => {
+router.post('/prompt-cards/:id/execute-all', async (req: Request, res: Response): Promise<Response> => {
   const startTime = Date.now();
   const executionId = uuidv4();
 
@@ -337,7 +337,7 @@ router.post('/prompt-cards/:id/execute-all', async (req, res) => {
  * Get test execution history for a test case
  * GET /api/test-cases/:id/executions
  */
-router.get('/:id/executions', (req, res) => {
+router.get('/:id/executions', (req: Request, res: Response): Response => {
   try {
     const { id } = req.params;
     const page = parseInt(req.query.page as string) || 1;
@@ -397,7 +397,7 @@ router.get('/:id/executions', (req, res) => {
  * Get specific test execution result
  * GET /api/test-executions/:executionId
  */
-router.get('/executions/:executionId', (req, res) => {
+router.get('/executions/:executionId', (req: Request, res: Response): Response => {
   try {
     const { executionId } = req.params;
 
@@ -440,7 +440,7 @@ router.get('/executions/:executionId', (req, res) => {
  * Execute tests in parallel with queue management
  * POST /api/test-cases/execute-parallel
  */
-router.post('/execute-parallel', async (req, res) => {
+router.post('/execute-parallel', async (req: Request, res: Response): Promise<Response> => {
   try {
     const { 
       prompt_card_id, 
@@ -520,7 +520,7 @@ router.post('/execute-parallel', async (req, res) => {
  * Get progress for a test execution
  * GET /api/test-cases/executions/:executionId/progress
  */
-router.get('/executions/:executionId/progress', async (req, res) => {
+router.get('/executions/:executionId/progress', async (req: Request, res: Response): Promise<Response> => {
   try {
     const { executionId } = req.params;
     const progressService = req.app.locals.progressService;
@@ -551,7 +551,7 @@ router.get('/executions/:executionId/progress', async (req, res) => {
  * Cancel a test execution
  * POST /api/test-cases/executions/:executionId/cancel
  */
-router.post('/executions/:executionId/cancel', async (req, res) => {
+router.post('/executions/:executionId/cancel', async (req: Request, res: Response): Promise<Response> => {
   try {
     const { executionId } = req.params;
     const { reason = 'User requested cancellation' } = req.body;
@@ -580,7 +580,7 @@ router.post('/executions/:executionId/cancel', async (req, res) => {
  * Get queue statistics
  * GET /api/test-cases/queue/stats
  */
-router.get('/queue/stats', async (req, res) => {
+router.get('/queue/stats', async (req: Request, res: Response): Promise<Response> => {
   try {
     const queueManager = req.app.locals.queueManager;
     const stats = await queueManager.getQueueStats();
@@ -602,7 +602,7 @@ router.get('/queue/stats', async (req, res) => {
  * Get active test executions
  * GET /api/test-cases/executions/active
  */
-router.get('/executions/active', async (req, res) => {
+router.get('/executions/active', async (req: Request, res: Response): Promise<Response> => {
   try {
     const progressService = req.app.locals.progressService;
     const activeExecutions = await progressService.getActiveExecutions();

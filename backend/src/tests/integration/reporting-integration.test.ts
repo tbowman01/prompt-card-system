@@ -40,9 +40,9 @@ describe('Advanced Reporting System Integration Tests', () => {
         .expect(200);
 
       assert(response.body.success === true);
-      expect(response.body.data).to.have.property('reportId');
-      expect(response.body.data).to.have.property('status');
-      expect(response.body.data.status).to.equal('completed');
+      expect(response.body.data).toHaveProperty('reportId');
+      expect(response.body.data).toHaveProperty('status');
+      expect(response.body.data.status).toBe('completed');
     });
 
     it('should generate performance analysis report', async () => {
@@ -58,9 +58,9 @@ describe('Advanced Reporting System Integration Tests', () => {
         .expect(200);
 
       assert(response.body.success === true);
-      expect(response.body.data).to.have.property('reportId');
-      expect(response.body.data).to.have.property('performanceMetrics');
-      expect(response.body.data).to.have.property('recommendations');
+      expect(response.body.data).toHaveProperty('reportId');
+      expect(response.body.data).toHaveProperty('performanceMetrics');
+      expect(response.body.data).toHaveProperty('recommendations');
     });
 
     it('should generate cost optimization report', async () => {
@@ -76,9 +76,9 @@ describe('Advanced Reporting System Integration Tests', () => {
         .expect(200);
 
       assert(response.body.success === true);
-      expect(response.body.data).to.have.property('reportId');
-      expect(response.body.data).to.have.property('costAnalysis');
-      expect(response.body.data).to.have.property('optimizationSuggestions');
+      expect(response.body.data).toHaveProperty('reportId');
+      expect(response.body.data).toHaveProperty('costAnalysis');
+      expect(response.body.data).toHaveProperty('optimizationSuggestions');
     });
   });
 
@@ -111,9 +111,9 @@ describe('Advanced Reporting System Integration Tests', () => {
         .expect(200);
 
       assert(exportResponse.body.success === true);
-      expect(exportResponse.body.data).to.have.property('downloadUrl');
-      expect(exportResponse.body.data).to.have.property('fileName');
-      expect(exportResponse.body.data.fileName).to.include('.pdf');
+      expect(exportResponse.body.data).toHaveProperty('downloadUrl');
+      expect(exportResponse.body.data).toHaveProperty('fileName');
+      expect(exportResponse.body.data.fileName).toContain('.pdf');
     });
 
     it('should export report to Excel format', async () => {
@@ -140,9 +140,9 @@ describe('Advanced Reporting System Integration Tests', () => {
         .expect(200);
 
       assert(exportResponse.body.success === true);
-      expect(exportResponse.body.data).to.have.property('downloadUrl');
-      expect(exportResponse.body.data).to.have.property('fileName');
-      expect(exportResponse.body.data.fileName).to.include('.xlsx');
+      expect(exportResponse.body.data).toHaveProperty('downloadUrl');
+      expect(exportResponse.body.data).toHaveProperty('fileName');
+      expect(exportResponse.body.data.fileName).toContain('.xlsx');
     });
 
     it('should export report to CSV format', async () => {
@@ -169,9 +169,9 @@ describe('Advanced Reporting System Integration Tests', () => {
         .expect(200);
 
       assert(exportResponse.body.success === true);
-      expect(exportResponse.body.data).to.have.property('downloadUrl');
-      expect(exportResponse.body.data).to.have.property('fileName');
-      expect(exportResponse.body.data.fileName).to.include('.csv');
+      expect(exportResponse.body.data).toHaveProperty('downloadUrl');
+      expect(exportResponse.body.data).toHaveProperty('fileName');
+      expect(exportResponse.body.data.fileName).toContain('.csv');
     });
   });
 
@@ -196,8 +196,8 @@ describe('Advanced Reporting System Integration Tests', () => {
         .expect(200);
 
       assert(response.body.success === true);
-      expect(response.body.data).to.have.property('scheduleId');
-      expect(response.body.data).to.have.property('nextExecution');
+      expect(response.body.data).toHaveProperty('scheduleId');
+      expect(response.body.data).toHaveProperty('nextExecution');
     });
 
     it('should handle scheduled report execution', async () => {
@@ -224,8 +224,8 @@ describe('Advanced Reporting System Integration Tests', () => {
         .expect(200);
 
       assert(executeResponse.body.success === true);
-      expect(executeResponse.body.data).to.have.property('reportId');
-      expect(executeResponse.body.data).to.have.property('executionTime');
+      expect(executeResponse.body.data).toHaveProperty('reportId');
+      expect(executeResponse.body.data).toHaveProperty('executionTime');
     });
   });
 
@@ -277,7 +277,7 @@ describe('Advanced Reporting System Integration Tests', () => {
         .expect(200);
 
       assert(reportResponse.body.success === true);
-      expect(reportResponse.body.data).to.have.property('reportId');
+      expect(reportResponse.body.data).toHaveProperty('reportId');
     });
   });
 
@@ -294,7 +294,7 @@ describe('Advanced Reporting System Integration Tests', () => {
         })
         .expect(400);
 
-      expect(response.body.error).to.include('Card ID is required');
+      expect(response.body.error).toContain('Card ID is required');
     });
 
     it('should handle invalid report type', async () => {
@@ -306,7 +306,7 @@ describe('Advanced Reporting System Integration Tests', () => {
         })
         .expect(400);
 
-      expect(response.body.error).to.include('Invalid report type');
+      expect(response.body.error).toContain('Invalid report type');
     });
 
     it('should handle export failures gracefully', async () => {
@@ -329,7 +329,7 @@ describe('Advanced Reporting System Integration Tests', () => {
         })
         .expect(400);
 
-      expect(exportResponse.body.error).to.include('Invalid export format');
+      expect(exportResponse.body.error).toContain('Invalid export format');
     });
   });
 
@@ -351,14 +351,14 @@ describe('Advanced Reporting System Integration Tests', () => {
         .expect(200);
 
       assert(response.body.success === true);
-      expect(response.body.data).to.have.property('reportId');
+      expect(response.body.data).toHaveProperty('reportId');
       
       // Verify the report was generated successfully
       const statusResponse = await request(app)
         .get(`/api/reports/${response.body.data.reportId}/status`)
         .expect(200);
 
-      expect(statusResponse.body.data.status).to.be.oneOf(['completed', 'processing']);
+      expect(statusResponse.body.data.status).toMatch(/^(completed|processing)$/);
     });
   });
 });

@@ -1,4 +1,4 @@
-import { MockOllamaService, createMockOllamaService } from '../mocks/MockOllamaService';
+import { MockOllamaService, createMockOllamaService, ChatMessage } from '../mocks/MockOllamaService';
 
 describe('MockOllamaService', () => {
   let mockService: MockOllamaService;
@@ -107,7 +107,7 @@ describe('MockOllamaService', () => {
 
   describe('Chat Interface', () => {
     it('should handle chat messages', async () => {
-      const messages = [
+      const messages: ChatMessage[] = [
         { role: 'user', content: 'Hello' }
       ];
       
@@ -122,7 +122,7 @@ describe('MockOllamaService', () => {
     });
 
     it('should stream responses progressively', async () => {
-      const messages = [
+      const messages: ChatMessage[] = [
         { role: 'user', content: 'Tell me a story about artificial intelligence' }
       ];
       

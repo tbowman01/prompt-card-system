@@ -10,11 +10,15 @@ RUN apk update && apk upgrade && \
     python3 \
     make \
     g++ \
-    && rm -rf /var/cache/apk/*
+    ca-certificates \
+    tzdata \
+    && rm -rf /var/cache/apk/* \
+    && addgroup -g 1001 -S nodejs \
+    && adduser -S nodejs -u 1001 -G nodejs
 
-# Create non-root user
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
+# Set timezone
+ENV TZ=UTC
+RUN cp /usr/share/zoneinfo/UTC /etc/localtime
 
 WORKDIR /app
 
@@ -24,16 +28,20 @@ COPY tsconfig.json ./
 
 # Dependencies stage
 FROM base AS deps
-RUN npm ci --only=production && npm cache clean --force
+COPY package*.json ./
+RUN npm ci --only=production --no-audit --no-fund && \
+    npm cache clean --force && \
+    rm -rf ~/.npm
 
 # Build stage
 FROM base AS build
 COPY package*.json ./
 COPY tsconfig.json ./
-RUN npm ci
+RUN npm ci --no-audit --no-fund
 COPY . .
 RUN npm run build && \
-    npm prune --production
+    npm prune --production --no-audit && \
+    rm -rf src/ tests/ node_modules/.cache/
 
 # Production stage
 FROM base AS production
@@ -43,9 +51,10 @@ COPY --from=build --chown=nodejs:nodejs /app/dist ./dist
 COPY --from=build --chown=nodejs:nodejs /app/node_modules ./node_modules
 COPY --from=build --chown=nodejs:nodejs /app/package.json ./package.json
 
-# Create required directories
-RUN mkdir -p data logs && \
-    chown -R nodejs:nodejs data logs
+# Create required directories with proper permissions
+RUN mkdir -p data logs uploads temp && \
+    chown -R nodejs:nodejs data logs uploads temp && \
+    chmod 755 data logs uploads temp
 
 # Security: Switch to non-root user
 USER nodejs
@@ -53,12 +62,12 @@ USER nodejs
 # Expose port
 EXPOSE 3001
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-  CMD curl -f http://localhost:3001/api/health || exit 1
+# Health check with enhanced monitoring
+HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
+  CMD curl -f http://localhost:3001/api/health/comprehensive || exit 1
 
 # Use dumb-init for proper signal handling
 ENTRYPOINT ["dumb-init", "--"]
 
-# Start production server
-CMD ["node", "dist/server.js"]
+# Start production server with optimizations
+CMD ["node", "--max-old-space-size=2048", "--optimize-for-size", "dist/server.js"]

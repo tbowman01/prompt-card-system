@@ -1,0 +1,299 @@
+f6af8d9b8e6a257ad94f3ad027c2b659
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+Object.defineProperty(exports, "default", {
+    enumerable: true,
+    get: function() {
+        return _default;
+    }
+});
+const _express = /*#__PURE__*/ _interop_require_default(require("express"));
+const _cors = /*#__PURE__*/ _interop_require_default(require("cors"));
+const _morgan = /*#__PURE__*/ _interop_require_default(require("morgan"));
+const _dotenv = /*#__PURE__*/ _interop_require_default(require("dotenv"));
+const _http = require("http");
+const _socketio = require("socket.io");
+const _rateLimiting = require("./middleware/rateLimiting");
+const _security = require("./middleware/security");
+const _validation = require("./middleware/validation");
+const _auth = require("./middleware/auth");
+const _connection = require("./database/connection");
+const _llmService = require("./services/llmService");
+const _health = require("./routes/health");
+const _healthenhanced = require("./routes/health-enhanced");
+const _healthorchestrator = require("./routes/health-orchestrator");
+const _alerts = require("./routes/alerts");
+const _promptCards = require("./routes/promptCards");
+const _testCases = require("./routes/testCases");
+const _testExecution = require("./routes/testExecution");
+const _parallelTestExecution = require("./routes/parallelTestExecution");
+const _yaml = require("./routes/yaml");
+const _assertions = require("./routes/assertions");
+const _analytics = require("./routes/analytics");
+const _predictiveanalytics = require("./routes/predictive-analytics");
+const _optimization = /*#__PURE__*/ _interop_require_default(require("./routes/optimization"));
+const _reports = require("./routes/reports");
+const _performance = /*#__PURE__*/ _interop_require_default(require("./routes/performance"));
+const _training = /*#__PURE__*/ _interop_require_default(require("./routes/training"));
+const _auth1 = require("./routes/auth");
+const _loadTesting = /*#__PURE__*/ _interop_require_default(require("./routes/loadTesting"));
+const _security1 = require("./routes/security");
+const _optimization1 = require("./services/optimization");
+const _PerformanceMonitor = require("./services/performance/PerformanceMonitor");
+const _LoadTestScheduler = require("./services/performance/LoadTestScheduler");
+const _PerformanceRegressionDetector = require("./services/performance/PerformanceRegressionDetector");
+const _ProgressService = require("./services/websocket/ProgressService");
+const _errorHandler = require("./middleware/errorHandler");
+const _HealthOrchestrator = require("./services/health/HealthOrchestrator");
+const _AlertingSystem = require("./services/health/AlertingSystem");
+const _ModelTrainingEngine = require("./services/training/ModelTrainingEngine");
+const _ModelRegistry = require("./services/training/ModelRegistry");
+const _security2 = require("./services/security");
+const _MLAnalyticsCoordinator = require("./services/analytics/MLAnalyticsCoordinator");
+function _interop_require_default(obj) {
+    return obj && obj.__esModule ? obj : {
+        default: obj
+    };
+}
+_dotenv.default.config();
+const app = (0, _express.default)();
+const server = (0, _http.createServer)(app);
+const PORT = process.env.PORT || 3001;
+// Trust proxy for correct IP detection behind reverse proxy
+app.set('trust proxy', 1);
+// Security middleware (order matters!)
+app.use(_security.requestId); // Add request ID for tracing
+app.use(_security.securityLogger); // Log security-relevant information
+app.use(_security.enhancedHelmetConfig); // Enhanced security headers
+app.use(_security.securityHeaders); // Additional security headers
+app.use(_rateLimiting.speedLimiter); // Slow down requests after threshold
+app.use(_rateLimiting.generalRateLimit); // General rate limiting
+// CORS configuration with security considerations
+app.use((0, _cors.default)({
+    origin: function(origin, callback) {
+        const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:3000').split(',');
+        // Allow requests with no origin (mobile apps, curl, etc.)
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.indexOf(origin) !== -1) {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
+    credentials: true,
+    methods: [
+        'GET',
+        'POST',
+        'PUT',
+        'DELETE',
+        'OPTIONS'
+    ],
+    allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+        'X-Requested-With',
+        'X-CSRF-Token',
+        'X-Session-ID',
+        'X-Request-ID'
+    ],
+    exposedHeaders: [
+        'X-Request-ID',
+        'X-RateLimit-Limit',
+        'X-RateLimit-Remaining'
+    ]
+}));
+// Setup log aggregation middleware
+app.use(_security2.logAggregator.getExpressMiddleware());
+// Morgan logging with custom format
+app.use((0, _morgan.default)('combined', {
+    skip: (req, res)=>res.statusCode < 400 // Only log errors in production
+}));
+// Body parsing with security limits
+app.use((0, _validation.limitRequestSize)(10 * 1024 * 1024)); // 10MB limit
+app.use(_express.default.json({
+    limit: '10mb',
+    verify: (req, res, buf, encoding)=>{
+        // Store raw body for webhook verification if needed
+        req.rawBody = buf;
+    }
+}));
+app.use(_express.default.urlencoded({
+    extended: true,
+    limit: '10mb',
+    parameterLimit: 100 // Limit number of parameters
+}));
+// Input sanitization (applied globally)
+app.use(_validation.sanitizeRequestBody);
+// Optional authentication for all routes (doesn't fail if no token)
+app.use(_auth.optionalAuth);
+// Initialize database
+const db = (0, _connection.initializeDatabase)();
+// Initialize LLM service with enhanced assertion engine
+_llmService.llmService.initialize().catch((error)=>{
+    console.error('Failed to initialize LLM service:', error);
+// Continue without enhanced assertions if initialization fails
+});
+// Initialize AI-powered optimization services
+(0, _optimization1.initializeOptimizationServices)().catch((error)=>{
+    console.error('Failed to initialize optimization services:', error);
+// Continue without optimization services if initialization fails
+});
+// Setup WebSocket server
+const io = new _socketio.Server(server, {
+    cors: {
+        origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+        methods: [
+            'GET',
+            'POST'
+        ],
+        credentials: true
+    }
+});
+// Initialize performance monitoring
+const progressService = new _ProgressService.ProgressService(io);
+_PerformanceMonitor.performanceMonitor.startMonitoring(5000); // Monitor every 5 seconds
+// Initialize health orchestrator
+_HealthOrchestrator.healthOrchestrator.start().catch((error)=>{
+    console.error('Failed to start health orchestrator:', error);
+});
+// Initialize alerting system
+_AlertingSystem.alertingSystem.initialize().catch((error)=>{
+    console.error('Failed to initialize alerting system:', error);
+});
+// Initialize training services
+_ModelTrainingEngine.modelTrainingEngine.initialize().catch((error)=>{
+    console.error('Failed to initialize model training engine:', error);
+});
+_ModelRegistry.modelRegistry.initialize().catch((error)=>{
+    console.error('Failed to initialize model registry:', error);
+});
+// Initialize load testing services
+_LoadTestScheduler.loadTestScheduler.initialize().catch((error)=>{
+    console.error('Failed to initialize load test scheduler:', error);
+});
+_PerformanceRegressionDetector.performanceRegressionDetector.startMonitoring(15).catch?.((error)=>{
+    console.error('Failed to start regression monitoring:', error);
+}) || _PerformanceRegressionDetector.performanceRegressionDetector.startMonitoring(15);
+// Initialize security monitoring systems
+console.log('Initializing security monitoring systems...');
+_security2.logAggregator.info('server', 'Security monitoring systems starting up', {}, [
+    'security',
+    'startup'
+]);
+// Perform initial security scan
+_security2.securityMonitor.performComprehensiveScan().then(()=>{
+    _security2.logAggregator.info('server', 'Initial security scan completed', {}, [
+        'security',
+        'scan'
+    ]);
+}).catch((error)=>{
+    _security2.logAggregator.error('server', 'Initial security scan failed', {
+        error
+    }, [
+        'security',
+        'error'
+    ]);
+});
+// Generate initial compliance report
+_security2.complianceChecker.generateComplianceReport().then(()=>{
+    _security2.logAggregator.info('server', 'Initial compliance report generated', {}, [
+        'compliance',
+        'report'
+    ]);
+}).catch((error)=>{
+    _security2.logAggregator.error('server', 'Initial compliance report failed', {
+        error
+    }, [
+        'compliance',
+        'error'
+    ]);
+});
+// Initialize ML Analytics Coordinator
+console.log('Initializing ML Analytics Coordinator...');
+_MLAnalyticsCoordinator.mlAnalyticsCoordinator.initialize().then(()=>{
+    console.log('ML Analytics Coordinator initialized successfully');
+    return _MLAnalyticsCoordinator.mlAnalyticsCoordinator.start();
+}).then(()=>{
+    console.log('ML Analytics Coordinator started successfully');
+}).catch((error)=>{
+    console.error('Failed to initialize ML Analytics Coordinator:', error);
+});
+// Security endpoints (no rate limiting for CSRF token)
+app.get('/api/security/csrf-token', _security.getCSRFToken);
+// Authentication routes (with auth-specific rate limiting)
+app.use('/api/auth', _auth1.authRoutes);
+// API routes with appropriate rate limiting
+app.use('/api/health', _health.healthRoutes);
+app.use('/api/health/v2', _healthenhanced.enhancedHealthRoutes);
+app.use('/api/health/orchestrator', _healthorchestrator.healthOrchestratorRoutes);
+app.use('/api/alerts', _rateLimiting.apiRateLimit, _alerts.alertRoutes);
+app.use('/api/prompt-cards', _rateLimiting.apiRateLimit, _promptCards.promptCardRoutes);
+app.use('/api/test-cases', _rateLimiting.apiRateLimit, _testCases.testCaseRoutes);
+app.use('/api/test-cases', _rateLimiting.testExecutionRateLimit, _testExecution.testExecutionRoutes); // Test execution routes
+app.use('/api/parallel-test-execution', _rateLimiting.testExecutionRateLimit, _parallelTestExecution.parallelTestExecutionRoutes); // Parallel test execution routes
+app.use('/api/yaml', _rateLimiting.apiRateLimit, _yaml.yamlRoutes);
+app.use('/api/assertions', _rateLimiting.apiRateLimit, _assertions.assertionRoutes);
+app.use('/api/analytics', _rateLimiting.apiRateLimit, _analytics.analyticsRoutes);
+app.use('/api/predictive-analytics', _predictiveanalytics.predictiveAnalyticsRoutes);
+app.use('/api/optimization', _rateLimiting.heavyOperationRateLimit, _optimization.default); // Heavy operations
+app.use('/api/reports', _rateLimiting.heavyOperationRateLimit, _reports.reportRoutes); // Heavy operations
+app.use('/api/performance', _rateLimiting.apiRateLimit, _performance.default);
+app.use('/api/training', _rateLimiting.heavyOperationRateLimit, _training.default); // Heavy operations
+app.use('/api/load-testing', _loadTesting.default);
+app.use('/api/security', _security1.securityRoutes);
+// Error handling middleware
+app.use(_errorHandler.errorHandler);
+// Store WebSocket instance for health checks and log aggregator
+app.set('io', io);
+app.set('logAggregator', _security2.logAggregator);
+// Start server
+server.listen(PORT, ()=>{
+    console.log(`🚀 Backend server running on port ${PORT}`);
+    console.log(`🌍 Environment: ${process.env.NODE_ENV}`);
+    console.log(`💾 Database path: ${process.env.DATABASE_PATH}`);
+    console.log(`🤖 Ollama URL: ${process.env.OLLAMA_BASE_URL}`);
+    console.log(`🔌 WebSocket server initialized`);
+    console.log(`⚡ Parallel test execution system ready`);
+    console.log(`🧠 AI-powered prompt optimization services active`);
+    console.log(`📊 Performance monitoring active`);
+    console.log(`📈 Performance API available at /api/performance`);
+    console.log(`🏥 Health orchestrator system active`);
+    console.log(`📋 Health dashboard available at /api/health/orchestrator/summary`);
+    console.log(`🚨 Alerting system active`);
+    console.log(`📢 Alerts API available at /api/alerts`);
+    console.log(`🧪 Load testing framework active`);
+    console.log(`⚡ Load testing API available at /api/load-testing`);
+    console.log(`📉 Performance regression detection active`);
+    console.log(`⏰ Automated load test scheduling enabled`);
+    console.log(`🛡️ Security monitoring system active`);
+    console.log(`🔒 Security API available at /api/security`);
+    console.log(`🔍 Vulnerability scanning enabled`);
+    console.log(`✅ Compliance checking active`);
+    console.log(`📝 Log aggregation and analysis enabled`);
+    console.log(`🔮 Predictive Analytics API available at /api/predictive-analytics`);
+    console.log(`🤖 ML-powered anomaly detection active`);
+    console.log(`📊 Capacity planning and forecasting enabled`);
+    console.log(`🎯 Auto-training ML models enabled`);
+    // Security status
+    console.log(`\n🔒 Security Features Active:`);
+    console.log(`   ✅ Rate limiting enabled`);
+    console.log(`   ✅ Enhanced security headers`);
+    console.log(`   ✅ Input validation and sanitization`);
+    console.log(`   ✅ CSRF protection`);
+    console.log(`   ✅ JWT authentication`);
+    console.log(`   ✅ Request logging and monitoring`);
+    console.log(`   ✅ Content Security Policy`);
+    console.log(`   🔑 Auth API available at /api/auth`);
+    console.log(`   🛡️ CSRF token endpoint at /api/security/csrf-token`);
+    if (process.env.NODE_ENV === 'production') {
+        console.log(`\n🛡️ Production Security Reminders:`);
+        console.log(`   - Update JWT_SECRET and JWT_REFRESH_SECRET`);
+        console.log(`   - Configure Redis for distributed rate limiting`);
+        console.log(`   - Set up proper CORS origins`);
+        console.log(`   - Enable HTTPS`);
+        console.log(`   - Configure proper CSP directives`);
+    }
+});
+const _default = app;

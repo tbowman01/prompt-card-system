@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { MetricsOverview } from '@/components/Analytics/MetricsOverview';
 import { PerformanceCharts } from '@/components/Analytics/PerformanceCharts';
 import { CostTracker } from '@/components/Analytics/CostTracker';

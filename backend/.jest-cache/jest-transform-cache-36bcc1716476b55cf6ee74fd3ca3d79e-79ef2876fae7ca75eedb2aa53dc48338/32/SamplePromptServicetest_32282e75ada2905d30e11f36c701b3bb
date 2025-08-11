@@ -1,0 +1,229 @@
+660259578f4f845c7cf59f10ce64e6e7
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+const _globals = require("@jest/globals");
+const _SamplePromptService = require("../../services/SamplePromptService");
+const _connection = require("../../database/connection");
+// Mock the database
+_globals.jest.mock('../../database/connection', ()=>({
+        db: {
+            prepare: _globals.jest.fn(),
+            exec: _globals.jest.fn()
+        }
+    }));
+(0, _globals.describe)('SamplePromptService', ()=>{
+    let service;
+    let mockDb;
+    (0, _globals.beforeEach)(()=>{
+        service = _SamplePromptService.SamplePromptService.getInstance();
+        mockDb = _connection.db;
+        _globals.jest.clearAllMocks();
+    });
+    (0, _globals.afterEach)(()=>{
+        _globals.jest.clearAllMocks();
+    });
+    (0, _globals.describe)('getSamplePrompts', ()=>{
+        (0, _globals.it)('should return all sample prompts', ()=>{
+            const samples = service.getSamplePrompts();
+            (0, _globals.expect)(samples).toHaveLength(6);
+            (0, _globals.expect)(samples[0]).toHaveProperty('title', 'Creative Story Generator');
+            (0, _globals.expect)(samples[1]).toHaveProperty('title', 'Technical Documentation Assistant');
+            (0, _globals.expect)(samples[2]).toHaveProperty('title', 'Data Analysis Query Builder');
+            (0, _globals.expect)(samples[3]).toHaveProperty('title', 'Problem-Solving Framework');
+            (0, _globals.expect)(samples[4]).toHaveProperty('title', 'Code Generation Assistant');
+            (0, _globals.expect)(samples[5]).toHaveProperty('title', 'Business Strategy Consultant');
+        });
+        (0, _globals.it)('should return prompts with all required fields', ()=>{
+            const samples = service.getSamplePrompts();
+            samples.forEach((sample)=>{
+                (0, _globals.expect)(sample).toHaveProperty('title');
+                (0, _globals.expect)(sample).toHaveProperty('description');
+                (0, _globals.expect)(sample).toHaveProperty('prompt_template');
+                (0, _globals.expect)(sample).toHaveProperty('variables');
+                (0, _globals.expect)(sample).toHaveProperty('category');
+                (0, _globals.expect)(sample).toHaveProperty('tags');
+                (0, _globals.expect)(typeof sample.title).toBe('string');
+                (0, _globals.expect)(typeof sample.description).toBe('string');
+                (0, _globals.expect)(typeof sample.prompt_template).toBe('string');
+                (0, _globals.expect)(Array.isArray(sample.variables)).toBe(true);
+                (0, _globals.expect)(typeof sample.category).toBe('string');
+                (0, _globals.expect)(Array.isArray(sample.tags)).toBe(true);
+            });
+        });
+    });
+    (0, _globals.describe)('getSamplePromptsByCategory', ()=>{
+        (0, _globals.it)('should return prompts filtered by category', ()=>{
+            const creativePrompts = service.getSamplePromptsByCategory('creative');
+            const technicalPrompts = service.getSamplePromptsByCategory('technical');
+            (0, _globals.expect)(creativePrompts).toHaveLength(1);
+            (0, _globals.expect)(creativePrompts[0].category).toBe('creative');
+            (0, _globals.expect)(technicalPrompts).toHaveLength(1);
+            (0, _globals.expect)(technicalPrompts[0].category).toBe('technical');
+        });
+        (0, _globals.it)('should return empty array for non-existent category', ()=>{
+            const nonExistentPrompts = service.getSamplePromptsByCategory('non-existent');
+            (0, _globals.expect)(nonExistentPrompts).toHaveLength(0);
+        });
+    });
+    (0, _globals.describe)('getCategories', ()=>{
+        (0, _globals.it)('should return all unique categories', ()=>{
+            const categories = service.getCategories();
+            (0, _globals.expect)(categories).toContain('creative');
+            (0, _globals.expect)(categories).toContain('technical');
+            (0, _globals.expect)(categories).toContain('analytics');
+            (0, _globals.expect)(categories).toContain('problem-solving');
+            (0, _globals.expect)(categories).toContain('development');
+            (0, _globals.expect)(categories).toContain('business');
+            // Should not contain duplicates
+            (0, _globals.expect)(new Set(categories).size).toBe(categories.length);
+        });
+    });
+    (0, _globals.describe)('validateSamplePrompt', ()=>{
+        (0, _globals.it)('should validate a correct sample prompt', ()=>{
+            const validSample = {
+                title: 'Test Prompt',
+                description: 'A test prompt for validation',
+                prompt_template: 'This is a test prompt with {{variable1}} and {{variable2}}',
+                variables: [
+                    'variable1',
+                    'variable2'
+                ],
+                category: 'test',
+                tags: [
+                    'test',
+                    'validation'
+                ]
+            };
+            const result = service.validateSamplePrompt(validSample);
+            (0, _globals.expect)(result.isValid).toBe(true);
+            (0, _globals.expect)(result.errors).toHaveLength(0);
+        });
+        (0, _globals.it)('should detect missing required fields', ()=>{
+            const invalidSample = {
+                title: '',
+                description: '',
+                prompt_template: '',
+                variables: [],
+                category: 'test',
+                tags: []
+            };
+            const result = service.validateSamplePrompt(invalidSample);
+            (0, _globals.expect)(result.isValid).toBe(false);
+            (0, _globals.expect)(result.errors).toContain('Title is required');
+            (0, _globals.expect)(result.errors).toContain('Prompt template is required');
+            (0, _globals.expect)(result.errors).toContain('Description is required');
+        });
+        (0, _globals.it)('should detect unused variables', ()=>{
+            const sampleWithUnusedVars = {
+                title: 'Test Prompt',
+                description: 'A test prompt',
+                prompt_template: 'This prompt uses {{variable1}}',
+                variables: [
+                    'variable1',
+                    'unused_variable'
+                ],
+                category: 'test',
+                tags: [
+                    'test'
+                ]
+            };
+            const result = service.validateSamplePrompt(sampleWithUnusedVars);
+            (0, _globals.expect)(result.isValid).toBe(false);
+            (0, _globals.expect)(result.errors.some((e)=>e.includes('unused_variable'))).toBe(true);
+        });
+        (0, _globals.it)('should detect undeclared variables', ()=>{
+            const sampleWithUndeclaredVars = {
+                title: 'Test Prompt',
+                description: 'A test prompt',
+                prompt_template: 'This prompt uses {{variable1}} and {{undeclared_variable}}',
+                variables: [
+                    'variable1'
+                ],
+                category: 'test',
+                tags: [
+                    'test'
+                ]
+            };
+            const result = service.validateSamplePrompt(sampleWithUndeclaredVars);
+            (0, _globals.expect)(result.isValid).toBe(false);
+            (0, _globals.expect)(result.errors.some((e)=>e.includes('undeclared_variable'))).toBe(true);
+        });
+    });
+    (0, _globals.describe)('getSamplePromptStats', ()=>{
+        (0, _globals.it)('should return correct statistics', ()=>{
+            const stats = service.getSamplePromptStats();
+            (0, _globals.expect)(stats.totalSamples).toBe(6);
+            (0, _globals.expect)(stats.categories).toBe(6);
+            (0, _globals.expect)(stats.categoriesBreakdown).toHaveLength(6);
+            (0, _globals.expect)(typeof stats.averageVariables).toBe('number');
+            (0, _globals.expect)(typeof stats.totalVariables).toBe('number');
+            // Check that breakdown adds up to total
+            const breakdownTotal = stats.categoriesBreakdown.reduce((sum, cat)=>sum + cat.count, 0);
+            (0, _globals.expect)(breakdownTotal).toBe(stats.totalSamples);
+        });
+    });
+    (0, _globals.describe)('getSamplePromptPreview', ()=>{
+        (0, _globals.it)('should return correct sample prompt by title', ()=>{
+            const preview = service.getSamplePromptPreview('Creative Story Generator');
+            (0, _globals.expect)(preview).not.toBeNull();
+            (0, _globals.expect)(preview?.title).toBe('Creative Story Generator');
+            (0, _globals.expect)(preview?.category).toBe('creative');
+        });
+        (0, _globals.it)('should return null for non-existent prompt', ()=>{
+            const preview = service.getSamplePromptPreview('Non-existent Prompt');
+            (0, _globals.expect)(preview).toBeNull();
+        });
+    });
+    (0, _globals.describe)('createPromptFromSample', ()=>{
+        (0, _globals.it)('should create a new prompt card from sample', async ()=>{
+            const mockRun = _globals.jest.fn().mockReturnValue({
+                lastInsertRowid: 1
+            });
+            const mockGet = _globals.jest.fn().mockReturnValueOnce(null) // First call for existing check
+            .mockReturnValueOnce({
+                id: 1,
+                title: 'Creative Story Generator',
+                description: 'Generate engaging creative stories...',
+                prompt_template: 'Write a {{genre}} story...',
+                variables: '["genre", "setting", "character_name"]',
+                created_at: '2024-01-01T00:00:00.000Z',
+                updated_at: '2024-01-01T00:00:00.000Z'
+            });
+            mockDb.prepare.mockReturnValue({
+                get: mockGet,
+                run: mockRun
+            });
+            const result = await service.createPromptFromSample('Creative Story Generator');
+            (0, _globals.expect)(result).not.toBeNull();
+            (0, _globals.expect)(result?.title).toBe('Creative Story Generator');
+            (0, _globals.expect)(Array.isArray(result?.variables)).toBe(true);
+            (0, _globals.expect)(mockRun).toHaveBeenCalled();
+        });
+        (0, _globals.it)('should return existing prompt card if already exists', async ()=>{
+            const existingCard = {
+                id: 1,
+                title: 'Creative Story Generator',
+                description: 'Generate engaging creative stories...',
+                prompt_template: 'Write a {{genre}} story...',
+                variables: '["genre", "setting", "character_name"]',
+                created_at: '2024-01-01T00:00:00.000Z',
+                updated_at: '2024-01-01T00:00:00.000Z'
+            };
+            const mockGet = _globals.jest.fn().mockReturnValue(existingCard);
+            const mockRun = _globals.jest.fn();
+            mockDb.prepare.mockReturnValue({
+                get: mockGet,
+                run: mockRun
+            });
+            const result = await service.createPromptFromSample('Creative Story Generator');
+            (0, _globals.expect)(result).not.toBeNull();
+            (0, _globals.expect)(result?.id).toBe(1);
+            (0, _globals.expect)(mockRun).not.toHaveBeenCalled(); // Should not create new card
+        });
+        (0, _globals.it)('should throw error for non-existent sample', async ()=>{
+            await (0, _globals.expect)(service.createPromptFromSample('Non-existent Sample')).rejects.toThrow('Sample prompt \'Non-existent Sample\' not found');
+        });
+    });
+});

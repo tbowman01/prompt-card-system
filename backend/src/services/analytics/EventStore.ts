@@ -24,11 +24,15 @@ export interface EventQuery {
 }
 
 export class EventStore {
-  private db: Database;
+  private db: any;
   private static instance: EventStore;
 
   private constructor() {
-    this.db = initializeDatabase();
+    this.initializeDb();
+  }
+
+  private async initializeDb(): Promise<void> {
+    this.db = await initializeDatabase();
     this.initializeEventStore();
   }
 

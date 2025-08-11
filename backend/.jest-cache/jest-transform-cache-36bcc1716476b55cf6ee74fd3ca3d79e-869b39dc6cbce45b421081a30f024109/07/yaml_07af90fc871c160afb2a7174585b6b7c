@@ -1,0 +1,239 @@
+c95b47bbaed5153b27eba6453819ea50
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+Object.defineProperty(exports, "yamlRoutes", {
+    enumerable: true,
+    get: function() {
+        return router;
+    }
+});
+const _express = require("express");
+const _connection = require("../database/connection");
+const _jsyaml = /*#__PURE__*/ _interop_require_default(require("js-yaml"));
+function _interop_require_default(obj) {
+    return obj && obj.__esModule ? obj : {
+        default: obj
+    };
+}
+const router = (0, _express.Router)();
+// Export prompt card(s) to YAML
+router.get('/export/:id?', (req, res)=>{
+    try {
+        const { id } = req.params;
+        let promptCards;
+        if (id) {
+            // Export single prompt card
+            const card = _connection.db.prepare(`
+        SELECT * FROM prompt_cards WHERE id = ?
+      `).get(id);
+            if (!card) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Prompt card not found'
+                });
+            }
+            const testCases = _connection.db.prepare(`
+        SELECT * FROM test_cases WHERE prompt_card_id = ?
+      `).all(id);
+            promptCards = [
+                {
+                    ...card,
+                    test_cases: testCases
+                }
+            ];
+        } else {
+            // Export all prompt cards
+            const cards = _connection.db.prepare('SELECT * FROM prompt_cards ORDER BY created_at DESC').all();
+            promptCards = cards.map((card)=>{
+                const testCases = _connection.db.prepare(`
+          SELECT * FROM test_cases WHERE prompt_card_id = ?
+        `).all(card.id);
+                return {
+                    ...card,
+                    test_cases: testCases
+                };
+            });
+        }
+        // Convert to Promptfoo format
+        const promptfooConfigs = promptCards.map((card)=>{
+            const config = {
+                prompts: [
+                    card.prompt_template
+                ],
+                providers: [
+                    'ollama:chat:llama2:7b'
+                ],
+                tests: card.test_cases.map((tc)=>({
+                        vars: JSON.parse(tc.input_variables),
+                        assert: JSON.parse(tc.assertions || '[]')
+                    })),
+                description: card.description || card.title
+            };
+            return config;
+        });
+        // If single card, return single config, otherwise return array
+        const yamlContent = _jsyaml.default.dump(promptCards.length === 1 ? promptfooConfigs[0] : promptfooConfigs);
+        res.setHeader('Content-Type', 'application/x-yaml');
+        res.setHeader('Content-Disposition', `attachment; filename="prompt-cards-${Date.now()}.yaml"`);
+        return res.send(yamlContent);
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to export YAML'
+        });
+    }
+});
+// Import prompt cards from YAML
+router.post('/import', (req, res)=>{
+    try {
+        const { yamlContent } = req.body;
+        if (!yamlContent) {
+            return res.status(400).json({
+                success: false,
+                error: 'YAML content is required'
+            });
+        }
+        // Parse YAML
+        const parsed = _jsyaml.default.load(yamlContent);
+        if (!parsed) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid YAML content'
+            });
+        }
+        // Handle both single config and array of configs
+        const configs = Array.isArray(parsed) ? parsed : [
+            parsed
+        ];
+        const importedCards = [];
+        // Begin transaction
+        const transaction = _connection.db.transaction((configs)=>{
+            for (const config of configs){
+                // Validate config structure
+                if (!config.prompts || !Array.isArray(config.prompts) || config.prompts.length === 0) {
+                    throw new Error('Invalid config: prompts array is required');
+                }
+                if (!config.tests || !Array.isArray(config.tests)) {
+                    throw new Error('Invalid config: tests array is required');
+                }
+                // Extract variables from prompt template
+                const promptTemplate = config.prompts[0];
+                const variableMatches = promptTemplate.match(/\{\{(\w+)\}\}/g) || [];
+                const variables = variableMatches.map((match)=>match.replace(/\{\{|\}\}/g, ''));
+                // Create prompt card
+                const cardData = {
+                    title: config.description || `Imported Prompt ${Date.now()}`,
+                    description: config.description,
+                    prompt_template: promptTemplate,
+                    variables
+                };
+                const cardResult = _connection.db.prepare(`
+          INSERT INTO prompt_cards (title, description, prompt_template, variables)
+          VALUES (?, ?, ?, ?)
+        `).run(cardData.title, cardData.description, cardData.prompt_template, JSON.stringify(cardData.variables || []));
+                const promptCardId = cardResult.lastInsertRowid;
+                // Create test cases
+                for(let i = 0; i < config.tests.length; i++){
+                    const test = config.tests[i];
+                    const testCaseData = {
+                        prompt_card_id: promptCardId,
+                        name: `Test Case ${i + 1}`,
+                        input_variables: test.vars || {},
+                        assertions: test.assert || []
+                    };
+                    _connection.db.prepare(`
+            INSERT INTO test_cases (prompt_card_id, name, input_variables, expected_output, assertions)
+            VALUES (?, ?, ?, ?, ?)
+          `).run(testCaseData.prompt_card_id, testCaseData.name, JSON.stringify(testCaseData.input_variables), testCaseData.expected_output || null, JSON.stringify(testCaseData.assertions || []));
+                }
+                // Get the created card with test cases
+                const createdCard = _connection.db.prepare(`
+          SELECT * FROM prompt_cards WHERE id = ?
+        `).get(promptCardId);
+                const testCases = _connection.db.prepare(`
+          SELECT * FROM test_cases WHERE prompt_card_id = ?
+        `).all(promptCardId);
+                importedCards.push({
+                    ...createdCard,
+                    variables: JSON.parse(createdCard.variables || '[]'),
+                    test_cases: testCases.map((tc)=>({
+                            ...tc,
+                            input_variables: JSON.parse(tc.input_variables),
+                            assertions: JSON.parse(tc.assertions || '[]')
+                        }))
+                });
+            }
+        });
+        transaction(configs);
+        return res.status(201).json({
+            success: true,
+            data: importedCards,
+            message: `Successfully imported ${importedCards.length} prompt card(s)`
+        });
+    } catch (error) {
+        return res.status(400).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to import YAML'
+        });
+    }
+});
+// Validate YAML format
+router.post('/validate', (req, res)=>{
+    try {
+        const { yamlContent } = req.body;
+        if (!yamlContent) {
+            return res.status(400).json({
+                success: false,
+                error: 'YAML content is required'
+            });
+        }
+        // Parse YAML
+        const parsed = _jsyaml.default.load(yamlContent);
+        if (!parsed) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid YAML syntax'
+            });
+        }
+        // Validate structure
+        const configs = Array.isArray(parsed) ? parsed : [
+            parsed
+        ];
+        const validationErrors = [];
+        for(let i = 0; i < configs.length; i++){
+            const config = configs[i];
+            const prefix = configs.length > 1 ? `Config ${i + 1}: ` : '';
+            if (!config.prompts || !Array.isArray(config.prompts) || config.prompts.length === 0) {
+                validationErrors.push(`${prefix}prompts array is required and must not be empty`);
+            }
+            if (!config.tests || !Array.isArray(config.tests)) {
+                validationErrors.push(`${prefix}tests array is required`);
+            } else {
+                config.tests.forEach((test, testIndex)=>{
+                    if (!test.vars || typeof test.vars !== 'object') {
+                        validationErrors.push(`${prefix}Test ${testIndex + 1}: vars object is required`);
+                    }
+                });
+            }
+        }
+        if (validationErrors.length > 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'Validation failed',
+                details: validationErrors
+            });
+        }
+        return res.json({
+            success: true,
+            message: 'YAML is valid',
+            configCount: configs.length
+        });
+    } catch (error) {
+        return res.status(400).json({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to validate YAML'
+        });
+    }
+});

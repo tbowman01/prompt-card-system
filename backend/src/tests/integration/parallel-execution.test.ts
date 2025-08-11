@@ -59,20 +59,20 @@ describe('Parallel Testing Infrastructure Integration Tests', () => {
       
       // All submissions should be accepted
       for (const response of responses) {
-        expect(response.status).to.equal(200);
-        assert(response.body.success === true);
-        expect(response.body.data).to.have.property('executionId');
-        expect(response.body.data).to.have.property('status');
-        expect(response.body.data.status).to.be.oneOf(['queued', 'running']);
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.data).toHaveProperty('executionId');
+        expect(response.body.data).toHaveProperty('status');
+        expect(['queued', 'running']).toContain(response.body.data.status);
       }
     });
 
     it('should respect resource limits and queue appropriately', async () => {
       // Set resource limits
       await resourceManager.setLimits({
-        maxConcurrentTests: 3,
-        maxMemoryUsage: 1024, // 1GB
-        maxCpuUsage: 80
+        max_concurrent_tests: 3,
+        max_memory_mb: 1024, // 1GB
+        max_cpu_percent: 80
       });
 
       const testPromises = [];
@@ -105,9 +105,9 @@ describe('Parallel Testing Infrastructure Integration Tests', () => {
         .expect(200);
 
       assert(queueStatusResponse.body.success === true);
-      expect(queueStatusResponse.body.data).to.have.property('running');
-      expect(queueStatusResponse.body.data).to.have.property('queued');
-      expect(queueStatusResponse.body.data.running).to.be.at.most(3);
+      expect(queueStatusResponse.body.data).toHaveProperty('running');
+      expect(queueStatusResponse.body.data).toHaveProperty('queued');
+      expect(queueStatusResponse.body.data.running).toBeLessThanOrEqual(3);
     });
 
     it('should handle queue priority correctly', async () => {
@@ -145,11 +145,11 @@ describe('Parallel Testing Infrastructure Integration Tests', () => {
         .expect(200);
 
       assert(queueResponse.body.success === true);
-      expect(queueResponse.body.data).to.be.an('array');
+      expect(Array.isArray(queueResponse.body.data)).toBe(true);
       
       // Critical should be first, then high, then low
       const priorities = queueResponse.body.data.map(item => item.priority);
-      expect(priorities[0]).to.equal('critical');
+      expect(priorities[0]).toBe('critical');
     });
   });
 
@@ -194,18 +194,18 @@ describe('Parallel Testing Infrastructure Integration Tests', () => {
         .expect(200);
 
       assert(resourceResponse.body.success === true);
-      expect(resourceResponse.body.data).to.have.property('cpu');
-      expect(resourceResponse.body.data).to.have.property('memory');
-      expect(resourceResponse.body.data).to.have.property('activeTests');
-      expect(resourceResponse.body.data).to.have.property('queueLength');
+      expect(resourceResponse.body.data).toHaveProperty('cpu');
+      expect(resourceResponse.body.data).toHaveProperty('memory');
+      expect(resourceResponse.body.data).toHaveProperty('activeTests');
+      expect(resourceResponse.body.data).toHaveProperty('queueLength');
     });
 
     it('should handle resource exhaustion gracefully', async () => {
       // Set very low resource limits
       await resourceManager.setLimits({
-        maxConcurrentTests: 1,
-        maxMemoryUsage: 100, // 100MB
-        maxCpuUsage: 50
+        max_concurrent_tests: 1,
+        max_memory_mb: 100, // 100MB
+        max_cpu_percent: 50
       });
 
       // Submit many tests
@@ -239,8 +239,8 @@ describe('Parallel Testing Infrastructure Integration Tests', () => {
         if (response.body.data.status === 'running') runningCount++;
       }
 
-      expect(queuedCount).to.be.greaterThan(0);
-      expect(runningCount).to.be.at.most(1);
+      expect(queuedCount).toBeGreaterThan(0);
+      expect(runningCount).toBeLessThanOrEqual(1);
     });
   });
 
@@ -285,9 +285,9 @@ describe('Parallel Testing Infrastructure Integration Tests', () => {
         .expect(200);
 
       assert(statusResponse.body.success === true);
-      expect(statusResponse.body.data).to.have.property('availablePermits');
-      expect(statusResponse.body.data).to.have.property('queuedRequests');
-      expect(statusResponse.body.data.availablePermits).to.be.at.most(3);
+      expect(statusResponse.body.data).toHaveProperty('availablePermits');
+      expect(statusResponse.body.data).toHaveProperty('queuedRequests');
+      expect(statusResponse.body.data.availablePermits).toBeLessThanOrEqual(3);
     });
   });
 
@@ -320,10 +320,10 @@ describe('Parallel Testing Infrastructure Integration Tests', () => {
         .expect(200);
 
       assert(statusResponse.body.success === true);
-      expect(statusResponse.body.data.status).to.be.oneOf(['failed', 'completed']);
+      expect(['failed', 'completed']).toContain(statusResponse.body.data.status);
       
       if (statusResponse.body.data.status === 'failed') {
-        expect(statusResponse.body.data).to.have.property('error');
+        expect(statusResponse.body.data).toHaveProperty('error');
       }
     });
 
@@ -366,8 +366,8 @@ describe('Parallel Testing Infrastructure Integration Tests', () => {
         }
       }
 
-      expect(acceptedCount).to.be.at.most(5);
-      expect(rejectedCount).to.be.greaterThan(0);
+      expect(acceptedCount).toBeLessThanOrEqual(5);
+      expect(rejectedCount).toBeGreaterThan(0);
     });
   });
 
@@ -400,11 +400,11 @@ describe('Parallel Testing Infrastructure Integration Tests', () => {
       const submissionTime = Date.now() - startTime;
 
       // All submissions should complete within reasonable time
-      expect(submissionTime).to.be.below(10000); // 10 seconds
+      expect(submissionTime).toBeLessThan(10000); // 10 seconds
       
       // Most should be accepted
       const successfulSubmissions = responses.filter(r => r.status === 200).length;
-      expect(successfulSubmissions).to.be.above(40); // At least 80% success rate
+      expect(successfulSubmissions).toBeGreaterThan(40); // At least 80% success rate
 
       // Check system performance
       const performanceResponse = await request(app)
@@ -412,9 +412,9 @@ describe('Parallel Testing Infrastructure Integration Tests', () => {
         .expect(200);
 
       assert(performanceResponse.body.success === true);
-      expect(performanceResponse.body.data).to.have.property('throughput');
-      expect(performanceResponse.body.data).to.have.property('averageWaitTime');
-      expect(performanceResponse.body.data).to.have.property('systemLoad');
+      expect(performanceResponse.body.data).toHaveProperty('throughput');
+      expect(performanceResponse.body.data).toHaveProperty('averageWaitTime');
+      expect(performanceResponse.body.data).toHaveProperty('systemLoad');
     });
   });
 
@@ -448,10 +448,10 @@ describe('Parallel Testing Infrastructure Integration Tests', () => {
         .expect(200);
 
       assert(analyticsResponse.body.success === true);
-      expect(analyticsResponse.body.data).to.have.property('totalParallelTests');
-      expect(analyticsResponse.body.data).to.have.property('averageParallelism');
-      expect(analyticsResponse.body.data).to.have.property('resourceEfficiency');
-      expect(analyticsResponse.body.data).to.have.property('queueMetrics');
+      expect(analyticsResponse.body.data).toHaveProperty('totalParallelTests');
+      expect(analyticsResponse.body.data).toHaveProperty('averageParallelism');
+      expect(analyticsResponse.body.data).toHaveProperty('resourceEfficiency');
+      expect(analyticsResponse.body.data).toHaveProperty('queueMetrics');
     });
   });
 });

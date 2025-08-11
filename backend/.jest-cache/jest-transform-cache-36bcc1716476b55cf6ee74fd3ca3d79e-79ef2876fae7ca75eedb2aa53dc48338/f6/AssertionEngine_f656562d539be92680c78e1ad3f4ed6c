@@ -1,0 +1,464 @@
+39bbed3fa24e598fa07e97b9ddff7864
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+Object.defineProperty(exports, "AssertionEngine", {
+    enumerable: true,
+    get: function() {
+        return AssertionEngine;
+    }
+});
+const _SemanticSimilarityValidator = require("./SemanticSimilarityValidator");
+const _CustomAssertionValidator = require("./CustomAssertionValidator");
+const _AssertionTypeRegistry = require("./AssertionTypeRegistry");
+function _define_property(obj, key, value) {
+    if (key in obj) {
+        Object.defineProperty(obj, key, {
+            value: value,
+            enumerable: true,
+            configurable: true,
+            writable: true
+        });
+    } else {
+        obj[key] = value;
+    }
+    return obj;
+}
+class AssertionEngine {
+    /**
+   * Initialize the assertion engine with ML models
+   */ async initialize() {
+        console.log('Initializing Enhanced Assertion Engine...');
+        try {
+            await this.semanticValidator.initialize();
+            await this.customValidator.initialize();
+            await this.typeRegistry.initialize();
+            console.log('✅ Enhanced Assertion Engine initialized successfully');
+        } catch (error) {
+            console.error('❌ Failed to initialize Enhanced Assertion Engine:', error);
+            throw error;
+        }
+    }
+    /**
+   * Validate all assertions against LLM output with enhanced context
+   */ async validateAssertions(output, assertions, context) {
+        const results = [];
+        for (const assertion of assertions){
+            const startTime = Date.now();
+            try {
+                const result = await this.validateSingleAssertion(output, assertion, context);
+                result.executionTime = Date.now() - startTime;
+                results.push(result);
+            } catch (error) {
+                results.push({
+                    assertion,
+                    passed: false,
+                    error: error instanceof Error ? error.message : 'Unknown assertion error',
+                    executionTime: Date.now() - startTime
+                });
+            }
+        }
+        return results;
+    }
+    /**
+   * Validate a single assertion with enhanced capabilities
+   */ async validateSingleAssertion(output, assertion, context) {
+        switch(assertion.type){
+            case 'contains':
+                return this.validateContains(output, assertion);
+            case 'not-contains':
+                return this.validateNotContains(output, assertion);
+            case 'equals':
+                return this.validateEquals(output, assertion);
+            case 'not-equals':
+                return this.validateNotEquals(output, assertion);
+            case 'regex':
+                return this.validateRegex(output, assertion);
+            case 'length':
+                return this.validateLength(output, assertion);
+            case 'semantic-similarity':
+                return await this.validateSemanticSimilarity(output, assertion, context);
+            case 'custom':
+                return await this.validateCustom(output, assertion, context);
+            case 'json-schema':
+                return this.validateJsonSchema(output, assertion);
+            case 'sentiment':
+                return await this.validateSentiment(output, assertion);
+            case 'language':
+                return await this.validateLanguage(output, assertion);
+            case 'toxicity':
+                return await this.validateToxicity(output, assertion);
+            default:
+                throw new Error(`Unknown assertion type: ${assertion.type}`);
+        }
+    }
+    /**
+   * Basic string contains validation
+   */ validateContains(output, assertion) {
+        const searchValue = String(assertion.value);
+        const passed = output.toLowerCase().includes(searchValue.toLowerCase());
+        return {
+            assertion,
+            passed,
+            metadata: {
+                searchValue,
+                outputLength: output.length,
+                caseSensitive: false
+            }
+        };
+    }
+    /**
+   * Basic string not-contains validation
+   */ validateNotContains(output, assertion) {
+        const searchValue = String(assertion.value);
+        const passed = !output.toLowerCase().includes(searchValue.toLowerCase());
+        return {
+            assertion,
+            passed,
+            metadata: {
+                searchValue,
+                outputLength: output.length,
+                caseSensitive: false
+            }
+        };
+    }
+    /**
+   * Exact string equality validation
+   */ validateEquals(output, assertion) {
+        const expectedValue = String(assertion.value);
+        const passed = output.trim() === expectedValue.trim();
+        return {
+            assertion,
+            passed,
+            metadata: {
+                expectedValue,
+                actualValue: output.trim(),
+                exactMatch: passed
+            }
+        };
+    }
+    /**
+   * String inequality validation
+   */ validateNotEquals(output, assertion) {
+        const expectedValue = String(assertion.value);
+        const passed = output.trim() !== expectedValue.trim();
+        return {
+            assertion,
+            passed,
+            metadata: {
+                expectedValue,
+                actualValue: output.trim(),
+                exactMatch: !passed
+            }
+        };
+    }
+    /**
+   * Regular expression validation
+   */ validateRegex(output, assertion) {
+        try {
+            const regex = new RegExp(String(assertion.value), assertion.config?.flags || '');
+            const matches = output.match(regex);
+            const passed = matches !== null;
+            return {
+                assertion,
+                passed,
+                metadata: {
+                    pattern: String(assertion.value),
+                    flags: assertion.config?.flags || '',
+                    matches: matches || [],
+                    matchCount: matches?.length || 0
+                }
+            };
+        } catch (error) {
+            return {
+                assertion,
+                passed: false,
+                error: `Invalid regex pattern: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                metadata: {
+                    pattern: String(assertion.value)
+                }
+            };
+        }
+    }
+    /**
+   * String length validation with range support
+   */ validateLength(output, assertion) {
+        const actualLength = output.length;
+        let passed = false;
+        const metadata = {
+            actualLength,
+            constraint: assertion.value
+        };
+        if (typeof assertion.value === 'number') {
+            passed = actualLength === assertion.value;
+        } else {
+            const valueStr = String(assertion.value);
+            if (valueStr.includes('-')) {
+                const [minStr, maxStr] = valueStr.split('-');
+                const min = parseInt(minStr.trim());
+                const max = parseInt(maxStr.trim());
+                passed = actualLength >= min && actualLength <= max;
+                metadata.min = min;
+                metadata.max = max;
+                metadata.inRange = passed;
+            } else if (valueStr.startsWith('>')) {
+                const min = parseInt(valueStr.substring(1));
+                passed = actualLength > min;
+                metadata.min = min;
+                metadata.operator = '>';
+            } else if (valueStr.startsWith('<')) {
+                const max = parseInt(valueStr.substring(1));
+                passed = actualLength < max;
+                metadata.max = max;
+                metadata.operator = '<';
+            } else if (valueStr.startsWith('>=')) {
+                const min = parseInt(valueStr.substring(2));
+                passed = actualLength >= min;
+                metadata.min = min;
+                metadata.operator = '>=';
+            } else if (valueStr.startsWith('<=')) {
+                const max = parseInt(valueStr.substring(2));
+                passed = actualLength <= max;
+                metadata.max = max;
+                metadata.operator = '<=';
+            } else {
+                const expected = parseInt(valueStr);
+                passed = actualLength === expected;
+                metadata.expected = expected;
+            }
+        }
+        return {
+            assertion,
+            passed,
+            metadata
+        };
+    }
+    /**
+   * Semantic similarity validation using transformer models
+   */ async validateSemanticSimilarity(output, assertion, context) {
+        try {
+            const expectedText = String(assertion.value);
+            const threshold = assertion.threshold || 0.8;
+            const similarity = await this.semanticValidator.computeSimilarity(output, expectedText);
+            const passed = similarity >= threshold;
+            return {
+                assertion,
+                passed,
+                score: similarity,
+                metadata: {
+                    expectedText,
+                    threshold,
+                    similarity,
+                    model: this.semanticValidator.getModelName(),
+                    algorithmUsed: 'sentence-transformers'
+                }
+            };
+        } catch (error) {
+            return {
+                assertion,
+                passed: false,
+                error: `Semantic similarity validation failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                metadata: {
+                    expectedText: String(assertion.value),
+                    threshold: assertion.threshold || 0.8
+                }
+            };
+        }
+    }
+    /**
+   * Custom JavaScript assertion validation
+   */ async validateCustom(output, assertion, context) {
+        try {
+            const customCode = String(assertion.value);
+            const result = await this.customValidator.execute(customCode, output, context);
+            return {
+                assertion,
+                passed: result.passed,
+                score: result.score,
+                metadata: {
+                    customCode,
+                    executionTime: result.executionTime,
+                    variables: result.variables,
+                    logs: result.logs
+                }
+            };
+        } catch (error) {
+            return {
+                assertion,
+                passed: false,
+                error: `Custom assertion validation failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                metadata: {
+                    customCode: String(assertion.value)
+                }
+            };
+        }
+    }
+    /**
+   * JSON schema validation
+   */ validateJsonSchema(output, assertion) {
+        try {
+            const parsedOutput = JSON.parse(output);
+            const schema = assertion.value;
+            // Simple schema validation - in a real implementation, use a proper JSON schema validator
+            const passed = this.validateObjectAgainstSchema(parsedOutput, schema);
+            return {
+                assertion,
+                passed,
+                metadata: {
+                    schema,
+                    parsedOutput,
+                    isValidJson: true
+                }
+            };
+        } catch (error) {
+            return {
+                assertion,
+                passed: false,
+                error: `JSON schema validation failed: ${error instanceof Error ? error.message : 'Invalid JSON'}`,
+                metadata: {
+                    schema: assertion.value,
+                    isValidJson: false
+                }
+            };
+        }
+    }
+    /**
+   * Sentiment analysis validation
+   */ async validateSentiment(output, assertion) {
+        try {
+            const expectedSentiment = String(assertion.value); // 'positive', 'negative', 'neutral'
+            const threshold = assertion.threshold || 0.6;
+            const sentiment = await this.semanticValidator.analyzeSentiment(output);
+            const passed = sentiment.label === expectedSentiment && sentiment.score >= threshold;
+            return {
+                assertion,
+                passed,
+                score: sentiment.score,
+                metadata: {
+                    expectedSentiment,
+                    actualSentiment: sentiment.label,
+                    confidence: sentiment.score,
+                    threshold
+                }
+            };
+        } catch (error) {
+            return {
+                assertion,
+                passed: false,
+                error: `Sentiment validation failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+            };
+        }
+    }
+    /**
+   * Language detection validation
+   */ async validateLanguage(output, assertion) {
+        try {
+            const expectedLanguage = String(assertion.value); // 'en', 'es', 'fr', etc.
+            const language = await this.semanticValidator.detectLanguage(output);
+            const passed = language.language === expectedLanguage;
+            return {
+                assertion,
+                passed,
+                score: language.confidence,
+                metadata: {
+                    expectedLanguage,
+                    detectedLanguage: language.language,
+                    confidence: language.confidence
+                }
+            };
+        } catch (error) {
+            return {
+                assertion,
+                passed: false,
+                error: `Language validation failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+            };
+        }
+    }
+    /**
+   * Toxicity detection validation
+   */ async validateToxicity(output, assertion) {
+        try {
+            const maxToxicity = Number(assertion.value); // 0.0 to 1.0
+            const toxicity = await this.semanticValidator.detectToxicity(output);
+            const passed = toxicity.score <= maxToxicity;
+            return {
+                assertion,
+                passed,
+                score: toxicity.score,
+                metadata: {
+                    maxToxicity,
+                    toxicityScore: toxicity.score,
+                    categories: toxicity.categories,
+                    isToxic: toxicity.score > 0.7
+                }
+            };
+        } catch (error) {
+            return {
+                assertion,
+                passed: false,
+                error: `Toxicity validation failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+            };
+        }
+    }
+    /**
+   * Simple object schema validation helper
+   */ validateObjectAgainstSchema(obj, schema) {
+        if (typeof schema !== 'object' || schema === null) {
+            return obj === schema;
+        }
+        for(const key in schema){
+            if (!(key in obj)) {
+                return false;
+            }
+            if (typeof schema[key] === 'object' && schema[key] !== null) {
+                if (!this.validateObjectAgainstSchema(obj[key], schema[key])) {
+                    return false;
+                }
+            } else if (typeof obj[key] !== typeof schema[key]) {
+                return false;
+            }
+        }
+        return true;
+    }
+    /**
+   * Register a custom assertion type
+   */ async registerAssertionType(name, validator) {
+        await this.typeRegistry.register(name, validator);
+    }
+    /**
+   * Get all registered assertion types
+   */ getRegisteredTypes() {
+        return this.typeRegistry.getRegisteredTypes();
+    }
+    /**
+   * Get assertion statistics
+   */ getStatistics() {
+        return this.typeRegistry.getStatistics();
+    }
+    /**
+   * Export assertion types to JSON
+   */ exportTypes() {
+        return this.typeRegistry.exportTypes();
+    }
+    /**
+   * Import assertion types from JSON
+   */ async importTypes(jsonData) {
+        await this.typeRegistry.importTypes(jsonData);
+    }
+    /**
+   * Clean up resources
+   */ async cleanup() {
+        await this.semanticValidator.cleanup();
+        await this.customValidator.cleanup();
+        await this.typeRegistry.cleanup();
+    }
+    constructor(){
+        _define_property(this, "semanticValidator", void 0);
+        _define_property(this, "customValidator", void 0);
+        _define_property(this, "typeRegistry", void 0);
+        this.semanticValidator = new _SemanticSimilarityValidator.SemanticSimilarityValidator();
+        this.customValidator = new _CustomAssertionValidator.CustomAssertionValidator();
+        this.typeRegistry = new _AssertionTypeRegistry.AssertionTypeRegistry();
+    }
+} // The AssertionEngine class is exported for instantiation in index.ts

@@ -1,0 +1,475 @@
+d23b3cc6ad683ecb09963aab4cb71bd4
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+function _export(target, all) {
+    for(var name in all)Object.defineProperty(target, name, {
+        enumerable: true,
+        get: Object.getOwnPropertyDescriptor(all, name).get
+    });
+}
+_export(exports, {
+    get PromptAnalyzer () {
+        return PromptAnalyzer;
+    },
+    get promptAnalyzer () {
+        return promptAnalyzer;
+    }
+});
+const _EventStore = require("../analytics/EventStore");
+const _AnalyticsEngine = require("../analytics/AnalyticsEngine");
+const _llmService = require("../llmService");
+function _define_property(obj, key, value) {
+    if (key in obj) {
+        Object.defineProperty(obj, key, {
+            value: value,
+            enumerable: true,
+            configurable: true,
+            writable: true
+        });
+    } else {
+        obj[key] = value;
+    }
+    return obj;
+}
+class PromptAnalyzer {
+    /**
+   * Analyze prompt effectiveness using historical data and AI insights
+   */ async analyzePrompt(promptId, promptText, timeRange = this.getDefaultTimeRange()) {
+        const analysisId = `analysis_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        try {
+            // Gather historical execution data
+            const executionEvents = await this.eventStore.getEvents({
+                event_type: 'test_execution',
+                start_time: timeRange.start,
+                end_time: timeRange.end
+            });
+            const promptExecutions = executionEvents.filter((event)=>event.entity_id === promptId || event.data.prompt_id === promptId);
+            // Calculate basic metrics
+            const metrics = this.calculatePromptMetrics(promptExecutions);
+            // Analyze patterns using AI
+            const patterns = await this.analyzeExecutionPatterns(promptExecutions, promptText);
+            // Generate effectiveness score
+            const effectiveness = this.calculateEffectivenessScore(metrics, patterns);
+            // Generate AI-powered recommendations
+            const recommendations = await this.generateRecommendations(promptText, metrics, patterns, effectiveness);
+            // Calculate trends
+            const trends = this.calculateTrends(promptExecutions);
+            // Perform security analysis
+            const securityIssues = await this.analyzeSecurityIssues(promptText);
+            const result = {
+                promptId,
+                analysisId,
+                effectiveness,
+                patterns,
+                metrics,
+                recommendations,
+                trends,
+                securityIssues,
+                timestamp: new Date()
+            };
+            // Store analysis result
+            await this.eventStore.recordEvent({
+                event_type: 'prompt_analysis',
+                entity_id: promptId,
+                entity_type: 'prompt',
+                data: result,
+                timestamp: new Date()
+            });
+            return result;
+        } catch (error) {
+            console.error('Error analyzing prompt:', error);
+            throw new Error(`Prompt analysis failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    }
+    /**
+   * Compare two prompts and determine which performs better
+   */ async comparePrompts(promptA, promptB, testCases, model = 'llama3') {
+        try {
+            const resultsA = await this.testPromptPerformance(promptA, testCases, model);
+            const resultsB = await this.testPromptPerformance(promptB, testCases, model);
+            const metricsA = this.calculateTestMetrics(resultsA);
+            const metricsB = this.calculateTestMetrics(resultsB);
+            // Determine winner based on weighted scoring
+            const scoreA = this.calculateWeightedScore(metricsA);
+            const scoreB = this.calculateWeightedScore(metricsB);
+            let winner;
+            let confidence;
+            if (Math.abs(scoreA - scoreB) < 0.1) {
+                winner = 'tie';
+                confidence = 1 - Math.abs(scoreA - scoreB);
+            } else if (scoreA > scoreB) {
+                winner = 'A';
+                confidence = (scoreA - scoreB) / Math.max(scoreA, scoreB);
+            } else {
+                winner = 'B';
+                confidence = (scoreB - scoreA) / Math.max(scoreA, scoreB);
+            }
+            // Generate AI analysis
+            const analysisPrompt = `
+        Compare these two prompts and their performance:
+        
+        Prompt A: "${promptA}"
+        Metrics A: Response Time: ${metricsA.responseTime}ms, Success Rate: ${metricsA.successRate}%, Quality: ${metricsA.qualityScore}
+        
+        Prompt B: "${promptB}"  
+        Metrics B: Response Time: ${metricsB.responseTime}ms, Success Rate: ${metricsB.successRate}%, Quality: ${metricsB.qualityScore}
+        
+        Provide a detailed analysis of the differences and why one performs better.
+      `;
+            const analysis = await _llmService.llmService.generate(analysisPrompt, model);
+            return {
+                promptA,
+                promptB,
+                winner,
+                confidence,
+                metrics: {
+                    responseTime: {
+                        A: metricsA.responseTime,
+                        B: metricsB.responseTime
+                    },
+                    successRate: {
+                        A: metricsA.successRate,
+                        B: metricsB.successRate
+                    },
+                    qualityScore: {
+                        A: metricsA.qualityScore,
+                        B: metricsB.qualityScore
+                    }
+                },
+                analysis: analysis.response
+            };
+        } catch (error) {
+            console.error('Error comparing prompts:', error);
+            throw new Error(`Prompt comparison failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    }
+    /**
+   * Get evolution history of a prompt
+   */ async getPromptEvolution(promptId) {
+        const evolutionEvents = await this.eventStore.getEvents({
+            event_type: 'prompt_evolution',
+            entity_id: promptId
+        });
+        return evolutionEvents.map((event)=>event.data);
+    }
+    /**
+   * Calculate basic metrics from execution events
+   */ calculatePromptMetrics(executionEvents) {
+        if (executionEvents.length === 0) {
+            return {
+                averageResponseTime: 0,
+                successRate: 0,
+                totalExecutions: 0,
+                consistencyScore: 0
+            };
+        }
+        const totalExecutions = executionEvents.length;
+        const successfulExecutions = executionEvents.filter((e)=>e.data.passed).length;
+        const averageResponseTime = executionEvents.reduce((sum, e)=>sum + e.data.execution_time, 0) / totalExecutions;
+        // Calculate consistency score based on response time variance
+        const responseTimes = executionEvents.map((e)=>e.data.execution_time);
+        const variance = this.calculateVariance(responseTimes);
+        const consistencyScore = Math.max(0, 100 - variance / averageResponseTime * 100);
+        return {
+            averageResponseTime,
+            successRate: successfulExecutions / totalExecutions * 100,
+            totalExecutions,
+            consistencyScore
+        };
+    }
+    /**
+   * Analyze execution patterns using AI
+   */ async analyzeExecutionPatterns(executionEvents, promptText) {
+        const successfulEvents = executionEvents.filter((e)=>e.data.passed);
+        const failedEvents = executionEvents.filter((e)=>!e.data.passed);
+        const analysisPrompt = `
+      Analyze this prompt and its execution patterns:
+      
+      Prompt: "${promptText}"
+      
+      Successful executions: ${successfulEvents.length}
+      Failed executions: ${failedEvents.length}
+      
+      Based on this data, identify:
+      1. Patterns that lead to success
+      2. Patterns that lead to failure  
+      3. Common errors or issues
+      
+      Return a JSON object with arrays for successPatterns, failurePatterns, and commonErrors.
+    `;
+        try {
+            const analysis = await _llmService.llmService.generate(analysisPrompt);
+            const patterns = JSON.parse(analysis.response);
+            return {
+                successPatterns: patterns.successPatterns || [],
+                failurePatterns: patterns.failurePatterns || [],
+                commonErrors: patterns.commonErrors || []
+            };
+        } catch (error) {
+            console.error('Error analyzing patterns:', error);
+            return {
+                successPatterns: [],
+                failurePatterns: [],
+                commonErrors: []
+            };
+        }
+    }
+    /**
+   * Calculate effectiveness score
+   */ calculateEffectivenessScore(metrics, patterns) {
+        // Weighted scoring: Success Rate (40%), Response Time (30%), Consistency (20%), Pattern Quality (10%)
+        const successScore = metrics.successRate; // 0-100
+        const responseTimeScore = Math.max(0, 100 - metrics.averageResponseTime / 1000 * 10); // Penalize slow responses
+        const consistencyScore = metrics.consistencyScore; // 0-100
+        const patternScore = Math.max(0, 100 - patterns.failurePatterns.length * 10); // Penalize failure patterns
+        const weightedScore = successScore * 0.4 + responseTimeScore * 0.3 + consistencyScore * 0.2 + patternScore * 0.1;
+        let category;
+        let reasoning;
+        if (weightedScore >= 85) {
+            category = 'excellent';
+            reasoning = 'High success rate with consistent performance and minimal failure patterns';
+        } else if (weightedScore >= 70) {
+            category = 'good';
+            reasoning = 'Good performance with room for minor improvements';
+        } else if (weightedScore >= 50) {
+            category = 'fair';
+            reasoning = 'Average performance with noticeable issues that need attention';
+        } else {
+            category = 'poor';
+            reasoning = 'Poor performance with significant issues requiring immediate attention';
+        }
+        return {
+            score: Math.round(weightedScore),
+            category,
+            reasoning
+        };
+    }
+    /**
+   * Generate AI-powered recommendations
+   */ async generateRecommendations(promptText, metrics, patterns, effectiveness) {
+        const recommendationPrompt = `
+      Analyze this prompt and provide improvement recommendations:
+      
+      Prompt: "${promptText}"
+      
+      Current Performance:
+      - Success Rate: ${metrics.successRate}%
+      - Average Response Time: ${metrics.averageResponseTime}ms
+      - Consistency Score: ${metrics.consistencyScore}%
+      - Effectiveness: ${effectiveness.score}/100 (${effectiveness.category})
+      
+      Failure Patterns: ${patterns.failurePatterns.join(', ')}
+      Common Errors: ${patterns.commonErrors.join(', ')}
+      
+      Provide specific, actionable recommendations to improve this prompt.
+      Return a JSON array with objects containing: priority, type, suggestion, expectedImprovement.
+    `;
+        try {
+            const response = await _llmService.llmService.generate(recommendationPrompt);
+            const recommendations = JSON.parse(response.response);
+            return recommendations.map((rec)=>({
+                    priority: rec.priority || 'medium',
+                    type: rec.type || 'structure',
+                    suggestion: rec.suggestion || 'No specific suggestion provided',
+                    expectedImprovement: rec.expectedImprovement || 5
+                }));
+        } catch (error) {
+            console.error('Error generating recommendations:', error);
+            return [
+                {
+                    priority: 'medium',
+                    type: 'structure',
+                    suggestion: 'Consider adding more specific instructions and examples',
+                    expectedImprovement: 10
+                }
+            ];
+        }
+    }
+    /**
+   * Calculate trends from execution data
+   */ calculateTrends(executionEvents) {
+        const groupedByHour = this.groupEventsByHour(executionEvents);
+        const performanceOverTime = groupedByHour.map((group)=>({
+                timestamp: group.timestamp,
+                score: group.events.length > 0 ? group.events.reduce((sum, e)=>sum + (e.data.passed ? 100 : 0), 0) / group.events.length : 0
+            }));
+        const successRateOverTime = groupedByHour.map((group)=>({
+                timestamp: group.timestamp,
+                rate: group.events.length > 0 ? group.events.filter((e)=>e.data.passed).length / group.events.length : 0
+            }));
+        return {
+            performanceOverTime,
+            successRateOverTime
+        };
+    }
+    /**
+   * Analyze security issues in prompt
+   */ async analyzeSecurityIssues(promptText) {
+        const securityIssues = [];
+        // Check for prompt injection patterns
+        const injectionPatterns = [
+            /ignore.*previous.*instructions/i,
+            /system.*prompt/i,
+            /role.*play/i,
+            /jailbreak/i,
+            /pretend.*you.*are/i,
+            /forget.*everything/i,
+            /new.*instructions/i,
+            /override.*safety/i
+        ];
+        for (const pattern of injectionPatterns){
+            if (pattern.test(promptText)) {
+                securityIssues.push({
+                    severity: 'high',
+                    type: 'injection',
+                    description: `Potential prompt injection pattern detected: ${pattern.source}`,
+                    recommendation: 'Review and sanitize prompt to prevent injection attacks'
+                });
+            }
+        }
+        // Check for sensitive information leakage
+        const sensitivePatterns = [
+            /password/i,
+            /api.*key/i,
+            /secret/i,
+            /token/i,
+            /credential/i,
+            /private.*key/i
+        ];
+        for (const pattern of sensitivePatterns){
+            if (pattern.test(promptText)) {
+                securityIssues.push({
+                    severity: 'critical',
+                    type: 'leakage',
+                    description: `Potential sensitive information detected: ${pattern.source}`,
+                    recommendation: 'Remove or mask sensitive information from prompt'
+                });
+            }
+        }
+        // Check for manipulation attempts
+        const manipulationPatterns = [
+            /you.*must/i,
+            /you.*have.*to/i,
+            /required.*to/i,
+            /bypass.*restrictions/i,
+            /special.*permissions/i
+        ];
+        for (const pattern of manipulationPatterns){
+            if (pattern.test(promptText)) {
+                securityIssues.push({
+                    severity: 'medium',
+                    type: 'manipulation',
+                    description: `Potential manipulation attempt detected: ${pattern.source}`,
+                    recommendation: 'Review prompt for manipulative language'
+                });
+            }
+        }
+        return securityIssues;
+    }
+    /**
+   * Test prompt performance with given test cases
+   */ async testPromptPerformance(prompt, testCases, model) {
+        const results = [];
+        for (const testCase of testCases){
+            const startTime = Date.now();
+            const fullPrompt = `${prompt}\n\nInput: ${testCase.input}`;
+            try {
+                const response = await _llmService.llmService.generate(fullPrompt, model);
+                const responseTime = Date.now() - startTime;
+                // Simple quality scoring based on similarity to expected output
+                const quality = this.calculateResponseQuality(response.response, testCase.expectedOutput);
+                const success = quality > 0.7; // Consider success if quality > 70%
+                results.push({
+                    responseTime,
+                    success,
+                    quality
+                });
+            } catch (error) {
+                results.push({
+                    responseTime: Date.now() - startTime,
+                    success: false,
+                    quality: 0
+                });
+            }
+        }
+        return results;
+    }
+    /**
+   * Calculate metrics from test results
+   */ calculateTestMetrics(results) {
+        const totalTests = results.length;
+        const successfulTests = results.filter((r)=>r.success).length;
+        const averageResponseTime = results.reduce((sum, r)=>sum + r.responseTime, 0) / totalTests;
+        const averageQuality = results.reduce((sum, r)=>sum + r.quality, 0) / totalTests;
+        return {
+            responseTime: averageResponseTime,
+            successRate: successfulTests / totalTests * 100,
+            qualityScore: averageQuality * 100
+        };
+    }
+    /**
+   * Calculate weighted score for comparison
+   */ calculateWeightedScore(metrics) {
+        // Normalize response time (lower is better)
+        const normalizedResponseTime = Math.max(0, 100 - metrics.responseTime / 1000 * 10);
+        // Weighted scoring: Success Rate (40%), Quality (40%), Response Time (20%)
+        return (metrics.successRate * 0.4 + metrics.qualityScore * 0.4 + normalizedResponseTime * 0.2) / 100;
+    }
+    /**
+   * Calculate response quality using simple similarity
+   */ calculateResponseQuality(response, expected) {
+        const responseWords = response.toLowerCase().split(/\s+/);
+        const expectedWords = expected.toLowerCase().split(/\s+/);
+        const commonWords = responseWords.filter((word)=>expectedWords.includes(word));
+        const similarity = commonWords.length / Math.max(responseWords.length, expectedWords.length);
+        return Math.min(1, similarity * 2); // Boost similarity score
+    }
+    /**
+   * Group events by hour
+   */ groupEventsByHour(events) {
+        const groups = new Map();
+        events.forEach((event)=>{
+            const timestamp = new Date(event.timestamp);
+            const hourKey = `${timestamp.getFullYear()}-${timestamp.getMonth()}-${timestamp.getDate()}-${timestamp.getHours()}`;
+            if (!groups.has(hourKey)) {
+                groups.set(hourKey, []);
+            }
+            groups.get(hourKey).push(event);
+        });
+        return Array.from(groups.entries()).map(([key, events])=>{
+            const parts = key.split('-').map(Number);
+            const timestamp = new Date(parts[0], parts[1], parts[2], parts[3]);
+            return {
+                timestamp,
+                events
+            };
+        }).sort((a, b)=>a.timestamp.getTime() - b.timestamp.getTime());
+    }
+    /**
+   * Calculate variance of an array of numbers
+   */ calculateVariance(numbers) {
+        const mean = numbers.reduce((sum, num)=>sum + num, 0) / numbers.length;
+        const squaredDiffs = numbers.map((num)=>Math.pow(num - mean, 2));
+        return squaredDiffs.reduce((sum, diff)=>sum + diff, 0) / numbers.length;
+    }
+    /**
+   * Get default time range (last 7 days)
+   */ getDefaultTimeRange() {
+        const end = new Date();
+        const start = new Date();
+        start.setDate(end.getDate() - 7);
+        return {
+            start,
+            end
+        };
+    }
+    constructor(){
+        _define_property(this, "eventStore", void 0);
+        _define_property(this, "analyticsEngine", void 0);
+        this.eventStore = _EventStore.EventStore.getInstance();
+        this.analyticsEngine = _AnalyticsEngine.AnalyticsEngine.getInstance();
+    }
+}
+const promptAnalyzer = new PromptAnalyzer();

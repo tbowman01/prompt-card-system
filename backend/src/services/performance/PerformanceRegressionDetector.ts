@@ -2,7 +2,7 @@ import { EventEmitter } from 'events';
 import { db } from '../../database/connection';
 import { LoadTestResults } from './LoadTestingFramework';
 import { performanceMonitor } from './PerformanceMonitor';
-import { alertingSystem } from '../health/AlertingSystem';
+import { alertingSystem, AlertType } from '../health/AlertingSystem';
 import { LRUCache } from 'lru-cache';
 import * as tf from '@tensorflow/tfjs-node';
 
@@ -784,14 +784,11 @@ export class PerformanceRegressionDetector extends EventEmitter {
     }
     
     // Send to alerting system
-    await alertingSystem.sendAlert({
-      id: alert.id,
-      type: 'performance_regression',
-      severity: alert.severity,
-      title: `Performance Regression Detected: ${alert.metric}`,
+    alertingSystem.checkAndCreateAlert({
+      type: AlertType.PERFORMANCE,
+      service: 'performance-regression-detector',
       message: `${alert.metric} degraded by ${alert.degradation.toFixed(1)}% (${alert.current} vs baseline ${alert.baseline})`,
-      timestamp: alert.timestamp,
-      metadata: {
+      details: {
         scenarioId: alert.scenarioId,
         metric: alert.metric,
         degradation: alert.degradation,

@@ -401,7 +401,7 @@ export class AnomalyDetector extends EventEmitter {
     const alerts = Array.from(this.alerts.values());
     const activeAlerts = alerts.filter(a => !a.resolved);
     
-    const alertsBySeveity = alerts.reduce((acc, alert) => {
+    const alertsByseverity = alerts.reduce((acc, alert) => {
       acc[alert.severity] = (acc[alert.severity] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);
@@ -424,7 +424,7 @@ export class AnomalyDetector extends EventEmitter {
     return {
       totalAlerts: alerts.length,
       activeAlerts: activeAlerts.length,
-      alertsBySeveity,
+      alertsByseverity,
       detectionAccuracy: accuracy,
       falsePositiveRate,
       modelCount: this.models.size,

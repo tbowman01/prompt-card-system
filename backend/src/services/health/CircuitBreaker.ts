@@ -31,7 +31,7 @@ export class CircuitBreaker extends EventEmitter {
   private failureCount = 0;
   private successCount = 0;
   private nextAttempt: Date | null = null;
-  private readonly config: CircuitBreakerConfig;
+  private config: CircuitBreakerConfig;
   private readonly serviceName: string;
   
   // Statistics

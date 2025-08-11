@@ -6,42 +6,10 @@
 import { Server, Socket } from 'socket.io';
 import OperationalTransform, { Operation, DocumentState } from './OperationalTransform';
 import CRDTService, { CRDTOperation } from './CRDTService';
-import PresenceService, { UserPresence } from './PresenceService';
+import PresenceService from './PresenceService';
+import { UserPresence, CollaborativeDocument, DocumentPermissions, UserSession, CollaborationEvent } from '../../types/collaboration';
 
-export interface CollaborativeDocument {
-  id: string;
-  title: string;
-  content: string;
-  version: number;
-  participants: string[];
-  permissions: DocumentPermissions;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface DocumentPermissions {
-  owner: string;
-  editors: string[];
-  viewers: string[];
-  public: boolean;
-}
-
-export interface UserSession {
-  userId: string;
-  username: string;
-  socketId: string;
-  documentId: string;
-  role: 'owner' | 'editor' | 'viewer';
-  lastActivity: Date;
-}
-
-export interface CollaborationEvent {
-  type: 'operation' | 'presence' | 'cursor' | 'selection';
-  data: any;
-  userId: string;
-  documentId: string;
-  timestamp: number;
-}
+// Types are now imported from shared collaboration types
 
 export class CollaborationService {
   private io: Server;
@@ -163,14 +131,7 @@ export class CollaborationService {
     });
 
     // Update presence
-    this.presenceService.updatePresence({
-      userId,
-      username,
-      documentId,
-      status: 'active',
-      lastSeen: new Date(),
-      cursor: { position: 0 }
-    });
+    await this.presenceService.updatePresence(userId, documentId, 'online');
 
     // Notify other participants
     socket.to(documentId).emit('user-joined', {
@@ -279,24 +240,14 @@ export class CollaborationService {
   /**
    * Handle cursor position updates
    */
-  private handleCursorUpdate(socket: Socket, data: { documentId: string; userId: string; position: number; selection?: { start: number; end: number } }): void {
+  private async handleCursorUpdate(socket: Socket, data: { documentId: string; userId: string; position: number; selection?: { start: number; end: number } }): Promise<void> {
     const session = this.userSessions.get(socket.id);
     if (!session || session.documentId !== data.documentId) {
       return;
     }
 
     // Update presence with cursor position
-    this.presenceService.updatePresence({
-      userId: data.userId,
-      username: session.username,
-      documentId: data.documentId,
-      status: 'active',
-      lastSeen: new Date(),
-      cursor: {
-        position: data.position,
-        selection: data.selection
-      }
-    });
+    await this.presenceService.updatePresence(data.userId, data.documentId, 'online');
 
     // Broadcast cursor update to other participants
     socket.to(data.documentId).emit('cursor-update', {
@@ -310,13 +261,13 @@ export class CollaborationService {
   /**
    * Handle presence updates
    */
-  private handlePresenceUpdate(socket: Socket, presence: UserPresence): void {
+  private async handlePresenceUpdate(socket: Socket, presence: UserPresence): Promise<void> {
     const session = this.userSessions.get(socket.id);
     if (!session || session.documentId !== presence.documentId) {
       return;
     }
 
-    this.presenceService.updatePresence(presence);
+    await this.presenceService.updatePresence(presence.userId, presence.documentId, presence.status);
 
     // Broadcast presence update
     socket.to(presence.documentId).emit('presence-update', presence);
@@ -325,7 +276,7 @@ export class CollaborationService {
   /**
    * Handle user disconnect
    */
-  private handleDisconnect(socket: Socket): void {
+  private async handleDisconnect(socket: Socket): Promise<void> {
     const session = this.userSessions.get(socket.id);
     if (!session) {
       return;
@@ -338,14 +289,7 @@ export class CollaborationService {
     }
 
     // Update presence to offline
-    this.presenceService.updatePresence({
-      userId: session.userId,
-      username: session.username,
-      documentId: session.documentId,
-      status: 'offline',
-      lastSeen: new Date(),
-      cursor: { position: 0 }
-    });
+    await this.presenceService.updatePresence(session.userId, session.documentId, 'offline');
 
     // Notify other participants
     socket.to(session.documentId).emit('user-left', {
@@ -466,7 +410,7 @@ export class CollaborationService {
     const result = [];
 
     for (const userId of participants) {
-      const presence = this.presenceService.getPresence(userId, documentId);
+      const presence = await this.presenceService.getPresence(userId);
       const session = Array.from(this.userSessions.values())
         .find(s => s.userId === userId && s.documentId === documentId);
 

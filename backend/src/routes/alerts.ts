@@ -1,10 +1,10 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import { alertingSystem, AlertSeverity } from '../services/health/AlertingSystem';
 
 const router = Router();
 
 // Get all alerts with optional filtering
-router.get('/', async (req, res) => {
+router.get('/', async (req: Request, res: Response) => {
   try {
     const {
       service,

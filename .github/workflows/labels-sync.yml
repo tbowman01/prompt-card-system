@@ -1,0 +1,193 @@
+name: 🏷️ Label Synchronization
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - '.github/labels.yml'
+      - '.github/workflows/labels-sync.yml'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  sync_labels:
+    name: 🔄 Sync Repository Labels
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 🏗️ Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: 🏷️ Create/Update Labels
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const labels = [
+              // Priority Labels
+              { name: 'priority:critical', color: 'B60205', description: '🔴 Critical priority - immediate attention required' },
+              { name: 'priority:high', color: 'D93F0B', description: '🟡 High priority - important issue' },
+              { name: 'priority:medium', color: 'FBCA04', description: '🟢 Medium priority - normal issue' },
+              { name: 'priority:low', color: '0E8A16', description: '⚪ Low priority - nice to have' },
+              
+              // Type Labels  
+              { name: 'type:bug', color: 'D73A4A', description: '🐛 Something isn\'t working' },
+              { name: 'type:feature', color: '0052CC', description: '✨ New feature or enhancement' },
+              { name: 'type:documentation', color: '1D76DB', description: '📚 Improvements or additions to documentation' },
+              { name: 'type:security', color: 'D4EDDA', description: '🛡️ Security related issue or improvement' },
+              { name: 'type:performance', color: '7057FF', description: '⚡ Performance improvement' },
+              { name: 'type:testing', color: 'F9D71C', description: '🧪 Testing related improvements' },
+              { name: 'type:refactor', color: 'E4E669', description: '🔧 Code refactoring' },
+              { name: 'type:chore', color: 'FEF2C0', description: '🏠 Maintenance tasks' },
+              
+              // Component Labels
+              { name: 'component:frontend', color: '61DAFB', description: '⚛️ Frontend (React/Next.js)' },
+              { name: 'component:backend', color: '68A063', description: '🖥️ Backend (Node.js/Express)' },
+              { name: 'component:database', color: 'FF6B6B', description: '🗄️ Database related' },
+              { name: 'component:api', color: '4ECDC4', description: '🔌 API endpoints' },
+              { name: 'component:auth', color: 'FFE66D', description: '🔐 Authentication/Authorization' },
+              { name: 'component:testing', color: 'A8E6CF', description: '🧪 Testing framework' },
+              { name: 'component:monitoring', color: 'C7CEEA', description: '📊 Monitoring/Analytics' },
+              { name: 'component:infrastructure', color: '0366D6', description: '🐳 Docker/Infrastructure' },
+              { name: 'component:ci-cd', color: '28A745', description: '⚙️ CI/CD Pipeline' },
+              
+              // Status Labels
+              { name: 'status:triage', color: 'EDEDED', description: '🔍 Needs initial triage and labeling' },
+              { name: 'status:ready', color: '0E8A16', description: '✅ Ready for development' },
+              { name: 'status:in-progress', color: 'FBCA04', description: '🔄 Currently being worked on' },
+              { name: 'status:review', color: 'FF9500', description: '👀 Under review (PR created)' },
+              { name: 'status:blocked', color: 'D93F0B', description: '⛔ Blocked by external dependency' },
+              { name: 'status:needs-info', color: 'D4C5F9', description: '❓ Waiting for more information' },
+              { name: 'status:stale', color: '969696', description: '🕰️ No recent activity - may be closed' },
+              { name: 'status:wont-fix', color: '000000', description: '❌ Will not be fixed' },
+              
+              // Effort Labels
+              { name: 'effort:small', color: 'C2E0C6', description: '🟢 Small effort (< 4 hours)' },
+              { name: 'effort:medium', color: 'FEF2C0', description: '🟡 Medium effort (1-3 days)' },
+              { name: 'effort:large', color: 'F9C2C2', description: '🔴 Large effort (> 1 week)' },
+              
+              // Special Labels
+              { name: 'good-first-issue', color: '7057FF', description: '👶 Good for newcomers' },
+              { name: 'help-wanted', color: '0E8A16', description: '🙋 Community help wanted' },
+              { name: 'breaking-change', color: 'B60205', description: '💥 Breaking change' },
+              { name: 'dependencies', color: '0366D6', description: '📦 Dependency updates' },
+              { name: 'duplicate', color: 'CCCCCC', description: '👥 Duplicate issue' },
+              { name: 'question', color: 'CC317C', description: '❓ General question' },
+              { name: 'wip', color: 'FFE4B5', description: '🚧 Work in progress' },
+              
+              // Automation Labels
+              { name: 'automation', color: '5319E7', description: '🤖 Created by automation' },
+              { name: 'report', color: '1F4E79', description: '📊 Automated report' },
+              { name: 'weekly-review', color: '2E8B57', description: '📋 Weekly review report' }
+            ];
+            
+            console.log(`Syncing ${labels.length} labels...`);
+            
+            for (const label of labels) {
+              try {
+                // Try to get existing label
+                const { data: existingLabel } = await github.rest.issues.getLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: label.name
+                }).catch(() => ({ data: null }));
+                
+                if (existingLabel) {
+                  // Update existing label if different
+                  if (existingLabel.color !== label.color.toLowerCase() || 
+                      existingLabel.description !== label.description) {
+                    await github.rest.issues.updateLabel({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      name: label.name,
+                      color: label.color,
+                      description: label.description
+                    });
+                    console.log(`✅ Updated label: ${label.name}`);
+                  } else {
+                    console.log(`➡️ Label unchanged: ${label.name}`);
+                  }
+                } else {
+                  // Create new label
+                  await github.rest.issues.createLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name: label.name,
+                    color: label.color,
+                    description: label.description
+                  });
+                  console.log(`🆕 Created label: ${label.name}`);
+                }
+              } catch (error) {
+                console.error(`❌ Error processing label ${label.name}:`, error.message);
+              }
+            }
+            
+            console.log('✨ Label synchronization completed!');
+            
+      - name: 📋 Generate Label Documentation
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // Get all labels from the repository
+            const { data: repoLabels } = await github.rest.issues.listLabelsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100
+            });
+            
+            // Group labels by category
+            const labelGroups = {
+              'Priority': repoLabels.filter(l => l.name.startsWith('priority:')),
+              'Type': repoLabels.filter(l => l.name.startsWith('type:')),
+              'Component': repoLabels.filter(l => l.name.startsWith('component:')),
+              'Status': repoLabels.filter(l => l.name.startsWith('status:')),
+              'Effort': repoLabels.filter(l => l.name.startsWith('effort:')),
+              'Special': repoLabels.filter(l => !l.name.includes(':') || l.name.includes('good-first-issue') || l.name.includes('help-wanted') || l.name.includes('breaking-change'))
+            };
+            
+            let documentation = `# 🏷️ Repository Labels\n\n*Auto-generated on ${new Date().toISOString()}*\n\n`;
+            documentation += `This repository uses a structured labeling system to help organize and prioritize issues and pull requests.\n\n`;
+            
+            for (const [category, labels] of Object.entries(labelGroups)) {
+              if (labels.length === 0) continue;
+              
+              documentation += `## ${category} Labels\n\n`;
+              documentation += `| Label | Description |\n`;
+              documentation += `|-------|-------------|\n`;
+              
+              for (const label of labels.sort((a, b) => a.name.localeCompare(b.name))) {
+                const colorBadge = `![#${label.color}](https://via.placeholder.com/15/${label.color}/000000?text=+)`;
+                documentation += `| ${colorBadge} \`${label.name}\` | ${label.description || 'No description'} |\n`;
+              }
+              
+              documentation += `\n`;
+            }
+            
+            documentation += `## Usage Guidelines\n\n`;
+            documentation += `### Automatic Labeling\n`;
+            documentation += `- Issues are automatically labeled based on title/body content\n`;
+            documentation += `- Priority is assigned based on keywords like "urgent", "critical", etc.\n`;
+            documentation += `- Components are detected from mentions of "frontend", "backend", "api", etc.\n\n`;
+            
+            documentation += `### Manual Labeling\n`;
+            documentation += `- Use slash commands in comments: \`/priority high\`, \`/ready\`, \`/blocked\`\n`;
+            documentation += `- Team members can manually adjust labels as needed\n`;
+            documentation += `- Status labels are automatically updated based on workflow events\n\n`;
+            
+            documentation += `### Label Combinations\n`;
+            documentation += `- Every issue should have: **Type + Priority + Component** (minimum)\n`;
+            documentation += `- Status labels track the current state of the issue\n`;
+            documentation += `- Effort labels help with sprint planning\n\n`;
+            
+            documentation += `---\n*This documentation is automatically updated when labels change*`;
+            
+            console.log('Generated label documentation:', documentation.length, 'characters');
+            
+            // For now, we'll just log the documentation
+            // In a real scenario, you might want to commit this to a file or update a wiki
+            console.log('Label documentation generated successfully!');

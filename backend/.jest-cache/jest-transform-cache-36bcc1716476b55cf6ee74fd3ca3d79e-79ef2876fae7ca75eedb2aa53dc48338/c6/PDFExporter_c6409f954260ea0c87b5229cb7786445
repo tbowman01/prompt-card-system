@@ -1,0 +1,394 @@
+3025f1dcc95a4e5bab680a11e7fec3f2
+"use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+Object.defineProperty(exports, "PDFExporter", {
+    enumerable: true,
+    get: function() {
+        return PDFExporter;
+    }
+});
+const _pdfkit = /*#__PURE__*/ _interop_require_default(require("pdfkit"));
+const _chartjsnodecanvas = require("chartjs-node-canvas");
+const _fs = /*#__PURE__*/ _interop_require_default(require("fs"));
+const _path = /*#__PURE__*/ _interop_require_default(require("path"));
+function _define_property(obj, key, value) {
+    if (key in obj) {
+        Object.defineProperty(obj, key, {
+            value: value,
+            enumerable: true,
+            configurable: true,
+            writable: true
+        });
+    } else {
+        obj[key] = value;
+    }
+    return obj;
+}
+function _interop_require_default(obj) {
+    return obj && obj.__esModule ? obj : {
+        default: obj
+    };
+}
+class PDFExporter {
+    async exportToPDF(report, options = {
+        format: 'pdf',
+        includeCharts: true,
+        includeRawData: false
+    }) {
+        const doc = new _pdfkit.default({
+            size: 'A4',
+            margin: 50,
+            info: {
+                Title: report.title,
+                Author: 'Prompt Card System',
+                Subject: report.description,
+                Creator: 'Prompt Card System Report Generator',
+                Producer: 'PDFKit',
+                CreationDate: report.generatedAt
+            }
+        });
+        const buffers = [];
+        doc.on('data', buffers.push.bind(buffers));
+        try {
+            await this.generatePDFContent(doc, report, options);
+            doc.end();
+            return new Promise((resolve, reject)=>{
+                doc.on('end', ()=>{
+                    resolve(Buffer.concat(buffers));
+                });
+                doc.on('error', reject);
+            });
+        } catch (error) {
+            doc.end();
+            throw error;
+        }
+    }
+    async generatePDFContent(doc, report, options) {
+        // Cover page
+        await this.generateCoverPage(doc, report, options);
+        // Table of contents
+        this.generateTableOfContents(doc, report);
+        // Executive summary
+        this.generateExecutiveSummary(doc, report);
+        // Report sections
+        for (const section of report.sections.sort((a, b)=>a.order - b.order)){
+            await this.generateSection(doc, section, options);
+        }
+        // Appendices
+        if (options.includeRawData) {
+            this.generateAppendices(doc, report);
+        }
+    }
+    async generateCoverPage(doc, report, options) {
+        const pageWidth = doc.page.width;
+        const pageHeight = doc.page.height;
+        // Add logo if provided
+        if (options.customizations?.logo) {
+            try {
+                const logoPath = _path.default.resolve(options.customizations.logo);
+                if (_fs.default.existsSync(logoPath)) {
+                    doc.image(logoPath, 50, 50, {
+                        width: 100
+                    });
+                }
+            } catch (error) {
+                console.warn('Could not load logo:', error.message);
+            }
+        }
+        // Title
+        doc.fontSize(28).fillColor(options.customizations?.colors?.primary || '#2c3e50').text(report.title, 50, 200, {
+            align: 'center',
+            width: pageWidth - 100
+        });
+        // Subtitle
+        doc.fontSize(16).fillColor('#7f8c8d').text(report.description, 50, 280, {
+            align: 'center',
+            width: pageWidth - 100
+        });
+        // Generated date
+        doc.fontSize(12).fillColor('#34495e').text(`Generated on: ${report.generatedAt.toLocaleDateString()}`, 50, 350, {
+            align: 'center'
+        });
+        // Key metrics overview
+        doc.fontSize(14).fillColor('#2c3e50').text('Key Metrics', 50, 400, {
+            align: 'center'
+        });
+        const keyMetrics = report.summary.keyMetrics;
+        const metricsPerRow = 2;
+        const startY = 430;
+        const columnWidth = (pageWidth - 100) / metricsPerRow;
+        keyMetrics.forEach((metric, index)=>{
+            const row = Math.floor(index / metricsPerRow);
+            const col = index % metricsPerRow;
+            const x = 50 + col * columnWidth;
+            const y = startY + row * 60;
+            doc.fontSize(12).fillColor('#7f8c8d').text(metric.label, x, y, {
+                width: columnWidth - 20,
+                align: 'center'
+            });
+            doc.fontSize(18).fillColor(options.customizations?.colors?.accent || '#3498db').text(metric.value.toString(), x, y + 20, {
+                width: columnWidth - 20,
+                align: 'center'
+            });
+        });
+        // Footer
+        doc.fontSize(10).fillColor('#95a5a6').text('Confidential - Internal Use Only', 50, pageHeight - 80, {
+            align: 'center'
+        });
+        doc.addPage();
+    }
+    generateTableOfContents(doc, report) {
+        doc.fontSize(20).fillColor('#2c3e50').text('Table of Contents', 50, 50);
+        let y = 100;
+        doc.fontSize(12).fillColor('#34495e');
+        // Executive Summary
+        doc.text('Executive Summary', 70, y, {
+            continued: true
+        });
+        doc.text('.'.repeat(50), {
+            continued: true
+        });
+        doc.text('Page 3');
+        y += 25;
+        // Sections
+        report.sections.forEach((section, index)=>{
+            doc.text(section.title, 70, y, {
+                continued: true
+            });
+            doc.text('.'.repeat(50), {
+                continued: true
+            });
+            doc.text(`Page ${4 + index}`);
+            y += 20;
+        });
+        // Appendices
+        if (report.sections.length > 0) {
+            y += 20;
+            doc.text('Appendices', 70, y, {
+                continued: true
+            });
+            doc.text('.'.repeat(50), {
+                continued: true
+            });
+            doc.text(`Page ${4 + report.sections.length}`);
+        }
+        doc.addPage();
+    }
+    generateExecutiveSummary(doc, report) {
+        doc.fontSize(20).fillColor('#2c3e50').text('Executive Summary', 50, 50);
+        doc.fontSize(12).fillColor('#34495e').text(report.description, 50, 90, {
+            width: 500
+        });
+        // Key metrics
+        doc.fontSize(16).fillColor('#2c3e50').text('Key Performance Indicators', 50, 140);
+        let y = 170;
+        report.summary.keyMetrics.forEach((metric)=>{
+            doc.fontSize(12).fillColor('#7f8c8d').text(metric.label, 70, y, {
+                continued: true
+            });
+            doc.fillColor('#2c3e50').text(`: ${metric.value}`, {
+                continued: false
+            });
+            y += 20;
+        });
+        // Key insights
+        if (report.summary.insights.length > 0) {
+            doc.fontSize(16).fillColor('#2c3e50').text('Key Insights', 50, y + 20);
+            y += 50;
+            report.summary.insights.slice(0, 3).forEach((insight)=>{
+                doc.fontSize(14).fillColor('#e74c3c').text(`• ${insight.title}`, 70, y);
+                doc.fontSize(11).fillColor('#34495e').text(insight.description, 90, y + 18, {
+                    width: 450
+                });
+                y += 60;
+            });
+        }
+        doc.addPage();
+    }
+    async generateSection(doc, section, options) {
+        doc.fontSize(18).fillColor('#2c3e50').text(section.title, 50, 50);
+        if (section.description) {
+            doc.fontSize(12).fillColor('#7f8c8d').text(section.description, 50, 80, {
+                width: 500
+            });
+        }
+        let y = section.description ? 120 : 90;
+        switch(section.type){
+            case 'metrics':
+                y = this.generateMetricsSection(doc, section.content, y);
+                break;
+            case 'charts':
+                if (options.includeCharts) {
+                    y = await this.generateChartSection(doc, section.content, y);
+                }
+                break;
+            case 'tables':
+                y = this.generateTableSection(doc, section.content, y);
+                break;
+            case 'insights':
+                y = this.generateInsightsSection(doc, section.content, y);
+                break;
+        }
+        doc.addPage();
+    }
+    generateMetricsSection(doc, metrics, y) {
+        const metricsPerRow = 2;
+        const columnWidth = (doc.page.width - 100) / metricsPerRow;
+        const rowHeight = 80;
+        metrics.forEach((metric, index)=>{
+            const row = Math.floor(index / metricsPerRow);
+            const col = index % metricsPerRow;
+            const x = 50 + col * columnWidth;
+            const currentY = y + row * rowHeight;
+            // Metric box
+            doc.rect(x, currentY, columnWidth - 20, rowHeight - 10).fillColor('#ecf0f1').fill();
+            // Metric label
+            doc.fontSize(12).fillColor('#7f8c8d').text(metric.label, x + 10, currentY + 10, {
+                width: columnWidth - 40,
+                align: 'center'
+            });
+            // Metric value
+            doc.fontSize(20).fillColor('#2c3e50').text(metric.value.toString() + (metric.unit ? ` ${metric.unit}` : ''), x + 10, currentY + 30, {
+                width: columnWidth - 40,
+                align: 'center'
+            });
+            // Status indicator
+            if (metric.status) {
+                const statusColor = metric.status === 'good' ? '#27ae60' : metric.status === 'warning' ? '#f39c12' : '#e74c3c';
+                doc.circle(x + columnWidth - 30, currentY + 15, 5).fillColor(statusColor).fill();
+            }
+        });
+        return y + Math.ceil(metrics.length / metricsPerRow) * rowHeight + 20;
+    }
+    async generateChartSection(doc, chartData, y) {
+        try {
+            const chartConfig = {
+                type: 'line',
+                data: {
+                    labels: chartData.labels,
+                    datasets: chartData.datasets.map((dataset)=>({
+                            label: dataset.label,
+                            data: dataset.data,
+                            backgroundColor: dataset.backgroundColor,
+                            borderColor: dataset.borderColor,
+                            borderWidth: dataset.borderWidth
+                        }))
+                },
+                options: {
+                    responsive: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            };
+            const chartBuffer = await this.chartRenderer.renderToBuffer(chartConfig);
+            const maxWidth = 500;
+            const maxHeight = 300;
+            doc.image(chartBuffer, 50, y, {
+                width: maxWidth,
+                height: maxHeight,
+                align: 'center'
+            });
+            return y + maxHeight + 20;
+        } catch (error) {
+            console.error('Error generating chart:', error);
+            doc.fontSize(12).fillColor('#e74c3c').text('Chart could not be generated', 50, y);
+            return y + 40;
+        }
+    }
+    generateTableSection(doc, tableData, y) {
+        const pageWidth = doc.page.width - 100;
+        const columnWidth = pageWidth / tableData.headers.length;
+        const rowHeight = 25;
+        // Headers
+        doc.fontSize(10).fillColor('#2c3e50');
+        tableData.headers.forEach((header, index)=>{
+            const x = 50 + index * columnWidth;
+            doc.rect(x, y, columnWidth, rowHeight).fillColor('#34495e').fill();
+            doc.fillColor('#ffffff').text(header, x + 5, y + 8, {
+                width: columnWidth - 10,
+                align: 'center'
+            });
+        });
+        y += rowHeight;
+        // Rows (limit to prevent page overflow)
+        const maxRows = Math.min(tableData.rows.length, 20);
+        doc.fillColor('#2c3e50');
+        for(let i = 0; i < maxRows; i++){
+            const row = tableData.rows[i];
+            row.forEach((cell, index)=>{
+                const x = 50 + index * columnWidth;
+                if (i % 2 === 0) {
+                    doc.rect(x, y, columnWidth, rowHeight).fillColor('#ecf0f1').fill();
+                }
+                doc.fillColor('#2c3e50').text(cell?.toString() || '', x + 5, y + 8, {
+                    width: columnWidth - 10,
+                    align: 'center'
+                });
+            });
+            y += rowHeight;
+        }
+        if (tableData.rows.length > maxRows) {
+            doc.fontSize(10).fillColor('#7f8c8d').text(`... and ${tableData.rows.length - maxRows} more rows`, 50, y + 10);
+            y += 30;
+        }
+        return y + 20;
+    }
+    generateInsightsSection(doc, insights, y) {
+        if (insights.insights) {
+            insights.insights.forEach((insight)=>{
+                const severityColor = insight.severity === 'critical' ? '#e74c3c' : insight.severity === 'high' ? '#f39c12' : insight.severity === 'medium' ? '#f1c40f' : '#27ae60';
+                doc.fontSize(14).fillColor(severityColor).text(`• ${insight.title}`, 50, y);
+                doc.fontSize(11).fillColor('#34495e').text(insight.description, 70, y + 18, {
+                    width: 480
+                });
+                y += 50;
+                if (insight.recommendations && insight.recommendations.length > 0) {
+                    doc.fontSize(10).fillColor('#7f8c8d').text('Recommendations:', 70, y);
+                    insight.recommendations.forEach((rec)=>{
+                        doc.text(`- ${rec}`, 90, y + 15, {
+                            width: 460
+                        });
+                        y += 15;
+                    });
+                    y += 10;
+                }
+            });
+        }
+        return y + 20;
+    }
+    generateAppendices(doc, report) {
+        doc.fontSize(18).fillColor('#2c3e50').text('Appendices', 50, 50);
+        doc.fontSize(12).fillColor('#34495e').text('Report Generation Details', 50, 90);
+        doc.fontSize(10).fillColor('#7f8c8d').text(`Report ID: ${report.id}`, 70, 120).text(`Generated: ${report.generatedAt.toLocaleString()}`, 70, 140).text(`Template: ${report.template.name}`, 70, 160).text(`Generation Time: ${report.metadata.generationTime}ms`, 70, 180);
+        // Filters applied
+        if (Object.keys(report.filters).length > 0) {
+            doc.fontSize(12).fillColor('#34495e').text('Filters Applied', 50, 220);
+            let y = 250;
+            Object.entries(report.filters).forEach(([key, value])=>{
+                doc.fontSize(10).fillColor('#7f8c8d').text(`${key}: ${value}`, 70, y);
+                y += 15;
+            });
+        }
+    }
+    constructor(){
+        _define_property(this, "chartRenderer", void 0);
+        this.chartRenderer = new _chartjsnodecanvas.ChartJSNodeCanvas({
+            width: PDFExporter.CHART_WIDTH,
+            height: PDFExporter.CHART_HEIGHT,
+            backgroundColour: 'white'
+        });
+    }
+}
+_define_property(PDFExporter, "CHART_WIDTH", 800);
+_define_property(PDFExporter, "CHART_HEIGHT", 400);

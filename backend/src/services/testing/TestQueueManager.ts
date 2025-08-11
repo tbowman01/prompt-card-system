@@ -9,7 +9,7 @@ import { performance } from 'perf_hooks';
 import { Worker } from 'worker_threads';
 import { LRUCache } from 'lru-cache';
 import { promisify } from 'util';
-import { setTimeout } from 'timers/promises';
+import { setTimeout as setTimeoutPromise } from 'timers/promises';
 
 export interface TestJob {
   test_execution_id: string;
@@ -116,7 +116,7 @@ export class TestQueueManager extends EventEmitter {
 
     // Initialize Redis queue with optimized settings
     this.testQueue = new Bull('test-execution', {
-      redis: redisConfig || {
+      redis: redisConfig as any || {
         host: process.env.REDIS_HOST || 'localhost',
         port: parseInt(process.env.REDIS_PORT || '6379'),
         maxRetriesPerRequest: 3,
@@ -424,7 +424,7 @@ export class TestQueueManager extends EventEmitter {
 
       // Execute with timeout
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error('Test execution timeout')), configuration.timeout_per_test);
+        setTimeout(() => reject(new Error('Test execution timeout')), configuration.timeout_per_test || 30000);
       });
 
       const executionPromise = llmService.generate(prompt, model);
@@ -432,7 +432,7 @@ export class TestQueueManager extends EventEmitter {
       const llmOutput = llmResponse.response;
 
       // Validate assertions
-      const assertionResults = llmService.validateAssertions(llmOutput, assertions);
+      const assertionResults = await llmService.validateAssertions(llmOutput, assertions);
       const allAssertionsPassed = assertionResults.every(result => result.passed);
 
       const executionTime = Date.now() - startTime;
@@ -686,7 +686,7 @@ export class TestQueueManager extends EventEmitter {
       
       // Small delay between batches to prevent overwhelming the system
       if (batches.indexOf(batch) < batches.length - 1) {
-        await setTimeout(100);
+        await setTimeoutPromise(100);
       }
     }
 
@@ -725,7 +725,7 @@ export class TestQueueManager extends EventEmitter {
 
       // Execute with timeout using Promise.race
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error('Test execution timeout')), configuration.timeout_per_test);
+        setTimeout(() => reject(new Error('Test execution timeout')), configuration.timeout_per_test || 30000);
       });
 
       const executionPromise = llmService.generate(prompt, model);
@@ -733,7 +733,7 @@ export class TestQueueManager extends EventEmitter {
       const llmOutput = llmResponse.response;
 
       // Validate assertions
-      const assertionResults = llmService.validateAssertions(llmOutput, assertions);
+      const assertionResults = await llmService.validateAssertions(llmOutput, assertions);
       const allAssertionsPassed = assertionResults.every(result => result.passed);
 
       const executionTime = performance.now() - startTime;
