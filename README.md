@@ -1,4 +1,4 @@
-# Prompt Card System - Feature Overview
+# Prompt Card System - Enterprise AI Testing Platform
 
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/tbowman01/prompt-card-system/badge)](https://api.securityscorecards.dev/projects/github.com/tbowman01/prompt-card-system)
 [![Security Rating](https://img.shields.io/badge/security-A+-brightgreen)](https://github.com/tbowman01/prompt-card-system/security)
@@ -16,7 +16,7 @@
 [![Maintained](https://img.shields.io/badge/maintained-yes-brightgreen.svg)](https://github.com/tbowman01/prompt-card-system/commits/main)
 [![Contributors](https://img.shields.io/github/contributors/tbowman01/prompt-card-system.svg)](https://github.com/tbowman01/prompt-card-system/graphs/contributors)
 
-A comprehensive prompt testing and evaluation system with advanced analytics, AI-powered optimization, and real-time performance monitoring.
+A comprehensive enterprise-grade AI prompt testing and evaluation platform featuring advanced analytics, AI-powered optimization, real-time collaboration, blockchain audit trails, and comprehensive monitoring infrastructure.
 
 ## 🏆 Security & Quality
 
@@ -80,34 +80,71 @@ A comprehensive prompt testing and evaluation system with advanced analytics, AI
 - **Anomaly Detection** - ML-powered performance monitoring
 - **Pattern Recognition** - Automatic optimization suggestions
 
-### 🔧 Technical Architecture
+### 🔧 System Architecture Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                    Frontend (Next.js 14)                           │
+│                   Load Balancer & Reverse Proxy                    │
+│                          (NGINX)                                   │
 ├─────────────────────────────────────────────────────────────────────┤
-│ • Analytics Dashboard     • Real-time Charts                       │
-│ • Cost Tracking          • Progress Monitoring                     │
-│ • Report Generation      • Optimization UI                         │
+│ • SSL Termination        • Rate Limiting                           │
+│ • Load Balancing         • Static Asset Caching                    │
 └─────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                    Backend (Node.js + Express)                     │
+│                    Frontend Layer (Next.js 14)                     │
 ├─────────────────────────────────────────────────────────────────────┤
-│ • Analytics Engine       • Optimization Engine                     │
-│ • Cost Tracker          • Parallel Test Runner                     │
-│ • Report Generator       • WebSocket Server                        │
-│ • AI Assertion Engine    • Model Health Monitor                    │
+│ • React Components       • Real-time Dashboard                     │
+│ • TypeScript             • WebSocket Integration                   │
+│ • Tailwind CSS           • SWR Data Fetching                       │
+│ • Chart.js/D3            • Progressive Web App                     │
 └─────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                    Data Layer                                      │
+│                    API Gateway & Backend Services                  │
+│                     (Node.js + Express.js)                         │
 ├─────────────────────────────────────────────────────────────────────┤
-│ • SQLite Database        • Redis Cache                             │
-│ • Event Store           • Performance Metrics                      │
-│ • Cost Analytics        • Test Results                             │
+│ Authentication & Authorization    │    Advanced Analytics Engine    │
+│ • JWT Tokens                     │    • Real-time Metrics          │
+│ • Role-based Access Control      │    • Predictive Analytics       │
+│ • API Key Management             │    • ML-powered Insights        │
+│ • Rate Limiting                  │    • Voice Interface             │
+├─────────────────────────────────┼─────────────────────────────────┤
+│ Core Business Services           │    Testing & Execution Engine   │
+│ • Prompt Card Management         │    • Parallel Test Execution    │
+│ • Test Case Management           │    • Queue Management           │
+│ • AI Optimization Engine         │    • Resource Allocation        │
+│ • Report Generation              │    • Progress Tracking          │
+├─────────────────────────────────┼─────────────────────────────────┤
+│ Collaboration Services           │    Monitoring & Observability   │
+│ • Real-time Collaboration        │    • OpenTelemetry Tracing      │
+│ • CRDT & Operational Transform   │    • Prometheus Metrics         │
+│ • WebSocket Management           │    • Structured Logging         │
+│ • Presence Tracking              │    • Health Checks              │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Data & Storage Layer                            │
+├─────────────────────────────────────────────────────────────────────┤
+│ Primary Database      │    Caching & Sessions    │    File Storage  │
+│ • PostgreSQL          │    • Redis                │    • Volume Mounts│
+│ • Multi-tenant Schema │    • Session Store        │    • Uploads     │
+│ • Automatic Backups   │    • Queue Management     │    • Logs        │
+│ • Connection Pooling  │    • Real-time Pub/Sub    │    • Reports     │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    External Services & AI Layer                    │
+├─────────────────────────────────────────────────────────────────────┤
+│ LLM Providers            │    Monitoring Stack       │    Security   │
+│ • Ollama (Local)         │    • Prometheus            │    • Snyk     │
+│ • OpenAI API             │    • Grafana               │    • CodeQL    │
+│ • Anthropic Claude       │    • Jaeger Tracing        │    • OWASP     │
+│ • Hugging Face           │    • Loki Logs             │    • TruffleHog│
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
