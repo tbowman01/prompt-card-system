@@ -47,6 +47,7 @@ import loadTestingRoutes from './routes/loadTesting';
 import { securityRoutes } from './routes/security';
 import { samplePromptRoutes } from './routes/samplePrompts';
 import cicdMonitoringRoutes from './routes/cicd-monitoring';
+import dependenciesRoutes from './routes/dependencies';
 import { initializeOptimizationServices } from './services/optimization';
 import { performanceMonitor } from './services/performance/PerformanceMonitor';
 import { loadTestScheduler } from './services/performance/LoadTestScheduler';
@@ -248,6 +249,7 @@ app.use('/api/load-testing', loadTestingRoutes);
 app.use('/api/security', securityRoutes);
 app.use('/api/sample-prompts', apiRateLimit, samplePromptRoutes);
 app.use('/api/ci-cd', apiRateLimit, cicdMonitoringRoutes);
+app.use('/api/dependencies', apiRateLimit, dependenciesRoutes);
 
 // Error handling middleware
 app.use(errorHandler);
