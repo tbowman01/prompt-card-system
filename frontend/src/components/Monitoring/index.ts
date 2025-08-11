@@ -5,3 +5,7 @@ export { default as AlertsManager } from './AlertsManager';
 export { default as DistributedTracingViz } from './DistributedTracingViz';
 export { default as PerformanceHeatmap } from './PerformanceHeatmap';
 export { default as CustomMetricsDashboard } from './CustomMetricsDashboard';
+export { default as PipelineMonitoring } from './PipelineMonitoring';
+export { default as BuildStatusVisualization } from './BuildStatusVisualization';
+export { default as DeploymentMonitoring } from './DeploymentMonitoring';
+export { default as ErrorReporting } from './ErrorReporting';

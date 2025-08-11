@@ -123,6 +123,16 @@ export class HealthOrchestrator extends EventEmitter {
         name: 'model-init',
         criticalService: false,
         dependencies: ['ollama']
+      },
+      {
+        name: 'ci-cd-metrics',
+        criticalService: false,
+        dependencies: ['backend', 'prometheus']
+      },
+      {
+        name: 'github-api',
+        criticalService: false,
+        dependencies: []
       }
     ];
 
@@ -408,6 +418,10 @@ export class HealthOrchestrator extends EventEmitter {
         return this.checkGrafana();
       case 'model-init':
         return this.checkModelInit();
+      case 'ci-cd-metrics':
+        return this.checkCICDMetrics();
+      case 'github-api':
+        return this.checkGitHubAPI();
       default:
         return {
           status: 'unhealthy',
@@ -640,6 +654,59 @@ export class HealthOrchestrator extends EventEmitter {
       return {
         status: 'unhealthy',
         message: `Model init check failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+      };
+    }
+  }
+
+  private async checkCICDMetrics(): Promise<{ status: ServiceHealth['status']; message?: string; details?: any }> {
+    try {
+      const response = await axios.get('http://localhost:3001/api/ci-cd/health', { timeout: this.config.timeout });
+      const data = response.data;
+      
+      return {
+        status: data.status === 'healthy' ? 'healthy' : data.status === 'degraded' ? 'degraded' : 'unhealthy',
+        message: `CI/CD metrics system ${data.status}`,
+        details: {
+          components: data.components,
+          metrics: data.metrics,
+          lastCollection: data.metrics?.lastCollection
+        }
+      };
+    } catch (error) {
+      return {
+        status: 'unhealthy',
+        message: `CI/CD metrics check failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+      };
+    }
+  }
+
+  private async checkGitHubAPI(): Promise<{ status: ServiceHealth['status']; message?: string; details?: any }> {
+    try {
+      const response = await axios.get('https://api.github.com', { 
+        timeout: this.config.timeout,
+        headers: process.env.GITHUB_TOKEN ? {
+          'Authorization': `token ${process.env.GITHUB_TOKEN}`,
+          'User-Agent': 'PromptCardSystem/1.0'
+        } : {}
+      });
+      
+      const rateLimitRemaining = response.headers['x-ratelimit-remaining'];
+      const rateLimitReset = response.headers['x-ratelimit-reset'];
+      
+      return {
+        status: response.status === 200 ? 'healthy' : 'degraded',
+        message: 'GitHub API accessible',
+        details: {
+          rateLimitRemaining: parseInt(rateLimitRemaining || '0'),
+          rateLimitReset: rateLimitReset ? new Date(parseInt(rateLimitReset) * 1000).toISOString() : null,
+          authenticated: !!process.env.GITHUB_TOKEN
+        }
+      };
+    } catch (error) {
+      return {
+        status: 'unhealthy',
+        message: `GitHub API check failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        details: { authenticated: !!process.env.GITHUB_TOKEN }
       };
     }
   }

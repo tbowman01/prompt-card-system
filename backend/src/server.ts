@@ -46,6 +46,7 @@ import { authRoutes } from './routes/auth';
 import loadTestingRoutes from './routes/loadTesting';
 import { securityRoutes } from './routes/security';
 import { samplePromptRoutes } from './routes/samplePrompts';
+import cicdMonitoringRoutes from './routes/cicd-monitoring';
 import { initializeOptimizationServices } from './services/optimization';
 import { performanceMonitor } from './services/performance/PerformanceMonitor';
 import { loadTestScheduler } from './services/performance/LoadTestScheduler';
@@ -58,6 +59,7 @@ import { modelTrainingEngine } from './services/training/ModelTrainingEngine';
 import { modelRegistry } from './services/training/ModelRegistry';
 import { securityMonitor, logAggregator, alertingSystem as securityAlerting, complianceChecker } from './services/security';
 import { mlAnalyticsCoordinator } from './services/analytics/MLAnalyticsCoordinator';
+import { cicdMetricsCollector } from './services/monitoring/CICDMetricsCollector';
 
 dotenv.config();
 
@@ -211,6 +213,14 @@ mlAnalyticsCoordinator.initialize().then(() => {
   console.error('Failed to initialize ML Analytics Coordinator:', error);
 });
 
+// Initialize CI/CD Metrics Collector
+console.log('Initializing CI/CD Metrics Collector...');
+cicdMetricsCollector.start().then(() => {
+  console.log('CI/CD Metrics Collector started successfully');
+}).catch(error => {
+  console.error('Failed to initialize CI/CD Metrics Collector:', error);
+});
+
 // Security endpoints (no rate limiting for CSRF token)
 app.get('/api/security/csrf-token', getCSRFToken);
 
@@ -237,6 +247,7 @@ app.use('/api/training', heavyOperationRateLimit, trainingRoutes); // Heavy oper
 app.use('/api/load-testing', loadTestingRoutes);
 app.use('/api/security', securityRoutes);
 app.use('/api/sample-prompts', apiRateLimit, samplePromptRoutes);
+app.use('/api/ci-cd', apiRateLimit, cicdMonitoringRoutes);
 
 // Error handling middleware
 app.use(errorHandler);
@@ -273,6 +284,9 @@ server.listen(PORT, () => {
   console.log(`🤖 ML-powered anomaly detection active`);
   console.log(`📊 Capacity planning and forecasting enabled`);
   console.log(`🎯 Auto-training ML models enabled`);
+  console.log(`🔄 CI/CD Metrics Collector active`);
+  console.log(`📈 CI/CD monitoring API available at /api/ci-cd`);
+  console.log(`🚀 Pipeline metrics and performance tracking enabled`);
   
   // Security status
   console.log(`\n🔒 Security Features Active:`);

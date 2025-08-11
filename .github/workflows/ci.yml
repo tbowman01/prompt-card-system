@@ -866,3 +866,31 @@ jobs:
           echo "Status: ${{ needs.quality-gate-optimized.result == 'success' && 'passing' || 'failing' }}"
           echo "Performance: 65% improved"
           echo "Completion: 100% target achieved"
+
+      - name: Send metrics to monitoring system
+        if: always()
+        continue-on-error: true
+        run: |
+          # Send pipeline metrics to our monitoring system
+          curl -X POST -H "Content-Type: application/json" \
+            -H "X-GitHub-Event: workflow_run" \
+            -d '{
+              "workflow_run": {
+                "id": "${{ github.run_id }}",
+                "name": "${{ github.workflow }}",
+                "status": "completed",
+                "conclusion": "${{ needs.quality-gate-optimized.result == 'success' && 'success' || 'failure' }}",
+                "head_branch": "${{ github.ref_name }}",
+                "head_sha": "${{ github.sha }}",
+                "event": "${{ github.event_name }}",
+                "created_at": "${{ github.event.repository.created_at }}",
+                "updated_at": "${{ github.event.repository.updated_at }}",
+                "head_commit": {
+                  "author": {
+                    "name": "${{ github.actor }}"
+                  }
+                }
+              },
+              "action": "completed"
+            }' \
+            http://localhost:3001/api/ci-cd/webhook/github || echo "Failed to send metrics (monitoring system may be offline)"
