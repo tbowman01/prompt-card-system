@@ -1,0 +1,550 @@
+name: 🧠 Smart Issue Assignment & Load Balancing
+
+on:
+  issues:
+    types: [opened, reopened, unassigned]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      rebalance:
+        description: 'Rebalance all open issues'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  smart_assignment:
+    name: 🤖 Intelligent Issue Assignment
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 🏗️ Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: 🧠 AI-Powered Assignment Logic
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // Smart assignment system
+            class SmartAssigner {
+              constructor(github, context) {
+                this.github = github;
+                this.context = context;
+                this.teamConfig = {
+                  members: {
+                    // Define team members and their expertise
+                    // This would be loaded from a config file in production
+                    'tbowman01': {
+                      expertise: ['backend', 'api', 'database', 'architecture'],
+                      maxCapacity: 10,
+                      preferredPriorities: ['critical', 'high'],
+                      availability: 'active'
+                    }
+                    // Add more team members as needed
+                  },
+                  rules: {
+                    maxIssuesPerPerson: 15,
+                    criticalIssueLimit: 3,
+                    autoAssignThreshold: 0.7, // 70% match score
+                    loadBalancingEnabled: true
+                  }
+                };
+              }
+              
+              async assignIssue(issue) {
+                console.log(`🔍 Analyzing issue #${issue.number} for assignment...`);
+                
+                // Skip if already assigned
+                if (issue.assignees && issue.assignees.length > 0) {
+                  console.log('Issue already assigned, skipping...');
+                  return;
+                }
+                
+                // Analyze issue
+                const analysis = await this.analyzeIssue(issue);
+                const teamWorkload = await this.getTeamWorkload();
+                const candidates = await this.findBestCandidates(analysis, teamWorkload);
+                
+                if (candidates.length === 0) {
+                  console.log('No suitable candidates found');
+                  await this.addNeedsAssignmentLabel(issue);
+                  return;
+                }
+                
+                // Select best candidate
+                const assignee = candidates[0];
+                
+                // Auto-assign if score is high enough
+                if (assignee.score >= this.teamConfig.rules.autoAssignThreshold) {
+                  await this.performAssignment(issue, assignee);
+                } else {
+                  await this.suggestAssignment(issue, candidates);
+                }
+              }
+              
+              async analyzeIssue(issue) {
+                const labels = issue.labels.map(l => l.name);
+                const title = issue.title.toLowerCase();
+                const body = (issue.body || '').toLowerCase();
+                
+                return {
+                  number: issue.number,
+                  title: issue.title,
+                  priority: this.extractPriority(labels),
+                  components: this.extractComponents(labels),
+                  type: this.extractType(labels),
+                  effort: this.extractEffort(labels),
+                  keywords: this.extractKeywords(title + ' ' + body),
+                  requiredExpertise: this.identifyRequiredExpertise(title, body, labels),
+                  complexity: this.assessComplexity(title, body, labels)
+                };
+              }
+              
+              extractPriority(labels) {
+                const priorities = ['critical', 'high', 'medium', 'low'];
+                for (const p of priorities) {
+                  if (labels.includes(`priority:${p}`) || labels.includes(`priority-${p}`)) {
+                    return p;
+                  }
+                }
+                return 'medium';
+              }
+              
+              extractComponents(labels) {
+                return labels
+                  .filter(l => l.startsWith('component:'))
+                  .map(l => l.replace('component:', ''));
+              }
+              
+              extractType(labels) {
+                const types = ['bug', 'feature', 'security', 'performance', 'documentation'];
+                for (const t of types) {
+                  if (labels.includes(`type:${t}`)) {
+                    return t;
+                  }
+                }
+                return 'general';
+              }
+              
+              extractEffort(labels) {
+                const efforts = ['small', 'medium', 'large'];
+                for (const e of efforts) {
+                  if (labels.includes(`effort:${e}`)) {
+                    return e;
+                  }
+                }
+                return null;
+              }
+              
+              extractKeywords(text) {
+                const techKeywords = {
+                  frontend: ['react', 'frontend', 'ui', 'component', 'styling', 'css'],
+                  backend: ['api', 'backend', 'server', 'endpoint', 'route'],
+                  database: ['database', 'db', 'sql', 'query', 'migration', 'schema'],
+                  testing: ['test', 'spec', 'jest', 'playwright', 'coverage'],
+                  devops: ['docker', 'deployment', 'ci', 'cd', 'pipeline'],
+                  security: ['security', 'auth', 'authentication', 'vulnerability'],
+                  performance: ['performance', 'optimize', 'slow', 'cache', 'speed']
+                };
+                
+                const found = {};
+                for (const [category, keywords] of Object.entries(techKeywords)) {
+                  found[category] = keywords.filter(k => text.includes(k)).length;
+                }
+                
+                return found;
+              }
+              
+              identifyRequiredExpertise(title, body, labels) {
+                const expertise = [];
+                const text = (title + ' ' + body).toLowerCase();
+                
+                // Component-based expertise
+                const components = this.extractComponents(labels);
+                expertise.push(...components);
+                
+                // Keyword-based expertise
+                if (text.includes('api') || text.includes('endpoint')) expertise.push('api');
+                if (text.includes('database') || text.includes('sql')) expertise.push('database');
+                if (text.includes('react') || text.includes('component')) expertise.push('frontend');
+                if (text.includes('docker') || text.includes('deploy')) expertise.push('devops');
+                
+                return [...new Set(expertise)]; // Remove duplicates
+              }
+              
+              assessComplexity(title, body, labels) {
+                let score = 0;
+                
+                // Label-based complexity
+                if (labels.includes('effort:large')) score += 3;
+                if (labels.includes('effort:medium')) score += 2;
+                if (labels.includes('effort:small')) score += 1;
+                
+                // Content-based complexity
+                const text = title + ' ' + body;
+                if (text.includes('refactor') || text.includes('architecture')) score += 2;
+                if (text.includes('multiple') || text.includes('several')) score += 1;
+                if (text.includes('simple') || text.includes('quick')) score -= 1;
+                
+                // Priority-based complexity
+                if (labels.includes('priority:critical')) score += 2;
+                
+                return Math.max(0, Math.min(5, score)); // Clamp between 0-5
+              }
+              
+              async getTeamWorkload() {
+                const { data: openIssues } = await this.github.rest.issues.listForRepo({
+                  owner: this.context.repo.owner,
+                  repo: this.context.repo.repo,
+                  state: 'open',
+                  per_page: 100
+                });
+                
+                const workload = {};
+                
+                // Initialize team members
+                for (const member of Object.keys(this.teamConfig.members)) {
+                  workload[member] = {
+                    total: 0,
+                    critical: 0,
+                    high: 0,
+                    inProgress: 0,
+                    byComponent: {},
+                    complexity: 0
+                  };
+                }
+                
+                // Calculate workload
+                for (const issue of openIssues) {
+                  const assignees = issue.assignees || [];
+                  const labels = issue.labels.map(l => l.name);
+                  const priority = this.extractPriority(labels);
+                  const components = this.extractComponents(labels);
+                  
+                  for (const assignee of assignees) {
+                    const login = assignee.login;
+                    if (workload[login]) {
+                      workload[login].total++;
+                      
+                      if (priority === 'critical') workload[login].critical++;
+                      if (priority === 'high') workload[login].high++;
+                      
+                      if (labels.includes('status:in-progress')) {
+                        workload[login].inProgress++;
+                      }
+                      
+                      for (const component of components) {
+                        workload[login].byComponent[component] = 
+                          (workload[login].byComponent[component] || 0) + 1;
+                      }
+                      
+                      // Add complexity score
+                      const complexity = this.assessComplexity(
+                        issue.title, 
+                        issue.body || '', 
+                        labels
+                      );
+                      workload[login].complexity += complexity;
+                    }
+                  }
+                }
+                
+                return workload;
+              }
+              
+              async findBestCandidates(issueAnalysis, teamWorkload) {
+                const candidates = [];
+                
+                for (const [member, config] of Object.entries(this.teamConfig.members)) {
+                  if (config.availability !== 'active') continue;
+                  
+                  const workload = teamWorkload[member] || {
+                    total: 0,
+                    critical: 0,
+                    complexity: 0
+                  };
+                  
+                  // Check capacity
+                  if (workload.total >= config.maxCapacity) continue;
+                  if (issueAnalysis.priority === 'critical' && 
+                      workload.critical >= this.teamConfig.rules.criticalIssueLimit) continue;
+                  
+                  // Calculate match score
+                  let score = 0;
+                  
+                  // Expertise match
+                  const expertiseMatch = issueAnalysis.requiredExpertise.filter(exp =>
+                    config.expertise.includes(exp)
+                  ).length;
+                  score += expertiseMatch * 0.3;
+                  
+                  // Component experience
+                  for (const component of issueAnalysis.components) {
+                    if (workload.byComponent[component]) {
+                      score += 0.1; // Has experience with this component
+                    }
+                  }
+                  
+                  // Priority preference
+                  if (config.preferredPriorities.includes(issueAnalysis.priority)) {
+                    score += 0.2;
+                  }
+                  
+                  // Load balancing
+                  const capacityRatio = workload.total / config.maxCapacity;
+                  score += (1 - capacityRatio) * 0.2; // Prefer less loaded members
+                  
+                  // Complexity handling
+                  const avgComplexity = workload.total > 0 ? 
+                    workload.complexity / workload.total : 0;
+                  if (issueAnalysis.complexity > 3 && avgComplexity > 3) {
+                    score -= 0.1; // Avoid overloading with complex issues
+                  }
+                  
+                  candidates.push({
+                    member,
+                    score,
+                    workload: workload.total,
+                    capacity: config.maxCapacity,
+                    expertise: config.expertise,
+                    matchedExpertise: expertiseMatch
+                  });
+                }
+                
+                // Sort by score
+                candidates.sort((a, b) => b.score - a.score);
+                
+                return candidates;
+              }
+              
+              async performAssignment(issue, assignee) {
+                await this.github.rest.issues.addAssignees({
+                  owner: this.context.repo.owner,
+                  repo: this.context.repo.repo,
+                  issue_number: issue.number,
+                  assignees: [assignee.member]
+                });
+                
+                await this.github.rest.issues.createComment({
+                  owner: this.context.repo.owner,
+                  repo: this.context.repo.repo,
+                  issue_number: issue.number,
+                  body: `🤖 **Auto-Assignment Complete**
+                  
+This issue has been automatically assigned to @${assignee.member} based on:
+
+**Match Score:** ${Math.round(assignee.score * 100)}%
+**Matched Expertise:** ${assignee.matchedExpertise} areas
+**Current Workload:** ${assignee.workload}/${assignee.capacity} issues
+
+**Assignment Factors:**
+- Expertise match in: ${assignee.expertise.filter(e => 
+  issue.labels.some(l => l.name.includes(e))).join(', ')}
+- Available capacity
+- Priority alignment
+- Component experience
+
+---
+*Automated by Smart Assignment System*`
+                });
+                
+                console.log(`✅ Assigned issue #${issue.number} to @${assignee.member}`);
+              }
+              
+              async suggestAssignment(issue, candidates) {
+                const topCandidates = candidates.slice(0, 3);
+                
+                let comment = `🤔 **Assignment Suggestions**
+                
+No automatic assignment was made (threshold: ${this.teamConfig.rules.autoAssignThreshold * 100}%).
+
+**Top Candidates:**
+`;
+                
+                for (const [index, candidate] of topCandidates.entries()) {
+                  comment += `
+${index + 1}. @${candidate.member}
+   - Match Score: ${Math.round(candidate.score * 100)}%
+   - Workload: ${candidate.workload}/${candidate.capacity}
+   - Expertise: ${candidate.expertise.join(', ')}
+`;
+                }
+                
+                comment += `
+                
+**To assign manually:**
+- Review the suggestions above
+- Use \`/assign @username\` to assign
+- Or let the system auto-assign by adding more context/labels
+
+---
+*Automated by Smart Assignment System*`;
+                
+                await this.github.rest.issues.createComment({
+                  owner: this.context.repo.owner,
+                  repo: this.context.repo.repo,
+                  issue_number: issue.number,
+                  body: comment
+                });
+                
+                await this.addNeedsAssignmentLabel(issue);
+              }
+              
+              async addNeedsAssignmentLabel(issue) {
+                await this.github.rest.issues.addLabels({
+                  owner: this.context.repo.owner,
+                  repo: this.context.repo.repo,
+                  issue_number: issue.number,
+                  labels: ['needs-assignment']
+                });
+              }
+              
+              async handleCommand(comment, issue) {
+                const body = comment.body.toLowerCase();
+                
+                // Handle /assign command
+                if (body.startsWith('/assign')) {
+                  const match = body.match(/\/assign\s+@(\w+)/);
+                  if (match) {
+                    const assignee = match[1];
+                    await this.github.rest.issues.addAssignees({
+                      owner: this.context.repo.owner,
+                      repo: this.context.repo.repo,
+                      issue_number: issue.number,
+                      assignees: [assignee]
+                    });
+                    
+                    // Remove needs-assignment label
+                    try {
+                      await this.github.rest.issues.removeLabel({
+                        owner: this.context.repo.owner,
+                        repo: this.context.repo.repo,
+                        issue_number: issue.number,
+                        name: 'needs-assignment'
+                      });
+                    } catch (e) {
+                      // Label might not exist
+                    }
+                    
+                    console.log(`✅ Manually assigned to @${assignee}`);
+                  }
+                }
+                
+                // Handle /rebalance command
+                if (body.includes('/rebalance')) {
+                  await this.rebalanceWorkload();
+                }
+              }
+              
+              async rebalanceWorkload() {
+                console.log('🔄 Starting workload rebalancing...');
+                
+                const { data: openIssues } = await this.github.rest.issues.listForRepo({
+                  owner: this.context.repo.owner,
+                  repo: this.context.repo.repo,
+                  state: 'open',
+                  per_page: 100
+                });
+                
+                const workload = await this.getTeamWorkload();
+                const overloadedMembers = [];
+                const underloadedMembers = [];
+                
+                // Identify overloaded and underloaded members
+                for (const [member, config] of Object.entries(this.teamConfig.members)) {
+                  const load = workload[member];
+                  if (load.total > config.maxCapacity * 0.9) {
+                    overloadedMembers.push({ member, load, config });
+                  } else if (load.total < config.maxCapacity * 0.5) {
+                    underloadedMembers.push({ member, load, config });
+                  }
+                }
+                
+                // Suggest rebalancing
+                const suggestions = [];
+                for (const overloaded of overloadedMembers) {
+                  // Find issues that could be reassigned
+                  const reassignableIssues = openIssues.filter(issue => {
+                    const assignees = issue.assignees.map(a => a.login);
+                    const labels = issue.labels.map(l => l.name);
+                    
+                    return assignees.includes(overloaded.member) &&
+                           !labels.includes('status:in-progress') &&
+                           !labels.includes('priority:critical');
+                  });
+                  
+                  for (const issue of reassignableIssues.slice(0, 2)) {
+                    const analysis = await this.analyzeIssue(issue);
+                    const candidates = await this.findBestCandidates(analysis, workload);
+                    
+                    const alternative = candidates.find(c => 
+                      underloadedMembers.some(u => u.member === c.member)
+                    );
+                    
+                    if (alternative) {
+                      suggestions.push({
+                        issue: issue.number,
+                        from: overloaded.member,
+                        to: alternative.member,
+                        reason: 'Load balancing'
+                      });
+                    }
+                  }
+                }
+                
+                // Create rebalancing report
+                if (suggestions.length > 0) {
+                  let report = `# 🔄 Workload Rebalancing Suggestions
+                  
+## Current Load Distribution
+`;
+                  
+                  for (const [member, load] of Object.entries(workload)) {
+                    const config = this.teamConfig.members[member];
+                    if (config) {
+                      const percentage = Math.round((load.total / config.maxCapacity) * 100);
+                      report += `- @${member}: ${load.total}/${config.maxCapacity} (${percentage}%)\n`;
+                    }
+                  }
+                  
+                  report += `
+## Suggested Reassignments
+
+| Issue | From | To | Reason |
+|-------|------|-----|--------|
+`;
+                  
+                  for (const suggestion of suggestions) {
+                    report += `| #${suggestion.issue} | @${suggestion.from} | @${suggestion.to} | ${suggestion.reason} |\n`;
+                  }
+                  
+                  await this.github.rest.issues.create({
+                    owner: this.context.repo.owner,
+                    repo: this.context.repo.repo,
+                    title: '🔄 Workload Rebalancing Suggestions',
+                    body: report,
+                    labels: ['automation', 'workload-balancing']
+                  });
+                }
+                
+                console.log(`✅ Rebalancing complete. ${suggestions.length} suggestions made.`);
+              }
+            }
+            
+            // Execute assignment logic
+            const assigner = new SmartAssigner(github, context);
+            
+            if (context.eventName === 'issues') {
+              await assigner.assignIssue(context.payload.issue);
+            } else if (context.eventName === 'issue_comment') {
+              await assigner.handleCommand(context.payload.comment, context.payload.issue);
+            } else if (context.eventName === 'workflow_dispatch' && 
+                       context.payload.inputs.rebalance) {
+              await assigner.rebalanceWorkload();
+            }
