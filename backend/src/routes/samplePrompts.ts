@@ -143,18 +143,21 @@ router.post('/initialize', async (req: Request, res: Response) => {
   try {
     const { includeTestCases = true } = req.body;
     
-    await sampleService.initializeSamplePrompts();
+    const initResult = await sampleService.initializeSamplePrompts();
     
-    if (includeTestCases) {
+    let testCaseStats = null;
+    if (includeTestCases && initResult.created > 0) {
       await testCaseService.initializeAllTestCases();
+      testCaseStats = testCaseService.getTestCaseStats();
     }
     
     return res.json({
       success: true,
-      message: `Sample prompts initialized successfully${includeTestCases ? ' with test cases' : ''}`,
+      message: `Sample prompts initialization: ${initResult.created} created, ${initResult.existing} existing, ${initResult.errors.length} errors`,
       data: {
+        initResult,
         promptStats: sampleService.getSamplePromptStats(),
-        testCaseStats: includeTestCases ? testCaseService.getTestCaseStats() : null
+        testCaseStats
       }
     });
   } catch (error) {
@@ -228,6 +231,201 @@ router.get('/test-cases/stats', (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to fetch test case statistics'
+    });
+  }
+});
+
+// Advanced search endpoint
+router.get('/search', (req: Request, res: Response) => {
+  try {
+    const { 
+      q: query = '', 
+      categories, 
+      maxResults = '50', 
+      fuzzyMatch = 'true' 
+    } = req.query;
+
+    const categoriesArray = categories ? 
+      (Array.isArray(categories) ? categories : [categories]) as string[] : 
+      [];
+
+    const searchOptions = {
+      categories: categoriesArray,
+      maxResults: parseInt(maxResults as string, 10),
+      fuzzyMatch: fuzzyMatch === 'true'
+    };
+
+    const results = sampleService.searchSamplePrompts(query as string, searchOptions);
+    
+    return res.json({
+      success: true,
+      data: results,
+      meta: {
+        query: query,
+        categories: categoriesArray,
+        resultsCount: results.length,
+        maxResults: searchOptions.maxResults
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to search sample prompts'
+    });
+  }
+});
+
+// Paginated sample prompts endpoint
+router.get('/paginated', (req: Request, res: Response) => {
+  try {
+    const {
+      page = '1',
+      limit = '10',
+      category,
+      sortBy = 'title',
+      sortOrder = 'asc'
+    } = req.query;
+
+    const options = {
+      page: parseInt(page as string, 10),
+      limit: parseInt(limit as string, 10),
+      category: category as string,
+      sortBy: sortBy as 'title' | 'category' | 'variables' | 'created',
+      sortOrder: sortOrder as 'asc' | 'desc'
+    };
+
+    const result = sampleService.getSamplePromptsPaginated(options);
+    
+    return res.json({
+      success: true,
+      data: result.samples,
+      meta: result.pagination
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get paginated sample prompts'
+    });
+  }
+});
+
+// Bulk create prompt cards from samples
+router.post('/bulk-create', async (req: Request, res: Response) => {
+  try {
+    const { sampleTitles = [], skipExisting = true } = req.body;
+    
+    if (!Array.isArray(sampleTitles) || sampleTitles.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'sampleTitles array is required and must not be empty'
+      });
+    }
+
+    const result = await sampleService.bulkCreatePromptsFromSamples(
+      sampleTitles, 
+      { skipExisting }
+    );
+    
+    return res.json({
+      success: true,
+      data: result,
+      message: `Bulk creation completed: ${result.created.length} created, ${result.skipped.length} skipped, ${result.errors.length} errors`
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to bulk create prompt cards'
+    });
+  }
+});
+
+// Export sample prompts
+router.get('/export/:format', (req: Request, res: Response) => {
+  try {
+    const { format } = req.params;
+    const { category, includeStats = 'false' } = req.query;
+    
+    if (!['json', 'yaml', 'csv'].includes(format)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid format. Supported formats: json, yaml, csv'
+      });
+    }
+
+    const options = {
+      category: category as string,
+      includeStats: includeStats === 'true'
+    };
+
+    const exportData = sampleService.exportSamplePrompts(format as 'json' | 'yaml' | 'csv', options);
+    
+    // Set appropriate content type and headers
+    const contentTypes = {
+      json: 'application/json',
+      yaml: 'text/yaml',
+      csv: 'text/csv'
+    };
+    
+    const filename = `sample-prompts-${category || 'all'}-${new Date().toISOString().split('T')[0]}.${format}`;
+    
+    res.setHeader('Content-Type', contentTypes[format as keyof typeof contentTypes]);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    
+    return res.send(exportData);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to export sample prompts'
+    });
+  }
+});
+
+// Get template complexity analysis
+router.get('/:title/complexity', (req: Request, res: Response) => {
+  try {
+    const { title } = req.params;
+    const decodedTitle = decodeURIComponent(title);
+    
+    const sample = sampleService.getSamplePromptPreview(decodedTitle);
+    
+    if (!sample) {
+      return res.status(404).json({
+        success: false,
+        error: 'Sample prompt not found'
+      });
+    }
+
+    const complexity = sampleService.getTemplateComplexity(sample);
+    
+    return res.json({
+      success: true,
+      data: {
+        title: sample.title,
+        complexity
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to analyze template complexity'
+    });
+  }
+});
+
+// Validate all sample prompts
+router.get('/validation/report', (req: Request, res: Response) => {
+  try {
+    const report = sampleService.validateAllSamplePrompts();
+    
+    return res.json({
+      success: true,
+      data: report,
+      message: `Validation complete: ${report.valid} valid, ${report.invalid} invalid`
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to validate sample prompts'
     });
   }
 });

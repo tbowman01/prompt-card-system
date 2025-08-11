@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import React from 'react';
 import { Button } from '@/components/ui/Button';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 
@@ -21,6 +22,10 @@ interface SamplePromptCardProps {
 export default function SamplePromptCard({ prompt, onCreateFromSample }: SamplePromptCardProps) {
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [complexity, setComplexity] = useState<{
+    score: number;
+    level: 'simple' | 'moderate' | 'complex' | 'advanced';
+  } | null>(null);
 
   const handleCreatePrompt = async (includeTestCases: boolean = true) => {
     try {
@@ -40,7 +45,12 @@ export default function SamplePromptCard({ prompt, onCreateFromSample }: SampleP
       analytics: 'bg-green-100 text-green-800 border-green-200',
       'problem-solving': 'bg-orange-100 text-orange-800 border-orange-200',
       development: 'bg-indigo-100 text-indigo-800 border-indigo-200',
-      business: 'bg-yellow-100 text-yellow-800 border-yellow-200'
+      business: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+      education: 'bg-teal-100 text-teal-800 border-teal-200',
+      marketing: 'bg-pink-100 text-pink-800 border-pink-200',
+      legal: 'bg-gray-100 text-gray-800 border-gray-200',
+      health: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+      'project-management': 'bg-violet-100 text-violet-800 border-violet-200'
     };
     return colors[category as keyof typeof colors] || 'bg-gray-100 text-gray-800 border-gray-200';
   };
@@ -49,6 +59,33 @@ export default function SamplePromptCard({ prompt, onCreateFromSample }: SampleP
     if (template.length <= maxLength) return template;
     return template.substring(0, maxLength) + '...';
   };
+
+  const getComplexityColor = (level: string) => {
+    const colors = {
+      simple: 'bg-green-100 text-green-700 border-green-300',
+      moderate: 'bg-yellow-100 text-yellow-700 border-yellow-300',
+      complex: 'bg-orange-100 text-orange-700 border-orange-300',
+      advanced: 'bg-red-100 text-red-700 border-red-300'
+    };
+    return colors[level as keyof typeof colors] || 'bg-gray-100 text-gray-700 border-gray-300';
+  };
+
+  const fetchComplexity = async () => {
+    try {
+      const response = await fetch(`/api/sample-prompts/${encodeURIComponent(prompt.title)}/complexity`);
+      if (response.ok) {
+        const result = await response.json();
+        setComplexity(result.data.complexity);
+      }
+    } catch (error) {
+      console.error('Failed to fetch complexity:', error);
+    }
+  };
+
+  // Fetch complexity when component mounts
+  React.useEffect(() => {
+    fetchComplexity();
+  }, [prompt.title]);
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-6 hover:shadow-md transition-shadow">
@@ -63,6 +100,11 @@ export default function SamplePromptCard({ prompt, onCreateFromSample }: SampleP
             <span className="text-sm text-gray-500">
               {prompt.variables.length} variable{prompt.variables.length !== 1 ? 's' : ''}
             </span>
+            {complexity && (
+              <span className={`px-2 py-1 text-xs font-medium rounded-full border ${getComplexityColor(complexity.level)}`}>
+                {complexity.level} ({complexity.score})
+              </span>
+            )}
           </div>
         </div>
       </div>

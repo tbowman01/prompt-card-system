@@ -282,6 +282,310 @@ Budget Considerations: {{budget_range}}`,
         variables: ["company_name", "industry", "business_stage", "target_market", "primary_challenge", "focus_area_1", "focus_area_2", "focus_area_3", "analysis_depth", "time_horizon", "budget_range"],
         category: "business",
         tags: ["business strategy", "market analysis", "consulting", "competitive analysis", "growth planning"]
+      },
+      {
+        title: "Educational Content Creator",
+        description: "Generate comprehensive educational materials, lesson plans, and learning assessments for various subjects and skill levels.",
+        prompt_template: `Create educational content for {{subject}} targeting {{grade_level}}.
+
+**Learning Objective:** {{learning_objective}}
+**Duration:** {{lesson_duration}}
+**Learning Style:** {{learning_style_focus}}
+**Assessment Type:** {{assessment_type}}
+
+Please provide:
+
+1. **Lesson Overview**
+   - Clear learning objectives and outcomes
+   - Prerequisites and prior knowledge required
+   - Key concepts and vocabulary
+   - Relevance to real-world applications
+
+2. **Content Structure**
+   - Introduction and hook ({{hook_type}})
+   - Main content delivery methods
+   - Interactive activities and examples
+   - Practice exercises and demonstrations
+
+3. **Teaching Materials**
+   - Visual aids and multimedia suggestions
+   - Handouts and worksheets
+   - Technology integration ideas
+   - Differentiation strategies for diverse learners
+
+4. **Assessment Methods**
+   - Formative assessment techniques
+   - Summative evaluation criteria
+   - Rubrics and scoring guides
+   - Self-reflection prompts for students
+
+5. **Extension Activities**
+   - Homework assignments
+   - Project-based learning opportunities
+   - Cross-curricular connections
+   - Advanced challenges for gifted learners
+
+**Special Considerations:**
+- Accommodations for {{special_needs}}
+- Cultural sensitivity and inclusivity
+- Technology requirements: {{tech_requirements}}
+- Materials needed: {{materials_list}}
+
+Teaching Approach: {{teaching_philosophy}}
+Class Size: {{class_size}}`,
+        variables: ["subject", "grade_level", "learning_objective", "lesson_duration", "learning_style_focus", "assessment_type", "hook_type", "special_needs", "tech_requirements", "materials_list", "teaching_philosophy", "class_size"],
+        category: "education",
+        tags: ["education", "lesson planning", "curriculum", "teaching", "assessment", "learning"]
+      },
+      {
+        title: "Social Media Content Strategist",
+        description: "Develop engaging social media content strategies, posts, and campaigns across multiple platforms with audience-specific messaging.",
+        prompt_template: `Create a comprehensive social media strategy for {{brand_name}} in the {{industry}} sector.
+
+**Brand Profile:**
+- Brand: {{brand_name}}
+- Industry: {{industry}}
+- Target Audience: {{target_audience}}
+- Brand Voice: {{brand_voice}}
+- Key Message: {{key_message}}
+
+**Campaign Details:**
+- Campaign Goal: {{campaign_goal}}
+- Duration: {{campaign_duration}}
+- Budget Tier: {{budget_tier}}
+- Primary Platforms: {{platforms}}
+
+Please provide:
+
+1. **Content Strategy**
+   - Content pillars and themes
+   - Posting frequency and optimal timing
+   - Content mix ({{content_ratio}})
+   - Seasonal considerations and trends
+
+2. **Platform-Specific Content**
+   - {{platform_1}}: {{platform_1_content_type}}
+   - {{platform_2}}: {{platform_2_content_type}}  
+   - {{platform_3}}: {{platform_3_content_type}}
+   - Cross-platform content adaptation strategies
+
+3. **Engagement Tactics**
+   - Hashtag strategy and research
+   - Community management approach
+   - Influencer collaboration opportunities
+   - User-generated content campaigns
+
+4. **Content Calendar**
+   - Weekly content themes
+   - Special events and holidays
+   - Product launches and announcements
+   - Crisis management content backup
+
+5. **Performance Metrics**
+   - KPIs and success metrics
+   - Monitoring and analytics tools
+   - A/B testing recommendations
+   - ROI measurement strategies
+
+**Creative Elements:**
+- Visual style guidelines
+- Caption templates and tone examples
+- Story and reel concepts
+- Interactive content ideas (polls, Q&A, contests)
+
+Campaign Type: {{campaign_type}}
+Competitive Focus: {{competitor_analysis}}`,
+        variables: ["brand_name", "industry", "target_audience", "brand_voice", "key_message", "campaign_goal", "campaign_duration", "budget_tier", "platforms", "content_ratio", "platform_1", "platform_1_content_type", "platform_2", "platform_2_content_type", "platform_3", "platform_3_content_type", "campaign_type", "competitor_analysis"],
+        category: "marketing",
+        tags: ["social media", "marketing", "content strategy", "brand management", "digital marketing", "engagement"]
+      },
+      {
+        title: "Legal Document Analyst",
+        description: "Analyze legal documents, contracts, and compliance requirements with clear explanations and risk assessments for business contexts.",
+        prompt_template: `Provide legal analysis and guidance for {{document_type}} in {{jurisdiction}}.
+
+**Document Context:**
+- Document Type: {{document_type}}
+- Jurisdiction: {{jurisdiction}}
+- Parties Involved: {{parties}}
+- Business Context: {{business_context}}
+- Urgency Level: {{urgency_level}}
+
+**Analysis Requirements:**
+
+1. **Document Summary**
+   - Key terms and provisions
+   - Rights and obligations of each party
+   - Critical dates and deadlines
+   - Payment terms and conditions
+
+2. **Legal Review**
+   - Compliance with {{applicable_laws}}
+   - Potential legal risks and liabilities
+   - Missing clauses or protections
+   - Enforceability concerns
+
+3. **Business Impact Analysis**
+   - Financial implications and exposure
+   - Operational requirements and constraints
+   - Strategic advantages and disadvantages
+   - Long-term business relationship effects
+
+4. **Risk Assessment**
+   - High-risk clauses requiring attention
+   - Mitigation strategies and alternatives
+   - Negotiation recommendations
+   - Red flags and deal breakers
+
+5. **Recommendations**
+   - Suggested amendments and additions
+   - Alternative clause language
+   - Negotiation strategy and priorities
+   - Next steps and action items
+
+**Special Considerations:**
+- Industry-specific regulations: {{industry_regulations}}
+- Cross-border implications: {{international_elements}}
+- Intellectual property concerns: {{ip_considerations}}
+- Dispute resolution mechanisms: {{dispute_resolution}}
+
+**Disclaimer:** This analysis is for informational purposes only and does not constitute legal advice. Consult with qualified legal counsel for specific legal matters.
+
+Analysis Depth: {{analysis_depth}}
+Review Priority: {{priority_areas}}`,
+        variables: ["document_type", "jurisdiction", "parties", "business_context", "urgency_level", "applicable_laws", "industry_regulations", "international_elements", "ip_considerations", "dispute_resolution", "analysis_depth", "priority_areas"],
+        category: "legal",
+        tags: ["legal analysis", "contracts", "compliance", "risk assessment", "business law", "documentation"]
+      },
+      {
+        title: "Health & Wellness Coach",
+        description: "Create personalized health and wellness plans, exercise routines, and nutrition guidance based on individual needs and goals.",
+        prompt_template: `Design a comprehensive health and wellness plan for {{client_profile}}.
+
+**Client Information:**
+- Age Group: {{age_group}}
+- Fitness Level: {{current_fitness_level}}
+- Health Goals: {{primary_goals}}
+- Available Time: {{time_commitment}}
+- Equipment Access: {{equipment_available}}
+- Health Considerations: {{health_restrictions}}
+
+**Plan Components:**
+
+1. **Fitness Program**
+   - Workout schedule and frequency
+   - Exercise types and progression plan
+   - {{workout_focus}} specific routines
+   - Recovery and rest day activities
+
+2. **Nutrition Guidance**
+   - Meal planning framework
+   - Nutritional goals and targets
+   - {{dietary_preferences}} compliant options
+   - Hydration and supplement recommendations
+
+3. **Lifestyle Integration**
+   - Daily routine optimization
+   - Stress management techniques
+   - Sleep hygiene improvements
+   - Work-life balance strategies
+
+4. **Progress Tracking**
+   - Measurable milestones and benchmarks
+   - Monitoring tools and methods
+   - Adjustment protocols
+   - Motivation and accountability systems
+
+5. **Educational Resources**
+   - Key health and wellness concepts
+   - Common misconceptions and myths
+   - Evidence-based practice explanations
+   - Additional learning materials
+
+**Weekly Structure:**
+- Monday: {{monday_focus}}
+- Tuesday: {{tuesday_focus}}
+- Wednesday: {{wednesday_focus}}
+- Thursday: {{thursday_focus}}
+- Friday: {{friday_focus}}
+- Weekend: {{weekend_focus}}
+
+**Important Note:** This plan is for educational purposes only. Consult healthcare professionals before starting any new fitness or nutrition program, especially if you have existing health conditions.
+
+Plan Duration: {{plan_length}}
+Modification Frequency: {{review_schedule}}`,
+        variables: ["client_profile", "age_group", "current_fitness_level", "primary_goals", "time_commitment", "equipment_available", "health_restrictions", "workout_focus", "dietary_preferences", "monday_focus", "tuesday_focus", "wednesday_focus", "thursday_focus", "friday_focus", "weekend_focus", "plan_length", "review_schedule"],
+        category: "health",
+        tags: ["health", "wellness", "fitness", "nutrition", "lifestyle", "coaching", "personal development"]
+      },
+      {
+        title: "Creative Project Manager",
+        description: "Plan and manage creative projects from concept to completion, including timeline management, resource allocation, and stakeholder coordination.",
+        prompt_template: `Create a comprehensive project management plan for {{project_name}} in the {{creative_field}} domain.
+
+**Project Overview:**
+- Project Name: {{project_name}}
+- Creative Field: {{creative_field}}
+- Project Type: {{project_type}}
+- Client/Stakeholder: {{stakeholder}}
+- Budget Range: {{budget_range}}
+- Timeline: {{project_timeline}}
+
+**Project Management Framework:**
+
+1. **Project Scope & Objectives**
+   - Creative vision and artistic goals
+   - Deliverables and final outputs
+   - Success criteria and quality standards
+   - Scope boundaries and limitations
+
+2. **Timeline & Milestones**
+   - Pre-production phase: {{preproduction_duration}}
+   - Production phase: {{production_duration}}
+   - Post-production phase: {{postproduction_duration}}
+   - Key milestones and approval gates
+
+3. **Resource Planning**
+   - Team roles and responsibilities
+   - {{creative_roles}} requirements
+   - Equipment and technology needs
+   - External vendor and contractor management
+
+4. **Creative Process Management**
+   - Ideation and concept development workflow
+   - Review and approval processes
+   - Revision cycles and feedback integration
+   - Quality assurance and testing protocols
+
+5. **Risk Management**
+   - Creative and technical risks
+   - Resource availability concerns
+   - Timeline and budget constraints
+   - Stakeholder expectation management
+
+6. **Communication Plan**
+   - Stakeholder reporting schedule
+   - Team collaboration protocols
+   - Client presentation and feedback sessions
+   - Crisis communication procedures
+
+**Specific Considerations:**
+- Creative brief and brand guidelines alignment
+- Intellectual property and usage rights
+- Technical specifications: {{technical_specs}}
+- Platform requirements: {{delivery_platforms}}
+
+**Tools & Methodology:**
+- Project management software: {{pm_tools}}
+- Creative collaboration platforms: {{creative_tools}}
+- File management and version control
+- Progress tracking and reporting methods
+
+Project Complexity: {{complexity_level}}
+Team Size: {{team_size}}`,
+        variables: ["project_name", "creative_field", "project_type", "stakeholder", "budget_range", "project_timeline", "preproduction_duration", "production_duration", "postproduction_duration", "creative_roles", "technical_specs", "delivery_platforms", "pm_tools", "creative_tools", "complexity_level", "team_size"],
+        category: "project-management",
+        tags: ["project management", "creative projects", "planning", "coordination", "timeline management", "resource allocation"]
       }
     ];
   }
@@ -289,40 +593,62 @@ Budget Considerations: {{budget_range}}`,
   /**
    * Initialize sample prompts in the database
    */
-  public async initializeSamplePrompts(): Promise<void> {
-    if (this.initialized) {
-      return;
-    }
-
+  public async initializeSamplePrompts(): Promise<{
+    created: number;
+    existing: number;
+    errors: string[];
+  }> {
+    const result = { created: 0, existing: 0, errors: [] };
+    
     try {
       const samplePrompts = this.getSamplePrompts();
       
       for (const sample of samplePrompts) {
-        // Check if prompt already exists
-        const existing = await db.prepare(`
-          SELECT id FROM prompt_cards WHERE title = ?
-        `).get(sample.title);
+        try {
+          // Validate sample before insertion
+          const validation = this.validateSamplePrompt(sample);
+          if (!validation.isValid) {
+            result.errors.push(`${sample.title}: ${validation.errors.join(', ')}`);
+            continue;
+          }
 
-        if (!existing) {
-          const result = await db.prepare(`
-            INSERT INTO prompt_cards (title, description, prompt_template, variables)
-            VALUES (?, ?, ?, ?)
-          `).run(
-            sample.title,
-            sample.description,
-            sample.prompt_template,
-            JSON.stringify(sample.variables)
-          );
+          // Check if prompt already exists
+          const existing = db.prepare(`
+            SELECT id FROM prompt_cards WHERE title = ?
+          `).get(sample.title);
 
-          console.log(`Created sample prompt: ${sample.title} (ID: ${result.lastInsertRowid})`);
+          if (!existing) {
+            const insertResult = db.prepare(`
+              INSERT INTO prompt_cards (title, description, prompt_template, variables)
+              VALUES (?, ?, ?, ?)
+            `).run(
+              sample.title,
+              sample.description,
+              sample.prompt_template,
+              JSON.stringify(sample.variables)
+            );
+
+            result.created++;
+            console.log(`Created sample prompt: ${sample.title} (ID: ${insertResult.lastInsertRowid})`);
+          } else {
+            result.existing++;
+          }
+        } catch (sampleError) {
+          const errorMsg = `Failed to process ${sample.title}: ${sampleError instanceof Error ? sampleError.message : 'Unknown error'}`;
+          result.errors.push(errorMsg);
+          console.error(errorMsg);
         }
       }
 
-      this.initialized = true;
-      console.log(`Sample prompts initialization completed`);
+      this.initialized = result.errors.length === 0 || result.created > 0;
+      console.log(`Sample prompts initialization completed: ${result.created} created, ${result.existing} existing, ${result.errors.length} errors`);
+      
+      return result;
     } catch (error) {
-      console.error('Failed to initialize sample prompts:', error);
-      throw error;
+      const errorMsg = 'Failed to initialize sample prompts: ' + (error instanceof Error ? error.message : 'Unknown error');
+      console.error(errorMsg);
+      result.errors.push(errorMsg);
+      return result;
     }
   }
 
@@ -460,6 +786,326 @@ Budget Considerations: {{budget_range}}`,
       averageVariables: Math.round(samples.reduce((sum, s) => sum + s.variables.length, 0) / samples.length),
       totalVariables: samples.reduce((sum, s) => sum + s.variables.length, 0)
     };
+  }
+
+  /**
+   * Search sample prompts by text (title, description, tags)
+   */
+  public searchSamplePrompts(query: string, options: {
+    categories?: string[];
+    maxResults?: number;
+    fuzzyMatch?: boolean;
+  } = {}): SamplePrompt[] {
+    const { categories = [], maxResults = 50, fuzzyMatch = true } = options;
+    const queryLower = query.toLowerCase().trim();
+    
+    if (!queryLower) {
+      return this.getSamplePrompts().slice(0, maxResults);
+    }
+
+    let samples = this.getSamplePrompts();
+    
+    // Filter by categories if specified
+    if (categories.length > 0) {
+      samples = samples.filter(s => categories.includes(s.category));
+    }
+
+    // Search and score results
+    const scored = samples.map(sample => {
+      let score = 0;
+      const titleLower = sample.title.toLowerCase();
+      const descLower = sample.description.toLowerCase();
+      const tagsLower = sample.tags.map(t => t.toLowerCase());
+
+      // Exact matches get highest score
+      if (titleLower === queryLower) score += 100;
+      else if (titleLower.includes(queryLower)) score += 50;
+      else if (fuzzyMatch && this.fuzzyMatch(titleLower, queryLower)) score += 30;
+
+      if (descLower.includes(queryLower)) score += 25;
+      else if (fuzzyMatch && this.fuzzyMatch(descLower, queryLower)) score += 15;
+
+      // Tag matches
+      tagsLower.forEach(tag => {
+        if (tag === queryLower) score += 40;
+        else if (tag.includes(queryLower)) score += 20;
+        else if (fuzzyMatch && this.fuzzyMatch(tag, queryLower)) score += 10;
+      });
+
+      // Category match
+      if (sample.category.toLowerCase().includes(queryLower)) score += 15;
+
+      return { sample, score };
+    })
+    .filter(item => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, maxResults)
+    .map(item => item.sample);
+
+    return scored;
+  }
+
+  /**
+   * Simple fuzzy matching implementation
+   */
+  private fuzzyMatch(text: string, query: string): boolean {
+    if (query.length > text.length) return false;
+    
+    let queryIndex = 0;
+    for (let i = 0; i < text.length && queryIndex < query.length; i++) {
+      if (text[i] === query[queryIndex]) {
+        queryIndex++;
+      }
+    }
+    
+    return queryIndex === query.length;
+  }
+
+  /**
+   * Get sample prompts with pagination
+   */
+  public getSamplePromptsPaginated(options: {
+    page?: number;
+    limit?: number;
+    category?: string;
+    sortBy?: 'title' | 'category' | 'variables' | 'created';
+    sortOrder?: 'asc' | 'desc';
+  } = {}) {
+    const { 
+      page = 1, 
+      limit = 10, 
+      category, 
+      sortBy = 'title', 
+      sortOrder = 'asc' 
+    } = options;
+
+    let samples = category ? 
+      this.getSamplePromptsByCategory(category) : 
+      this.getSamplePrompts();
+
+    // Sort samples
+    samples.sort((a, b) => {
+      let aValue: any, bValue: any;
+      
+      switch (sortBy) {
+        case 'title':
+          aValue = a.title.toLowerCase();
+          bValue = b.title.toLowerCase();
+          break;
+        case 'category':
+          aValue = a.category.toLowerCase();
+          bValue = b.category.toLowerCase();
+          break;
+        case 'variables':
+          aValue = a.variables.length;
+          bValue = b.variables.length;
+          break;
+        default:
+          aValue = a.title.toLowerCase();
+          bValue = b.title.toLowerCase();
+      }
+
+      if (aValue < bValue) return sortOrder === 'asc' ? -1 : 1;
+      if (aValue > bValue) return sortOrder === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    // Apply pagination
+    const startIndex = (page - 1) * limit;
+    const endIndex = startIndex + limit;
+    const paginatedSamples = samples.slice(startIndex, endIndex);
+
+    return {
+      samples: paginatedSamples,
+      pagination: {
+        page,
+        limit,
+        total: samples.length,
+        totalPages: Math.ceil(samples.length / limit),
+        hasNext: endIndex < samples.length,
+        hasPrev: page > 1
+      }
+    };
+  }
+
+  /**
+   * Bulk create prompt cards from multiple samples
+   */
+  public async bulkCreatePromptsFromSamples(
+    sampleTitles: string[],
+    options: { skipExisting?: boolean } = {}
+  ): Promise<{
+    created: PromptCard[];
+    skipped: string[];
+    errors: string[];
+  }> {
+    const result = { created: [], skipped: [], errors: [] };
+    const { skipExisting = true } = options;
+
+    for (const title of sampleTitles) {
+      try {
+        const sample = this.getSamplePrompts().find(p => p.title === title);
+        if (!sample) {
+          result.errors.push(`Sample '${title}' not found`);
+          continue;
+        }
+
+        // Check if already exists
+        if (skipExisting) {
+          const existing = db.prepare(`
+            SELECT id FROM prompt_cards WHERE title = ?
+          `).get(title);
+          
+          if (existing) {
+            result.skipped.push(title);
+            continue;
+          }
+        }
+
+        const promptCard = await this.createPromptFromSample(title);
+        if (promptCard) {
+          result.created.push(promptCard);
+        }
+      } catch (error) {
+        result.errors.push(`Failed to create '${title}': ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Export sample prompts in various formats
+   */
+  public exportSamplePrompts(format: 'json' | 'yaml' | 'csv', options: {
+    category?: string;
+    includeStats?: boolean;
+  } = {}) {
+    const { category, includeStats = false } = options;
+    
+    let samples = category ? 
+      this.getSamplePromptsByCategory(category) : 
+      this.getSamplePrompts();
+
+    const exportData: any = { samples };
+    
+    if (includeStats) {
+      exportData.stats = this.getSamplePromptStats();
+      exportData.exportedAt = new Date().toISOString();
+      exportData.filter = category ? { category } : 'all';
+    }
+
+    switch (format) {
+      case 'json':
+        return JSON.stringify(exportData, null, 2);
+      
+      case 'yaml':
+        // Simple YAML export (would need yaml library for complex objects)
+        const yamlLines: string[] = [];
+        if (includeStats) {
+          yamlLines.push('# Sample Prompts Export');
+          yamlLines.push(`# Generated: ${new Date().toISOString()}`);
+          yamlLines.push(`# Filter: ${category || 'all'}`);
+          yamlLines.push('');
+        }
+        yamlLines.push('samples:');
+        samples.forEach((sample, index) => {
+          yamlLines.push(`  - title: "${sample.title}"`);
+          yamlLines.push(`    category: "${sample.category}"`);
+          yamlLines.push(`    description: "${sample.description.replace(/"/g, '\\"')}"`);
+          yamlLines.push(`    variables: [${sample.variables.map(v => `"${v}"`).join(', ')}]`);
+          yamlLines.push(`    tags: [${sample.tags.map(t => `"${t}"`).join(', ')}]`);
+          if (index < samples.length - 1) yamlLines.push('');
+        });
+        return yamlLines.join('\n');
+      
+      case 'csv':
+        const csvRows = ['Title,Category,Description,Variables,Tags,Template Length'];
+        samples.forEach(sample => {
+          csvRows.push([
+            `"${sample.title.replace(/"/g, '""')}"`,
+            `"${sample.category}"`,
+            `"${sample.description.replace(/"/g, '""')}"`,
+            `"${sample.variables.join(', ')}"`,
+            `"${sample.tags.join(', ')}"`,
+            sample.prompt_template.length.toString()
+          ].join(','));
+        });
+        return csvRows.join('\n');
+      
+      default:
+        throw new Error(`Unsupported export format: ${format}`);
+    }
+  }
+
+  /**
+   * Get template complexity analysis
+   */
+  public getTemplateComplexity(sample: SamplePrompt): {
+    score: number;
+    factors: {
+      variableCount: number;
+      templateLength: number;
+      structuralElements: number;
+      conditionalLogic: number;
+    };
+    level: 'simple' | 'moderate' | 'complex' | 'advanced';
+  } {
+    const factors = {
+      variableCount: sample.variables.length,
+      templateLength: sample.prompt_template.length,
+      structuralElements: (sample.prompt_template.match(/#{1,6}|\*{1,2}|_{1,2}|\d+\.|•|→|├|└/g) || []).length,
+      conditionalLogic: (sample.prompt_template.match(/\b(if|when|unless|should|must|may|can)\b/gi) || []).length
+    };
+
+    // Calculate complexity score
+    let score = 0;
+    score += Math.min(factors.variableCount * 5, 50); // Max 50 points for variables
+    score += Math.min(factors.templateLength / 50, 30); // Max 30 points for length
+    score += Math.min(factors.structuralElements * 2, 15); // Max 15 points for structure
+    score += Math.min(factors.conditionalLogic * 3, 25); // Max 25 points for logic
+
+    let level: 'simple' | 'moderate' | 'complex' | 'advanced';
+    if (score < 30) level = 'simple';
+    else if (score < 60) level = 'moderate';
+    else if (score < 90) level = 'complex';
+    else level = 'advanced';
+
+    return { score: Math.round(score), factors, level };
+  }
+
+  /**
+   * Validate all sample prompts and return report
+   */
+  public validateAllSamplePrompts(): {
+    valid: number;
+    invalid: number;
+    issues: Array<{
+      title: string;
+      errors: string[];
+      complexity: string;
+    }>;
+  } {
+    const samples = this.getSamplePrompts();
+    const report = { valid: 0, invalid: 0, issues: [] };
+
+    samples.forEach(sample => {
+      const validation = this.validateSamplePrompt(sample);
+      const complexity = this.getTemplateComplexity(sample);
+      
+      if (validation.isValid) {
+        report.valid++;
+      } else {
+        report.invalid++;
+        report.issues.push({
+          title: sample.title,
+          errors: validation.errors,
+          complexity: complexity.level
+        });
+      }
+    });
+
+    return report;
   }
 }
 

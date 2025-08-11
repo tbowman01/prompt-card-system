@@ -35,26 +35,74 @@ export default function SamplePromptGallery() {
   const [error, setError] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
+  const [sortBy, setSortBy] = useState<'title' | 'category' | 'variables'>('title');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
   useEffect(() => {
     fetchSamples();
     fetchStats();
   }, []);
 
-  const fetchSamples = async (category?: string) => {
+  const fetchSamples = async (category?: string, search?: string) => {
     try {
       setLoading(true);
       setError(null);
       
-      const url = category && category !== 'all' 
-        ? `/api/sample-prompts?category=${encodeURIComponent(category)}`
-        : '/api/sample-prompts';
+      let url = '/api/sample-prompts';
+      const params = new URLSearchParams();
+      
+      // Use search endpoint if there's a search term
+      if (search && search.trim()) {
+        url = '/api/sample-prompts/search';
+        params.append('q', search.trim());
+        if (category && category !== 'all') {
+          params.append('categories', category);
+        }
+        params.append('maxResults', '50');
+        params.append('fuzzyMatch', 'true');
+      } else if (category && category !== 'all') {
+        params.append('category', category);
+      }
+      
+      if (params.toString()) {
+        url += '?' + params.toString();
+      }
       
       const response = await fetch(url);
       const result = await response.json();
       
       if (result.success) {
-        setSamples(result.data);
+        let fetchedSamples = result.data;
+        
+        // Apply client-side sorting
+        fetchedSamples.sort((a: SamplePrompt, b: SamplePrompt) => {
+          let aValue: any, bValue: any;
+          
+          switch (sortBy) {
+            case 'title':
+              aValue = a.title.toLowerCase();
+              bValue = b.title.toLowerCase();
+              break;
+            case 'category':
+              aValue = a.category.toLowerCase();
+              bValue = b.category.toLowerCase();
+              break;
+            case 'variables':
+              aValue = a.variables.length;
+              bValue = b.variables.length;
+              break;
+            default:
+              aValue = a.title.toLowerCase();
+              bValue = b.title.toLowerCase();
+          }
+
+          if (aValue < bValue) return sortOrder === 'asc' ? -1 : 1;
+          if (aValue > bValue) return sortOrder === 'asc' ? 1 : -1;
+          return 0;
+        });
+        
+        setSamples(fetchedSamples);
       } else {
         setError(result.error || 'Failed to fetch sample prompts');
       }
@@ -80,7 +128,47 @@ export default function SamplePromptGallery() {
 
   const handleCategoryChange = (category: string) => {
     setSelectedCategory(category);
-    fetchSamples(category);
+    fetchSamples(category, searchTerm);
+  };
+
+  const handleSearch = (term: string) => {
+    setSearchTerm(term);
+    fetchSamples(selectedCategory, term);
+  };
+
+  const handleSortChange = (newSortBy: 'title' | 'category' | 'variables', newSortOrder: 'asc' | 'desc') => {
+    setSortBy(newSortBy);
+    setSortOrder(newSortOrder);
+    fetchSamples(selectedCategory, searchTerm);
+  };
+
+  const exportSamples = async (format: 'json' | 'yaml' | 'csv') => {
+    try {
+      const params = new URLSearchParams();
+      if (selectedCategory !== 'all') {
+        params.append('category', selectedCategory);
+      }
+      params.append('includeStats', 'true');
+      
+      const url = `/api/sample-prompts/export/${format}?${params.toString()}`;
+      const response = await fetch(url);
+      
+      if (response.ok) {
+        const blob = await response.blob();
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = `sample-prompts-${selectedCategory}-${new Date().toISOString().split('T')[0]}.${format}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(downloadUrl);
+      } else {
+        throw new Error('Export failed');
+      }
+    } catch (error) {
+      setError('Failed to export samples: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    }
   };
 
   const handleCreateFromSample = async (title: string, includeTestCases: boolean) => {
@@ -124,7 +212,7 @@ export default function SamplePromptGallery() {
 
       if (result.success) {
         setStats(result.data.promptStats);
-        await fetchSamples(selectedCategory);
+        await fetchSamples(selectedCategory, searchTerm);
       } else {
         setError(result.error || 'Failed to initialize sample prompts');
       }
@@ -135,16 +223,8 @@ export default function SamplePromptGallery() {
     }
   };
 
-  const filteredSamples = samples.filter(sample => {
-    if (!searchTerm) return true;
-    
-    const searchLower = searchTerm.toLowerCase();
-    return (
-      sample.title.toLowerCase().includes(searchLower) ||
-      sample.description.toLowerCase().includes(searchLower) ||
-      sample.tags.some(tag => tag.toLowerCase().includes(searchLower))
-    );
-  });
+  // Samples are already filtered by the backend search, so no need for client-side filtering
+  const filteredSamples = samples;
 
   const categories = stats?.categoriesBreakdown || [];
   const allCategories = [
@@ -212,34 +292,89 @@ export default function SamplePromptGallery() {
 
       {/* Filters */}
       <div className="mb-8">
-        <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
-          {/* Category Filter */}
-          <div className="flex flex-wrap gap-2">
-            {allCategories.map(({ category, count }) => (
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
+            {/* Search */}
+            <div className="w-full md:w-80">
+              <input
+                type="text"
+                placeholder="Search prompts, descriptions, or tags..."
+                value={searchTerm}
+                onChange={(e) => handleSearch(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            {/* Controls */}
+            <div className="flex items-center gap-2">
               <button
-                key={category}
-                onClick={() => handleCategoryChange(category)}
-                className={`px-3 py-2 text-sm font-medium rounded-md border transition-colors ${
-                  selectedCategory === category
-                    ? 'bg-blue-600 text-white border-blue-600'
-                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                }`}
+                onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                className="px-3 py-2 text-sm text-gray-600 hover:text-gray-900 border border-gray-300 rounded-md hover:bg-gray-50"
               >
-                {category === 'all' ? 'All' : category} ({count})
+                {showAdvancedFilters ? 'Hide Filters' : 'Show Filters'}
               </button>
-            ))}
+              
+              <div className="relative">
+                <select
+                  value={`${sortBy}-${sortOrder}`}
+                  onChange={(e) => {
+                    const [newSortBy, newSortOrder] = e.target.value.split('-') as ['title' | 'category' | 'variables', 'asc' | 'desc'];
+                    handleSortChange(newSortBy, newSortOrder);
+                  }}
+                  className="px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="title-asc">Title A-Z</option>
+                  <option value="title-desc">Title Z-A</option>
+                  <option value="category-asc">Category A-Z</option>
+                  <option value="category-desc">Category Z-A</option>
+                  <option value="variables-asc">Variables (Low)</option>
+                  <option value="variables-desc">Variables (High)</option>
+                </select>
+              </div>
+
+              {/* Export Dropdown */}
+              <div className="relative">
+                <select
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      exportSamples(e.target.value as 'json' | 'yaml' | 'csv');
+                      e.target.value = '';
+                    }
+                  }}
+                  className="px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-green-50 hover:bg-green-100"
+                >
+                  <option value="">Export...</option>
+                  <option value="json">JSON</option>
+                  <option value="yaml">YAML</option>
+                  <option value="csv">CSV</option>
+                </select>
+              </div>
+            </div>
           </div>
 
-          {/* Search */}
-          <div className="w-full md:w-80">
-            <input
-              type="text"
-              placeholder="Search prompts, descriptions, or tags..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
+          {/* Advanced Filters */}
+          {showAdvancedFilters && (
+            <div className="p-4 bg-gray-50 rounded-md border">
+              <div className="flex flex-col gap-4">
+                <h4 className="text-sm font-medium text-gray-900">Filter by Category</h4>
+                <div className="flex flex-wrap gap-2">
+                  {allCategories.map(({ category, count }) => (
+                    <button
+                      key={category}
+                      onClick={() => handleCategoryChange(category)}
+                      className={`px-3 py-2 text-sm font-medium rounded-md border transition-colors ${
+                        selectedCategory === category
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      {category === 'all' ? 'All' : category} ({count})
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -276,11 +411,25 @@ export default function SamplePromptGallery() {
 
       {/* Footer Info */}
       {filteredSamples.length > 0 && (
-        <div className="mt-8 p-4 bg-blue-50 border border-blue-200 rounded-md">
-          <p className="text-blue-800 text-sm">
-            <strong>Tip:</strong> Each sample prompt comes with pre-configured test cases to help you validate your AI responses. 
-            Click "Create with Tests" to get started immediately, or "Create Only" if you prefer to add your own test cases.
-          </p>
+        <div className="mt-8 space-y-4">
+          <div className="p-4 bg-blue-50 border border-blue-200 rounded-md">
+            <p className="text-blue-800 text-sm">
+              <strong>Tip:</strong> Each sample prompt comes with pre-configured test cases to help you validate your AI responses. 
+              Click "Create with Tests" to get started immediately, or "Create Only" if you prefer to add your own test cases.
+            </p>
+          </div>
+          
+          {/* Results Summary */}
+          <div className="flex items-center justify-between text-sm text-gray-600 border-t pt-4">
+            <div>
+              Showing {filteredSamples.length} of {stats?.totalSamples || 0} sample prompts
+              {selectedCategory !== 'all' && ` in "${selectedCategory}" category`}
+              {searchTerm && ` matching "${searchTerm}"`}
+            </div>
+            <div>
+              Sorted by {sortBy} ({sortOrder === 'asc' ? 'ascending' : 'descending'})
+            </div>
+          </div>
         </div>
       )}
     </div>

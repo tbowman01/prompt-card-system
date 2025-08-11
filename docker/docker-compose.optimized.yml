@@ -1,0 +1,426 @@
+# Optimized Docker Compose with advanced caching and multi-platform support
+version: '3.8'
+
+# Global extension fields for reusable configurations
+x-build-defaults: &build-defaults
+  platforms:
+    - linux/amd64
+    - linux/arm64
+  cache_from:
+    - type=gha,scope=build
+    - type=local,src=/tmp/.buildx-cache
+  cache_to:
+    - type=gha,mode=max,scope=build
+    - type=local,dest=/tmp/.buildx-cache
+  driver_opts:
+    network: host
+  args:
+    - BUILDKIT_INLINE_CACHE=1
+    - DOCKER_BUILDKIT=1
+
+x-common-environment: &common-env
+  NODE_ENV: production
+  TZ: UTC
+  UV_THREADPOOL_SIZE: 8
+
+x-security-options: &security-options
+  security_opt:
+    - no-new-privileges:true
+  read_only: false
+  user: "1001:1001"
+
+x-resource-limits: &resource-limits
+  deploy:
+    resources:
+      limits:
+        cpus: '2.0'
+        memory: 2G
+      reservations:
+        cpus: '0.5'
+        memory: 512M
+    restart_policy:
+      condition: on-failure
+      delay: 5s
+      max_attempts: 3
+      window: 120s
+
+x-health-defaults: &health-defaults
+  interval: 15s
+  timeout: 5s
+  retries: 3
+  start_period: 30s
+
+services:
+  # ================================
+  # OPTIMIZED FRONTEND SERVICE
+  # ================================
+  frontend:
+    build:
+      <<: *build-defaults
+      context: ../frontend
+      dockerfile: ../docker/Dockerfile.frontend.optimized
+      target: production
+      args:
+        - NODE_ENV=production
+        - NEXT_TELEMETRY_DISABLED=1
+        - BUILDPLATFORM=linux/amd64
+        - TARGETPLATFORM=linux/amd64
+    image: prompt-card-frontend:optimized
+    container_name: frontend-optimized
+    hostname: frontend
+    <<: *resource-limits
+    <<: *security-options
+    environment:
+      <<: *common-env
+      NEXT_PUBLIC_API_URL: http://backend:3001
+      NEXT_TELEMETRY_DISABLED: 1
+      HOSTNAME: "0.0.0.0"
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - app-network
+    volumes:
+      # Read-only volume for cached static assets (if needed)
+      - frontend-cache:/app/.next/cache:ro
+    healthcheck:
+      <<: *health-defaults
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+    restart: unless-stopped
+    init: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`localhost`)"
+      - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+      - "docker.optimization.level=advanced"
+      - "docker.service.type=frontend"
+
+  # ================================
+  # OPTIMIZED BACKEND SERVICE
+  # ================================
+  backend:
+    build:
+      <<: *build-defaults
+      context: ../backend
+      dockerfile: ../docker/Dockerfile.backend.optimized
+      target: production
+      args:
+        - NODE_ENV=production
+        - BUILDPLATFORM=linux/amd64
+        - TARGETPLATFORM=linux/amd64
+    image: prompt-card-backend:optimized
+    container_name: backend-optimized
+    hostname: backend
+    <<: *resource-limits
+    <<: *security-options
+    environment:
+      <<: *common-env
+      OLLAMA_BASE_URL: http://ollama:11434
+      DATABASE_PATH: /app/data/database.sqlite
+      CORS_ORIGIN: http://frontend:3000
+      NODE_OPTIONS: "--max-old-space-size=2048 --max-semi-space-size=128 --optimize-for-size"
+    ports:
+      - "3001:3001"
+    depends_on:
+      ollama:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - app-network
+    volumes:
+      - ./data:/app/data
+      - backend-cache:/app/cache
+      - backend-logs:/app/logs
+    healthcheck:
+      <<: *health-defaults
+      test: ["CMD", "curl", "-f", "http://localhost:3001/api/health/comprehensive", "--connect-timeout", "3", "--max-time", "5"]
+    restart: unless-stopped
+    init: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend.rule=Host(`api.localhost`)"
+      - "traefik.http.services.backend.loadbalancer.server.port=3001"
+      - "docker.optimization.level=advanced"
+      - "docker.service.type=backend"
+
+  # ================================
+  # OPTIMIZED OLLAMA SERVICE
+  # ================================
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama-optimized
+    hostname: ollama
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 8G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_MAX_LOADED_MODELS=2
+      - OLLAMA_MAX_QUEUE=512
+      - OLLAMA_NUM_PARALLEL=4
+      - CUDA_VISIBLE_DEVICES=all  # Enable GPU if available
+    ports:
+      - "11434:11434"
+    networks:
+      - app-network
+    volumes:
+      - ollama-data:/root/.ollama
+      - ollama-cache:/tmp/ollama-cache
+    healthcheck:
+      <<: *health-defaults
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/version"]
+    restart: unless-stopped
+    init: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    labels:
+      - "docker.optimization.level=standard"
+      - "docker.service.type=ai-model"
+
+  # ================================
+  # REDIS CACHING SERVICE
+  # ================================
+  redis:
+    image: redis:7-alpine
+    container_name: redis-optimized
+    hostname: redis
+    <<: *security-options
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    environment:
+      - REDIS_MAXMEMORY=512mb
+      - REDIS_MAXMEMORY_POLICY=allkeys-lru
+    ports:
+      - "6379:6379"
+    networks:
+      - app-network
+    volumes:
+      - redis-data:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    healthcheck:
+      <<: *health-defaults
+      test: ["CMD", "redis-cli", "ping"]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+    labels:
+      - "docker.optimization.level=standard"
+      - "docker.service.type=cache"
+
+  # ================================
+  # MODEL LOADER SERVICE
+  # ================================
+  model-loader:
+    image: ollama/ollama:latest
+    container_name: model-loader-optimized
+    hostname: model-loader
+    depends_on:
+      ollama:
+        condition: service_healthy
+    networks:
+      - app-network
+    volumes:
+      - ollama-data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    command: >
+      sh -c "
+        echo 'Starting model loading...' &&
+        ollama pull llama2:7b &&
+        ollama pull codellama:7b &&
+        echo 'Model loading completed successfully'
+      "
+    restart: "no"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "2"
+    labels:
+      - "docker.optimization.level=standard"
+      - "docker.service.type=initialization"
+
+  # ================================
+  # MONITORING AND OBSERVABILITY
+  # ================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus-monitoring
+    hostname: prometheus
+    user: "65534:65534"
+    ports:
+      - "9090:9090"
+    networks:
+      - app-network
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    labels:
+      - "docker.service.type=monitoring"
+
+  # ================================
+  # REVERSE PROXY WITH LOAD BALANCING
+  # ================================
+  nginx:
+    image: nginx:alpine
+    container_name: nginx-proxy
+    hostname: nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - app-network
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+      - nginx-cache:/var/cache/nginx
+    depends_on:
+      - frontend
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    labels:
+      - "docker.service.type=proxy"
+
+# ================================
+# OPTIMIZED VOLUMES
+# ================================
+volumes:
+  # Persistent data volumes
+  ollama-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./volumes/ollama-data
+  
+  redis-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./volumes/redis-data
+  
+  prometheus-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./volumes/prometheus-data
+  
+  # Cache volumes for performance
+  frontend-cache:
+    driver: local
+  
+  backend-cache:
+    driver: local
+  
+  backend-logs:
+    driver: local
+  
+  ollama-cache:
+    driver: local
+  
+  nginx-cache:
+    driver: local
+
+# ================================
+# OPTIMIZED NETWORKS
+# ================================
+networks:
+  app-network:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: "br-promptcard"
+      com.docker.network.driver.mtu: "1500"
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+          gateway: 172.20.0.1
+    labels:
+      - "docker.optimization.level=advanced"
+      - "docker.network.type=application"
+
+# ================================
+# DEVELOPMENT OVERRIDES
+# ================================
+# Use: docker-compose -f docker-compose.optimized.yml -f docker-compose.dev.override.yml up
+x-development-overrides:
+  frontend:
+    build:
+      target: development
+    volumes:
+      - ../frontend:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      - NODE_ENV=development
+    command: ["npm", "run", "dev"]
+  
+  backend:
+    build:
+      target: development
+    volumes:
+      - ../backend:/app
+      - /app/node_modules
+      - /app/dist
+    environment:
+      - NODE_ENV=development
+    command: ["npm", "run", "dev"]
