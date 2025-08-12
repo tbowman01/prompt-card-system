@@ -481,6 +481,335 @@ All documentation is now available in the `./docs` folder:
 - Reddit community
 - Twitter updates
 
+# 📚 Comprehensive Usage Guide
+
+## 🚀 Getting Started
+
+### 1. **System Requirements Check**
+```bash
+# Run deployment readiness check
+chmod +x scripts/deployment-readiness-check.sh
+./scripts/deployment-readiness-check.sh
+```
+
+### 2. **Environment Setup**
+```bash
+# Development Environment
+docker compose -f docker-compose.dev.yml up -d
+
+# Production Environment  
+docker compose -f docker-compose.prod.yml up -d
+
+# Monitoring Stack
+docker compose -f docker-compose.monitoring.yml up -d
+```
+
+### 3. **Access Points**
+- **Frontend Application**: http://localhost:3000
+- **Backend API**: http://localhost:3001/api
+- **API Documentation**: http://localhost:3001/api/docs
+- **Prometheus Metrics**: http://localhost:9090
+- **Grafana Dashboards**: http://localhost:3100 (admin/admin)
+- **Health Check**: http://localhost:3001/api/health
+
+## 🎯 Core Usage Patterns
+
+### **Prompt Card Management**
+```bash
+# Create a new prompt card
+curl -X POST http://localhost:3001/api/prompt-cards \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Code Review Assistant",
+    "prompt": "Review this code for best practices: {{code}}",
+    "variables": ["code"],
+    "category": "development"
+  }'
+
+# List all prompt cards
+curl http://localhost:3001/api/prompt-cards
+
+# Get specific card
+curl http://localhost:3001/api/prompt-cards/1
+```
+
+### **AI-Powered Optimization**
+```bash
+# Analyze prompt for optimization
+curl -X POST http://localhost:3001/api/optimization/analyze \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Write a function that does something",
+    "context": "JavaScript development"
+  }'
+
+# Get optimization suggestions
+curl -X POST http://localhost:3001/api/optimization/suggest \
+  -H "Content-Type: application/json" \
+  -d '{
+    "promptId": 1,
+    "optimizationType": "clarity"
+  }'
+```
+
+### **Parallel Test Execution**
+```bash
+# Execute tests in parallel
+curl -X POST http://localhost:3001/api/test-cases/execute-parallel \
+  -H "Content-Type: application/json" \
+  -d '{
+    "testCaseIds": [1, 2, 3, 4],
+    "maxConcurrency": 5
+  }'
+
+# Monitor test progress (WebSocket)
+# Connect to: ws://localhost:3001/api/test-execution/progress
+```
+
+### **Analytics & Monitoring**
+```bash
+# Get dashboard metrics
+curl http://localhost:3001/api/analytics/dashboard
+
+# Cost analytics
+curl http://localhost:3001/api/analytics/costs
+
+# Performance metrics
+curl http://localhost:3001/api/analytics/performance
+```
+
+## 🔧 Advanced Configuration
+
+### **Environment Variables**
+```bash
+# Backend Configuration (.env)
+NODE_ENV=production
+DATABASE_URL=postgresql://user:pass@localhost:5432/promptdb
+REDIS_URL=redis://localhost:6379
+JWT_SECRET=your-secret-key
+ENCRYPTION_KEY=your-encryption-key
+
+# AI Configuration
+OPENAI_API_KEY=your-openai-key
+ANTHROPIC_API_KEY=your-anthropic-key
+OLLAMA_BASE_URL=http://localhost:11434
+
+# Monitoring Configuration
+PROMETHEUS_ENABLED=true
+JAEGER_ENDPOINT=http://localhost:14268/api/traces
+SENTRY_DSN=your-sentry-dsn
+```
+
+### **Docker Compose Profiles**
+```bash
+# Development with hot reload
+docker compose --profile dev up
+
+# Production with monitoring
+docker compose --profile prod --profile monitoring up
+
+# Security hardened
+docker compose -f docker-security.yml up
+```
+
+### **Performance Tuning**
+```bash
+# High-performance configuration
+export MAX_CONCURRENCY=10
+export CACHE_TTL=3600
+export BATCH_SIZE=100
+
+# Memory optimization
+export NODE_OPTIONS="--max-old-space-size=4096"
+```
+
+## 🛡️ Security Best Practices
+
+### **API Authentication**
+```bash
+# Generate API key
+curl -X POST http://localhost:3001/api/auth/api-keys \
+  -H "Authorization: Bearer $JWT_TOKEN" \
+  -d '{"name": "my-app", "permissions": ["read", "write"]}'
+
+# Use API key
+curl -H "X-API-Key: $API_KEY" http://localhost:3001/api/prompt-cards
+```
+
+### **Security Scanning**
+```bash
+# Run security audit
+npm run security:audit
+
+# Container security scan
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+  aquasec/trivy image prompt-card-backend:latest
+```
+
+## 📊 Monitoring & Observability
+
+### **Health Monitoring**
+```bash
+# Basic health check
+curl http://localhost:3001/api/health
+
+# Detailed health with dependencies
+curl http://localhost:3001/api/health/v2
+
+# System metrics
+curl http://localhost:3001/api/monitoring/system-health
+```
+
+### **Prometheus Metrics**
+```bash
+# Application metrics
+curl http://localhost:3001/metrics
+
+# Custom business metrics
+curl http://localhost:3001/api/monitoring/custom-metrics
+```
+
+### **Grafana Dashboards**
+- **System Overview**: CPU, Memory, Network, Disk usage
+- **Application Metrics**: Request rates, response times, error rates
+- **Business Metrics**: Test execution trends, cost analysis
+- **Security Dashboard**: Failed logins, rate limit hits, security events
+
+## 🧪 Testing & Validation
+
+### **Test Suite Execution**
+```bash
+# Run all tests
+npm test
+
+# Unit tests only
+npm run test:unit
+
+# Integration tests
+npm run test:integration
+
+# E2E tests with Playwright
+npm run test:e2e
+
+# Load testing
+npm run test:load
+```
+
+### **API Testing with curl**
+```bash
+# Health check
+curl -f http://localhost:3001/api/health || echo "Service down"
+
+# Functional test
+curl -X POST http://localhost:3001/api/prompt-cards \
+  -H "Content-Type: application/json" \
+  -d '{"title":"test","prompt":"test {{var}}","variables":["var"]}'
+```
+
+## 🚀 Deployment Strategies
+
+### **Development Deployment**
+```bash
+# Local development
+npm run dev
+
+# Docker development
+docker compose -f docker-compose.dev.yml up --build
+```
+
+### **Staging Deployment**
+```bash
+# Staging environment
+docker compose -f docker-compose.yml up -d
+./scripts/deployment-readiness-check.sh
+```
+
+### **Production Deployment**
+```bash
+# Production with security hardening
+docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.monitoring.yml up -d
+docker compose -f docker-security.yml up -d
+```
+
+### **Cloud Deployment (Kubernetes)**
+```bash
+# Apply Kubernetes manifests
+kubectl apply -f k8s/
+kubectl rollout status deployment/prompt-card-backend
+kubectl rollout status deployment/prompt-card-frontend
+```
+
+## 🔍 Troubleshooting
+
+### **Common Issues**
+```bash
+# Container logs
+docker compose logs backend
+docker compose logs frontend
+
+# Database connection issues
+docker compose exec backend npm run db:test
+
+# Redis connection issues  
+docker compose exec backend npm run redis:test
+
+# Memory issues
+docker stats
+```
+
+### **Performance Issues**
+```bash
+# Check system resources
+docker compose exec backend node -e "console.log(process.memoryUsage())"
+
+# Database performance
+docker compose exec postgres pg_stat_activity
+
+# Cache hit rates
+docker compose exec redis redis-cli info stats
+```
+
+### **Security Issues**
+```bash
+# Check for vulnerabilities
+npm audit
+docker scout cves prompt-card-backend:latest
+
+# Review security logs
+docker compose exec backend tail -f logs/security.log
+```
+
+## 📈 Scaling & Performance
+
+### **Horizontal Scaling**
+```bash
+# Scale backend services
+docker compose up -d --scale backend=3
+
+# Load balancer configuration
+# Update nginx.conf for load balancing
+```
+
+### **Vertical Scaling**
+```bash
+# Increase container resources
+docker compose -f docker-compose.prod.yml up -d
+# Update resource limits in compose file
+```
+
+### **Performance Optimization**
+```bash
+# Enable performance monitoring
+export ENABLE_PROFILING=true
+
+# Database optimization
+npm run db:optimize
+
+# Cache warming
+npm run cache:warm
+```
+
 ## 📄 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
