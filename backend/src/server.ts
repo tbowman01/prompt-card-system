@@ -30,6 +30,7 @@ import { healthRoutes } from './routes/health';
 import { enhancedHealthRoutes } from './routes/health-enhanced';
 import { healthOrchestratorRoutes } from './routes/health-orchestrator';
 import { alertRoutes } from './routes/alerts';
+import { monitoringRoutes } from './routes/monitoring';
 import { promptCardRoutes } from './routes/promptCards';
 import { testCaseRoutes } from './routes/testCases';
 import { testExecutionRoutes } from './routes/testExecution';
@@ -234,6 +235,7 @@ app.use('/api/health', healthRoutes);
 app.use('/api/health/v2', enhancedHealthRoutes);
 app.use('/api/health/orchestrator', healthOrchestratorRoutes);
 app.use('/api/alerts', apiRateLimit, alertRoutes);
+app.use('/api/monitoring', apiRateLimit, monitoringRoutes);
 app.use('/api/prompt-cards', apiRateLimit, promptCardRoutes);
 app.use('/api/test-cases', apiRateLimit, testCaseRoutes);
 app.use('/api/test-cases', testExecutionRateLimit, testExecutionRoutes); // Test execution routes
