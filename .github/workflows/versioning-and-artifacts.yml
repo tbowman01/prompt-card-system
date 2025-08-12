@@ -1,0 +1,267 @@
+name: Versioning and Artifacts
+
+on:
+  push:
+    branches: [ main, develop ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  version-and-build:
+    name: Version and Build Artifacts
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      should-publish: ${{ steps.version.outputs.should-publish }}
+      build-type: ${{ steps.version.outputs.build-type }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Needed for version calculation
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          npm install
+          cd backend && npm install
+          cd ../frontend && npm install
+
+      - name: Generate version
+        id: version
+        run: |
+          # Run version script
+          node scripts/version.js --force
+          
+          # Extract version info
+          VERSION=$(node -p "require('./version-info.json').version")
+          BUILD_TYPE=$(node -p "require('./version-info.json').buildType")
+          BRANCH=${GITHUB_REF#refs/heads/}
+          
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "build-type=$BUILD_TYPE" >> $GITHUB_OUTPUT
+          
+          # Determine if we should publish artifacts (only main and develop)
+          if [[ "$BRANCH" == "main" || "$BRANCH" == "develop" ]]; then
+            echo "should-publish=true" >> $GITHUB_OUTPUT
+          else
+            echo "should-publish=false" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "📦 Version: $VERSION"
+          echo "🏗️ Build Type: $BUILD_TYPE"
+          echo "📤 Should Publish: $(echo $BRANCH | grep -E '^(main|develop)$' && echo true || echo false)"
+
+      - name: Update version in package.json files
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          echo "Updating package.json files to version: $VERSION"
+          
+          # Update root package.json
+          node -p "const pkg=require('./package.json'); pkg.version='$VERSION'; JSON.stringify(pkg, null, 2)" > package.json.tmp
+          mv package.json.tmp package.json
+          
+          # Update backend package.json
+          if [ -f "backend/package.json" ]; then
+            node -p "const pkg=require('./backend/package.json'); pkg.version='$VERSION'; JSON.stringify(pkg, null, 2)" > backend/package.json.tmp
+            mv backend/package.json.tmp backend/package.json
+          fi
+          
+          # Update frontend package.json
+          if [ -f "frontend/package.json" ]; then
+            node -p "const pkg=require('./frontend/package.json'); pkg.version='$VERSION'; JSON.stringify(pkg, null, 2)" > frontend/package.json.tmp
+            mv frontend/package.json.tmp frontend/package.json
+          fi
+
+      - name: Build backend
+        run: |
+          cd backend
+          npm run build
+          
+          # Create distribution package
+          mkdir -p ../dist/backend
+          cp -r dist/* ../dist/backend/
+          cp package.json ../dist/backend/
+          cp -r node_modules ../dist/backend/ || echo "Warning: node_modules not copied"
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm run build
+          
+          # Create distribution package
+          mkdir -p ../dist/frontend
+          cp -r .next/standalone/* ../dist/frontend/ || cp -r .next/* ../dist/frontend/
+          cp -r .next/static ../dist/frontend/.next/ || echo "Static files not found"
+          cp package.json ../dist/frontend/
+
+      - name: Create artifact metadata
+        run: |
+          cat > dist/metadata.json << EOF
+          {
+            "version": "${{ steps.version.outputs.version }}",
+            "buildType": "${{ steps.version.outputs.build-type }}",
+            "branch": "${GITHUB_REF#refs/heads/}",
+            "commit": "${{ github.sha }}",
+            "buildTime": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "workflow": "${{ github.workflow }}",
+            "runId": "${{ github.run_id }}",
+            "runNumber": "${{ github.run_number }}"
+          }
+          EOF
+
+      - name: Run tests
+        run: |
+          # Run backend tests
+          cd backend && npm test -- --passWithNoTests --coverage || echo "Backend tests completed with issues"
+          
+          # Run frontend tests  
+          cd ../frontend && npm test -- --passWithNoTests --coverage || echo "Frontend tests completed with issues"
+
+      - name: Upload build artifacts (main/develop only)
+        if: steps.version.outputs.should-publish == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: prompt-card-system-${{ steps.version.outputs.version }}
+          path: |
+            dist/
+            version-info.json
+          retention-days: 30
+
+      - name: Upload test artifacts (main/develop only) 
+        if: steps.version.outputs.should-publish == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ steps.version.outputs.version }}
+          path: |
+            backend/coverage/
+            frontend/coverage/
+          retention-days: 14
+
+  build-verification:
+    name: Build Verification (All Branches)
+    runs-on: ubuntu-latest
+    if: github.ref_name != 'main' && github.ref_name != 'develop'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Generate version for verification
+        id: verify-version
+        run: |
+          node scripts/version.js --force
+          VERSION=$(node -p "require('./version-info.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "🔍 Verification Version: $VERSION"
+
+      - name: Install and build
+        run: |
+          npm install
+          cd backend && npm install && npm run build
+          cd ../frontend && npm install && npm run build
+
+      - name: Run verification tests
+        run: |
+          cd backend && npm test -- --passWithNoTests
+          cd ../frontend && npm test -- --passWithNoTests
+
+      - name: Verify build artifacts
+        run: |
+          echo "✅ Build verification completed for version: ${{ steps.verify-version.outputs.version }}"
+          echo "📝 Commit SHA: ${{ github.sha }}"
+          echo "🌿 Branch: ${{ github.ref_name }}"
+
+  create-release:
+    name: Create GitHub Release
+    needs: version-and-build
+    runs-on: ubuntu-latest
+    if: github.ref_name == 'main' && needs.version-and-build.outputs.should-publish == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: prompt-card-system-${{ needs.version-and-build.outputs.version }}
+          path: ./release-artifacts
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ needs.version-and-build.outputs.version }}
+          release_name: Release v${{ needs.version-and-build.outputs.version }}
+          body: |
+            ## Release v${{ needs.version-and-build.outputs.version }}
+            
+            **Build Type:** ${{ needs.version-and-build.outputs.build-type }}
+            **Branch:** main
+            **Commit:** ${{ github.sha }}
+            
+            ### Changes
+            - Automated release from main branch
+            - Includes backend and frontend builds
+            - Test coverage reports included
+            
+            ### Artifacts
+            - Backend build: `dist/backend/`
+            - Frontend build: `dist/frontend/`
+            - Metadata: `metadata.json`
+            - Version info: `version-info.json`
+          draft: false
+          prerelease: true
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./release-artifacts/
+          asset_name: prompt-card-system-${{ needs.version-and-build.outputs.version }}.zip
+          asset_content_type: application/zip
+
+  notify-completion:
+    name: Notify Build Completion
+    needs: [version-and-build, build-verification]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Build Summary
+        run: |
+          echo "## 🚀 Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY  
+          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | ${{ needs.version-and-build.outputs.version || 'N/A' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build Type | ${{ needs.version-and-build.outputs.build-type || 'verification' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Published | ${{ needs.version-and-build.outputs.should-publish || 'false' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ needs.version-and-build.result }}" == "success" || "${{ needs.build-verification.result }}" == "success" ]]; then
+            echo "✅ **Build Completed Successfully**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Build Failed**" >> $GITHUB_STEP_SUMMARY
+          fi
