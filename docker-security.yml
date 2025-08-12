@@ -1,0 +1,446 @@
+# Docker Security Hardening Configuration
+# This file contains security-hardened Docker configurations for production deployment
+
+version: '3.8'
+
+services:
+  # Hardened Backend Service
+  backend-secure:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+      target: production
+    container_name: prompt-card-backend-secure
+    restart: unless-stopped
+    
+    # Security Configuration
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:docker-default
+      - seccomp:default
+    
+    # Non-root user
+    user: "1001:1001"
+    
+    # Resource limits to prevent DoS
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    
+    # Read-only root filesystem
+    read_only: true
+    
+    # Temporary filesystems for writable directories
+    tmpfs:
+      - /tmp:noexec,nosuid,size=100m
+      - /var/tmp:noexec,nosuid,size=50m
+      - /var/log:noexec,nosuid,size=100m
+    
+    # Environment variables (secrets should be managed externally)
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - SECURITY_HEADERS_ENABLED=true
+      - ENABLE_HELMET=true
+      - TRUST_PROXY=true
+      - LOG_LEVEL=info
+    
+    # Network configuration
+    networks:
+      - backend-network
+      - db-network
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=backend"
+    
+    # Capabilities - drop all, add only necessary ones
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+    
+    # Volumes with security options
+    volumes:
+      - backend-data:/app/data:rw,noexec,nosuid
+      - backend-logs:/var/log:rw,noexec,nosuid
+      - type: tmpfs
+        target: /app/tmp
+        tmpfs:
+          size: 100m
+          mode: 1777
+
+  # Hardened Frontend Service
+  frontend-secure:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      target: production
+    container_name: prompt-card-frontend-secure
+    restart: unless-stopped
+    
+    # Security Configuration
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:docker-default
+      - seccomp:default
+    
+    # Non-root user (Next.js runs as nextjs user)
+    user: "1001:1001"
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    
+    # Read-only root filesystem
+    read_only: true
+    
+    # Temporary filesystems
+    tmpfs:
+      - /tmp:noexec,nosuid,size=50m
+      - /var/cache:noexec,nosuid,size=50m
+      - /var/log:noexec,nosuid,size=50m
+    
+    # Environment variables
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=http://backend-secure:3001/api
+      - PORT=3000
+    
+    # Network configuration
+    networks:
+      - frontend-network
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=frontend"
+    
+    # Capabilities
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+    
+    # Volumes
+    volumes:
+      - frontend-logs:/var/log:rw,noexec,nosuid
+      - type: tmpfs
+        target: /app/.next/cache
+        tmpfs:
+          size: 100m
+          mode: 1777
+
+  # Hardened Database Service
+  postgres-secure:
+    image: postgres:15-alpine
+    container_name: prompt-card-postgres-secure
+    restart: unless-stopped
+    
+    # Security Configuration
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:docker-default
+      - seccomp:default
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    
+    # Environment variables (use secrets in production)
+    environment:
+      - POSTGRES_DB=promptcards
+      - POSTGRES_USER=promptuser
+      - POSTGRES_PASSWORD_FILE=/run/secrets/db_password
+      - POSTGRES_INITDB_ARGS=--auth-host=md5 --auth-local=md5
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    
+    # Secrets
+    secrets:
+      - db_password
+    
+    # Network
+    networks:
+      - db-network
+    
+    # Health check
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U promptuser -d promptcards"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=database"
+    
+    # Capabilities
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+    
+    # Volumes
+    volumes:
+      - postgres-data:/var/lib/postgresql/data:rw,noexec,nosuid
+      - postgres-logs:/var/log:rw,noexec,nosuid
+    
+    # Database-specific configurations
+    command: >
+      postgres 
+      -c ssl=on 
+      -c ssl_cert_file=/var/lib/postgresql/server.crt 
+      -c ssl_key_file=/var/lib/postgresql/server.key
+      -c log_statement=mod
+      -c log_destination=stderr
+      -c logging_collector=on
+      -c log_directory=/var/log
+      -c log_filename=postgresql-%Y-%m-%d_%H%M%S.log
+      -c log_rotation_age=1d
+      -c log_rotation_size=100MB
+      -c log_min_duration_statement=1000
+      -c log_connections=on
+      -c log_disconnections=on
+      -c log_lock_waits=on
+      -c deadlock_timeout=1s
+      -c shared_preload_libraries='pg_stat_statements'
+
+  # Redis for caching and session storage
+  redis-secure:
+    image: redis:7-alpine
+    container_name: prompt-card-redis-secure
+    restart: unless-stopped
+    
+    # Security Configuration
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:docker-default
+      - seccomp:default
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    
+    # Network
+    networks:
+      - backend-network
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    
+    # Capabilities
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+    
+    # Volumes
+    volumes:
+      - redis-data:/data:rw,noexec,nosuid
+    
+    # Redis configuration with security settings
+    command: >
+      redis-server 
+      --appendonly yes 
+      --appendfsync everysec 
+      --save 900 1 
+      --save 300 10 
+      --save 60 10000
+      --maxmemory 200mb
+      --maxmemory-policy allkeys-lru
+      --timeout 300
+      --tcp-keepalive 300
+      --requirepass "${REDIS_PASSWORD:-changeme}"
+
+  # Security Scanner (Trivy)
+  security-scanner:
+    image: aquasec/trivy:latest
+    container_name: security-scanner
+    restart: "no"
+    
+    # Security Configuration
+    security_opt:
+      - no-new-privileges:true
+    
+    # Read-only filesystem
+    read_only: true
+    
+    # Temporary filesystem for cache
+    tmpfs:
+      - /tmp:noexec,nosuid,size=100m
+    
+    # Capabilities
+    cap_drop:
+      - ALL
+    
+    # Volume for Docker socket (scanning containers)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - trivy-cache:/root/.cache/trivy:rw
+    
+    # Scan command
+    command: >
+      sh -c "
+      trivy image --exit-code 1 --severity HIGH,CRITICAL prompt-card-backend-secure &&
+      trivy image --exit-code 1 --severity HIGH,CRITICAL prompt-card-frontend-secure &&
+      trivy image --exit-code 1 --severity HIGH,CRITICAL postgres:15-alpine &&
+      trivy image --exit-code 1 --severity HIGH,CRITICAL redis:7-alpine
+      "
+
+# Network Configuration
+networks:
+  # Frontend network (isolated)
+  frontend-network:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"
+      com.docker.network.bridge.enable_ip_masquerade: "true"
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+  
+  # Backend network
+  backend-network:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "true"
+      com.docker.network.bridge.enable_ip_masquerade: "true"
+    ipam:
+      config:
+        - subnet: 172.21.0.0/24
+  
+  # Database network (most restricted)
+  db-network:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"
+      com.docker.network.bridge.enable_ip_masquerade: "false"
+    ipam:
+      config:
+        - subnet: 172.22.0.0/24
+
+# Volume Configuration
+volumes:
+  # Backend data
+  backend-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind,noexec,nosuid
+      device: ./data/backend
+  
+  backend-logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind,noexec,nosuid
+      device: ./logs/backend
+  
+  # Frontend logs
+  frontend-logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind,noexec,nosuid
+      device: ./logs/frontend
+  
+  # Database data (encrypted at rest)
+  postgres-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind,noexec,nosuid
+      device: ./data/postgres
+  
+  postgres-logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind,noexec,nosuid
+      device: ./logs/postgres
+  
+  # Redis data
+  redis-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind,noexec,nosuid
+      device: ./data/redis
+  
+  # Trivy cache
+  trivy-cache:
+    driver: local
+
+# Secrets Configuration
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
+  redis_password:
+    file: ./secrets/redis_password.txt
+  jwt_secret:
+    file: ./secrets/jwt_secret.txt

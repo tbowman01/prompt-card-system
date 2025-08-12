@@ -30,6 +30,7 @@ import { healthRoutes } from './routes/health';
 import { enhancedHealthRoutes } from './routes/health-enhanced';
 import { healthOrchestratorRoutes } from './routes/health-orchestrator';
 import { alertRoutes } from './routes/alerts';
+import { monitoringRoutes } from './routes/monitoring';
 import { promptCardRoutes } from './routes/promptCards';
 import { testCaseRoutes } from './routes/testCases';
 import { testExecutionRoutes } from './routes/testExecution';
@@ -48,6 +49,7 @@ import { securityRoutes } from './routes/security';
 import { samplePromptRoutes } from './routes/samplePrompts';
 import cicdMonitoringRoutes from './routes/cicd-monitoring';
 import dependenciesRoutes from './routes/dependencies';
+import enterpriseCostsRoutes from './routes/enterpriseCosts';
 import { initializeOptimizationServices } from './services/optimization';
 import { performanceMonitor } from './services/performance/PerformanceMonitor';
 import { loadTestScheduler } from './services/performance/LoadTestScheduler';
@@ -233,6 +235,7 @@ app.use('/api/health', healthRoutes);
 app.use('/api/health/v2', enhancedHealthRoutes);
 app.use('/api/health/orchestrator', healthOrchestratorRoutes);
 app.use('/api/alerts', apiRateLimit, alertRoutes);
+app.use('/api/monitoring', apiRateLimit, monitoringRoutes);
 app.use('/api/prompt-cards', apiRateLimit, promptCardRoutes);
 app.use('/api/test-cases', apiRateLimit, testCaseRoutes);
 app.use('/api/test-cases', testExecutionRateLimit, testExecutionRoutes); // Test execution routes
@@ -250,6 +253,7 @@ app.use('/api/security', securityRoutes);
 app.use('/api/sample-prompts', apiRateLimit, samplePromptRoutes);
 app.use('/api/ci-cd', apiRateLimit, cicdMonitoringRoutes);
 app.use('/api/dependencies', apiRateLimit, dependenciesRoutes);
+app.use('/api/enterprise-costs', apiRateLimit, enterpriseCostsRoutes);
 
 // Error handling middleware
 app.use(errorHandler);

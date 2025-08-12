@@ -1,0 +1,1168 @@
+openapi: 3.0.3
+info:
+  title: Prompt Card System API
+  description: |
+    Comprehensive API for managing prompt cards, test cases, and LLM testing workflows.
+    
+    ## Features
+    - Prompt card and test case management
+    - LLM test execution with multiple models
+    - Real-time progress tracking via WebSocket
+    - Performance analytics and monitoring
+    - Security and compliance features
+    
+    ## Authentication
+    Uses JWT Bearer token authentication. Include the token in the Authorization header:
+    ```
+    Authorization: Bearer <jwt_token>
+    ```
+  version: 1.0.0
+  contact:
+    name: API Support
+    url: https://github.com/tbowman01/prompt-card-system
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:3001/api
+    description: Development server
+  - url: https://api.promptcards.example.com/api
+    description: Production server
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Authentication
+    description: User authentication and authorization
+  - name: Prompt Cards
+    description: Manage prompt cards and templates
+  - name: Test Cases
+    description: Manage test cases for prompt validation
+  - name: Test Execution
+    description: Execute tests and manage test runs
+  - name: Analytics
+    description: Performance metrics and analytics
+  - name: Health
+    description: System health and monitoring
+  - name: Security
+    description: Security and compliance endpoints
+  - name: Dependencies
+    description: Dependency management and monitoring
+
+paths:
+  # Authentication endpoints
+  /auth/login:
+    post:
+      tags: [Authentication]
+      summary: User login
+      description: Authenticate user and receive JWT tokens
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: user@example.com
+                password:
+                  type: string
+                  format: password
+                  minLength: 6
+                  example: securePassword123!
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
+
+  /auth/register:
+    post:
+      tags: [Authentication]
+      summary: User registration
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, confirmPassword]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 8
+                  pattern: '^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]'
+                confirmPassword:
+                  type: string
+      responses:
+        '201':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '409':
+          $ref: '#/components/responses/ConflictError'
+
+  /auth/me:
+    get:
+      tags: [Authentication]
+      summary: Get current user info
+      responses:
+        '200':
+          description: User information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      user:
+                        $ref: '#/components/schemas/User'
+
+  # Prompt Cards endpoints
+  /prompt-cards:
+    get:
+      tags: [Prompt Cards]
+      summary: List prompt cards
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+        - name: search
+          in: query
+          schema:
+            type: string
+            description: Search term for title/description
+      responses:
+        '200':
+          description: List of prompt cards
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PromptCard'
+                  pagination:
+                    $ref: '#/components/schemas/PaginationInfo'
+
+    post:
+      tags: [Prompt Cards]
+      summary: Create new prompt card
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePromptCardRequest'
+      responses:
+        '201':
+          description: Prompt card created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/PromptCard'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+
+  /prompt-cards/{id}:
+    get:
+      tags: [Prompt Cards]
+      summary: Get prompt card by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Prompt card details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/PromptCardWithTestCases'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    put:
+      tags: [Prompt Cards]
+      summary: Update prompt card
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePromptCardRequest'
+      responses:
+        '200':
+          description: Prompt card updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/PromptCard'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    delete:
+      tags: [Prompt Cards]
+      summary: Delete prompt card
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Prompt card deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessMessage'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  # Test Cases endpoints
+  /test-cases:
+    post:
+      tags: [Test Cases]
+      summary: Create new test case
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTestCaseRequest'
+      responses:
+        '201':
+          description: Test case created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/TestCase'
+
+  /test-cases/{id}:
+    get:
+      tags: [Test Cases]
+      summary: Get test case by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Test case details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/TestCase'
+
+  /test-cases/{id}/execute:
+    post:
+      tags: [Test Execution]
+      summary: Execute single test case
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                model:
+                  type: string
+                  example: llama3.1:8b
+                  description: Optional model override
+      responses:
+        '200':
+          description: Test execution result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/TestExecutionResult'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /test-cases/prompt-cards/{id}/execute-all:
+    post:
+      tags: [Test Execution]
+      summary: Execute all test cases for a prompt card
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                model:
+                  type: string
+                  example: llama3.1:8b
+                stopOnFirstFailure:
+                  type: boolean
+                  default: false
+      responses:
+        '200':
+          description: Batch execution result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/BatchExecutionResult'
+
+  /test-cases/execute-parallel:
+    post:
+      tags: [Test Execution]
+      summary: Execute test cases in parallel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ParallelExecutionRequest'
+      responses:
+        '200':
+          description: Execution queued successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      execution_id:
+                        type: string
+                        example: parallel_123456
+                      status:
+                        type: string
+                        example: queued
+                      message:
+                        type: string
+                        example: Test execution queued successfully
+
+  /test-cases/executions/{executionId}/progress:
+    get:
+      tags: [Test Execution]
+      summary: Get execution progress
+      parameters:
+        - name: executionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Execution progress
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/ExecutionProgress'
+
+  # Analytics endpoints
+  /analytics/dashboard:
+    get:
+      tags: [Analytics]
+      summary: Get dashboard metrics
+      responses:
+        '200':
+          description: Dashboard metrics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/DashboardMetrics'
+
+  /analytics/realtime:
+    get:
+      tags: [Analytics]
+      summary: Get real-time metrics
+      responses:
+        '200':
+          description: Real-time metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # Health endpoints
+  /health:
+    get:
+      tags: [Health]
+      summary: Basic health check
+      security: []
+      responses:
+        '200':
+          description: System health status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '500':
+          description: System unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /performance/overview:
+    get:
+      tags: [Health]
+      summary: Performance overview
+      responses:
+        '200':
+          description: Performance metrics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/PerformanceOverview'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "1"
+        email:
+          type: string
+          format: email
+          example: user@example.com
+        role:
+          type: string
+          enum: [user, admin]
+          example: user
+        permissions:
+          type: array
+          items:
+            type: string
+          example: ["read", "write"]
+        createdAt:
+          type: string
+          format: date-time
+        lastLogin:
+          type: string
+          format: date-time
+
+    LoginResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            user:
+              $ref: '#/components/schemas/User'
+            tokens:
+              type: object
+              properties:
+                accessToken:
+                  type: string
+                  example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                refreshToken:
+                  type: string
+                  example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                expiresIn:
+                  type: integer
+                  example: 3600
+
+    PromptCard:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        title:
+          type: string
+          example: Sentiment Analysis
+        description:
+          type: string
+          example: Analyze sentiment of text
+        prompt_template:
+          type: string
+          example: "Analyze the sentiment of: {{text}}"
+        variables:
+          type: array
+          items:
+            type: string
+          example: ["text"]
+        test_case_count:
+          type: integer
+          example: 5
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreatePromptCardRequest:
+      type: object
+      required: [title, description, prompt_template]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+          example: Translation Prompt
+        description:
+          type: string
+          example: Translate text between languages
+        prompt_template:
+          type: string
+          example: "Translate '{{text}}' from {{source_lang}} to {{target_lang}}"
+        variables:
+          type: array
+          items:
+            type: string
+          example: ["text", "source_lang", "target_lang"]
+
+    TestCase:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        prompt_card_id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: Positive sentiment test
+        input_variables:
+          type: object
+          example:
+            text: "I love this product!"
+        expected_output:
+          type: string
+          example: positive
+        assertions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Assertion'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateTestCaseRequest:
+      type: object
+      required: [prompt_card_id, name, input_variables]
+      properties:
+        prompt_card_id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          example: Positive sentiment test
+        input_variables:
+          type: object
+          example:
+            text: "I love this product!"
+        expected_output:
+          type: string
+          example: positive
+        assertions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Assertion'
+
+    Assertion:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [contains, not-contains, equals, not-equals, regex, length]
+          example: contains
+        value:
+          oneOf:
+            - type: string
+            - type: number
+          example: positive
+        description:
+          type: string
+          example: Should contain 'positive'
+
+    TestExecutionResult:
+      type: object
+      properties:
+        execution_id:
+          type: string
+          example: exec_123456
+        test_case_id:
+          type: integer
+          example: 1
+        passed:
+          type: boolean
+          example: true
+        llm_output:
+          type: string
+          example: The sentiment is positive.
+        assertion_results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssertionResult'
+        execution_time_ms:
+          type: integer
+          example: 2500
+        model:
+          type: string
+          example: llama3.1:8b
+        prompt_used:
+          type: string
+          example: "Analyze the sentiment of: I love this product!"
+
+    AssertionResult:
+      type: object
+      properties:
+        type:
+          type: string
+          example: contains
+        value:
+          oneOf:
+            - type: string
+            - type: number
+          example: positive
+        passed:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: Found 'positive' in output
+
+    BatchExecutionResult:
+      type: object
+      properties:
+        execution_id:
+          type: string
+          example: batch_123456
+        prompt_card_id:
+          type: integer
+          example: 1
+        total_tests:
+          type: integer
+          example: 3
+        passed_tests:
+          type: integer
+          example: 2
+        failed_tests:
+          type: integer
+          example: 1
+        overall_passed:
+          type: boolean
+          example: false
+        execution_time_ms:
+          type: integer
+          example: 7500
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/TestExecutionResult'
+
+    ParallelExecutionRequest:
+      type: object
+      required: [prompt_card_id, test_case_ids]
+      properties:
+        prompt_card_id:
+          type: integer
+          example: 1
+        test_case_ids:
+          type: array
+          items:
+            type: integer
+          minItems: 1
+          example: [1, 2, 3]
+        model:
+          type: string
+          example: llama3.1:8b
+        configuration:
+          type: object
+          properties:
+            max_concurrent_tests:
+              type: integer
+              default: 3
+            timeout_per_test:
+              type: integer
+              default: 30000
+            retry_failed_tests:
+              type: boolean
+              default: false
+            max_retries:
+              type: integer
+              default: 1
+            resource_limits:
+              type: object
+              properties:
+                memory_mb:
+                  type: integer
+                  default: 1024
+                cpu_percent:
+                  type: integer
+                  default: 50
+        priority:
+          type: integer
+          default: 0
+
+    ExecutionProgress:
+      type: object
+      properties:
+        job_id:
+          type: string
+          example: parallel_123456
+        execution_id:
+          type: string
+          example: parallel_123456
+        total_tests:
+          type: integer
+          example: 5
+        completed_tests:
+          type: integer
+          example: 3
+        failed_tests:
+          type: integer
+          example: 1
+        current_test:
+          type: object
+          properties:
+            test_case_id:
+              type: integer
+              example: 4
+            model:
+              type: string
+              example: llama3.1:8b
+            started_at:
+              type: string
+              format: date-time
+            estimated_completion:
+              type: string
+              format: date-time
+        overall_progress_percent:
+          type: number
+          format: float
+          example: 60.0
+        estimated_time_remaining:
+          type: integer
+          example: 30000
+        message:
+          type: string
+          example: Executing test 4 of 5
+        status:
+          type: string
+          enum: [pending, running, completed, failed, cancelled]
+          example: running
+        updated_at:
+          type: string
+          format: date-time
+
+    DashboardMetrics:
+      type: object
+      properties:
+        totalPromptCards:
+          type: integer
+          example: 25
+        totalTestCases:
+          type: integer
+          example: 120
+        totalExecutions:
+          type: integer
+          example: 1500
+        successRate:
+          type: number
+          format: float
+          example: 87.5
+        averageExecutionTime:
+          type: integer
+          example: 2450
+        popularModels:
+          type: array
+          items:
+            type: object
+            properties:
+              model:
+                type: string
+                example: llama3.1:8b
+              usage_count:
+                type: integer
+                example: 800
+              success_rate:
+                type: number
+                format: float
+                example: 89.2
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+          example: healthy
+        timestamp:
+          type: string
+          format: date-time
+        services:
+          type: object
+          properties:
+            database:
+              type: string
+              enum: [connected, disconnected]
+              example: connected
+            ollama:
+              type: object
+              properties:
+                url:
+                  type: string
+                  example: http://ollama:11434
+                status:
+                  type: string
+                  example: configured
+        environment:
+          type: string
+          example: development
+
+    PerformanceOverview:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        systemMetrics:
+          type: object
+          properties:
+            cpu_usage:
+              type: number
+              format: float
+              example: 45.2
+            memory_usage:
+              type: number
+              format: float
+              example: 67.8
+            disk_usage:
+              type: number
+              format: float
+              example: 34.1
+        applicationMetrics:
+          type: object
+          properties:
+            active_connections:
+              type: integer
+              example: 12
+            requests_per_minute:
+              type: integer
+              example: 450
+            average_response_time:
+              type: integer
+              example: 125
+        uptime:
+          type: integer
+          example: 86400
+
+    PromptCardWithTestCases:
+      allOf:
+        - $ref: '#/components/schemas/PromptCard'
+        - type: object
+          properties:
+            test_cases:
+              type: array
+              items:
+                $ref: '#/components/schemas/TestCase'
+
+    PaginationInfo:
+      type: object
+      properties:
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 10
+        total:
+          type: integer
+          example: 25
+        totalPages:
+          type: integer
+          example: 3
+        hasNext:
+          type: boolean
+          example: true
+        hasPrev:
+          type: boolean
+          example: false
+
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+
+    SuccessMessage:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: Operation completed successfully
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: string
+          example: Error message
+        code:
+          type: string
+          example: ERROR_CODE
+
+  responses:
+    UnauthorizedError:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error: Invalid credentials
+            code: INVALID_CREDENTIALS
+
+    NotFoundError:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error: Resource not found
+            code: RESOURCE_NOT_FOUND
+
+    ValidationError:
+      description: Request validation failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error: Validation failed
+            code: VALIDATION_ERROR
+
+    ConflictError:
+      description: Resource already exists
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error: User already exists
+            code: USER_EXISTS
+
+    RateLimitError:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error: Too many requests
+            code: RATE_LIMIT_EXCEEDED
+
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            error: Internal server error
+            code: SYSTEM_ERROR
+
+# WebSocket events are documented separately as OpenAPI doesn't fully support WebSocket specs
+x-websocket-events:
+  client-to-server:
+    - event: subscribe-test
+      description: Subscribe to test execution updates
+      payload:
+        type: string
+        description: execution_id
+        example: exec_123456
+    
+    - event: unsubscribe-test
+      description: Unsubscribe from test execution updates  
+      payload:
+        type: string
+        description: execution_id
+        example: exec_123456
+    
+    - event: subscribe-system-resources
+      description: Subscribe to system resource updates
+      payload: null
+    
+    - event: get-progress
+      description: Request current progress
+      payload:
+        type: string
+        description: execution_id
+        example: exec_123456
+
+  server-to-client:
+    - event: progress
+      description: Test execution progress update
+      payload:
+        $ref: '#/components/schemas/ExecutionProgress'
+    
+    - event: test-complete
+      description: Test execution completed
+      payload:
+        $ref: '#/components/schemas/TestExecutionResult'
+    
+    - event: subscription-confirmed
+      description: Subscription confirmation
+      payload:
+        type: object
+        properties:
+          executionId:
+            type: string
+          status:
+            type: string
+            enum: [subscribed, unsubscribed]

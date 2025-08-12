@@ -1,4 +1,5 @@
-const { http, HttpResponse } = require('msw')
+import { http, HttpResponse } from 'msw'
+import { PromptCard, TestCase, DashboardMetrics, TestExecution, AnalyticsInsight } from '@/types'
 
 const API_BASE_URL = 'http://localhost:3001/api'
 
@@ -315,4 +316,4 @@ const handlers = [
   }),
 ]
 
-module.exports = { handlers }
+export { handlers }
