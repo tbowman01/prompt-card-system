@@ -1,7 +1,11 @@
 import express, { Request, Response } from 'express';
 import { AnalyticsEngine } from '../services/analytics/AnalyticsEngine';
+import integratedAnalyticsRouter from './integrated-analytics';
 
 const router = express.Router();
+
+// Mount integrated analytics routes
+router.use('/', integratedAnalyticsRouter);
 const analyticsEngine = AnalyticsEngine.getInstance();
 
 // Get dashboard metrics
