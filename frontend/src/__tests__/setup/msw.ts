@@ -1,6 +1,6 @@
 // Setup MSW for testing environment only
-const { setupServer } = require('msw/node')
-const { handlers } = require('../mocks/handlers')
+import { setupServer } from 'msw/node'
+import { handlers } from '../mocks/handlers'
 
 // Setup server with request handlers
 const server = setupServer(...handlers)
@@ -16,4 +16,4 @@ afterEach(() => server.resetHandlers())
 // Clean up after tests are complete
 afterAll(() => server.close())
 
-module.exports = { server }
+export { server }

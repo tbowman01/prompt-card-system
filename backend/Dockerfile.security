@@ -1,0 +1,145 @@
+# Multi-stage security-hardened Dockerfile for backend
+FROM node:20-alpine AS base
+
+# Install security updates and required packages
+RUN apk update && apk upgrade && \
+    apk add --no-cache \
+    dumb-init \
+    curl \
+    ca-certificates \
+    && rm -rf /var/cache/apk/*
+
+# Create non-root user with specific UID/GID
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S backend -u 1001 -G nodejs
+
+# Set up secure directories
+RUN mkdir -p /app && \
+    mkdir -p /app/logs && \
+    mkdir -p /app/data && \
+    mkdir -p /app/tmp && \
+    chown -R backend:nodejs /app && \
+    chmod 755 /app
+
+# Dependency installation stage
+FROM base AS deps
+WORKDIR /app
+
+# Copy package files
+COPY --chown=backend:nodejs package*.json ./
+
+# Install dependencies with security audit
+USER backend
+RUN npm ci --only=production && \
+    npm audit --audit-level high && \
+    npm cache clean --force
+
+# Build stage
+FROM base AS builder
+WORKDIR /app
+
+# Copy source and build
+COPY --chown=backend:nodejs . .
+COPY --from=deps --chown=backend:nodejs /app/node_modules ./node_modules
+
+# Build application
+USER backend
+RUN npm run build && \
+    npm prune --production
+
+# Production stage with maximum security
+FROM base AS production
+
+# Security labels
+LABEL \
+    org.opencontainers.image.title="Prompt Card System Backend - Security Hardened" \
+    org.opencontainers.image.description="Production-ready backend with comprehensive security measures" \
+    org.opencontainers.image.vendor="Prompt Card System" \
+    org.opencontainers.image.version="1.0.0" \
+    org.opencontainers.image.created="${BUILD_DATE}" \
+    org.opencontainers.image.revision="${VCS_REF}" \
+    security.scan="enabled" \
+    security.updates="auto"
+
+WORKDIR /app
+
+# Copy built application and dependencies
+COPY --from=builder --chown=backend:nodejs /app/dist ./dist
+COPY --from=builder --chown=backend:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=backend:nodejs /app/package*.json ./
+
+# Copy security configuration files
+COPY --chown=backend:nodejs security/ ./security/
+
+# Set up runtime directories with proper permissions
+RUN mkdir -p logs data tmp uploads && \
+    chown -R backend:nodejs /app && \
+    chmod 750 /app && \
+    chmod 770 logs data tmp && \
+    chmod 750 uploads && \
+    # Remove potentially dangerous binaries
+    find /usr/bin /usr/sbin /bin /sbin -type f \( \
+        -name "wget" -o \
+        -name "curl" -o \
+        -name "nc" -o \
+        -name "netcat" -o \
+        -name "telnet" -o \
+        -name "ftp" \) \
+        -not -path "/usr/bin/curl" -delete || true
+
+# Security configurations
+ENV NODE_ENV=production \
+    NPM_CONFIG_LOGLEVEL=warn \
+    NODE_OPTIONS="--max-old-space-size=1024 --no-warnings" \
+    PORT=3001 \
+    # Security environment variables
+    HELMET_ENABLED=true \
+    SECURITY_HEADERS_ENABLED=true \
+    RATE_LIMITING_ENABLED=true \
+    CSRF_PROTECTION_ENABLED=true \
+    INPUT_VALIDATION_ENABLED=true \
+    # Logging configuration
+    LOG_LEVEL=info \
+    LOG_FORMAT=json \
+    # Process security
+    DISABLE_SOURCEMAPS=true \
+    NODE_OPTIONS="--disable-proto=delete"
+
+# Expose port (non-privileged)
+EXPOSE 3001
+
+# Health check with security considerations
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:3001/api/health/security || exit 1
+
+# Switch to non-root user
+USER backend:nodejs
+
+# Use dumb-init for proper signal handling
+ENTRYPOINT ["dumb-init", "--"]
+
+# Secure startup command with process isolation
+CMD ["node", "--enable-source-maps", "--trace-warnings", "dist/server.js"]
+
+# Security scan stage (for CI/CD)
+FROM aquasec/trivy:latest AS security-scan
+COPY --from=production / /scan-target/
+RUN trivy fs --exit-code 1 --severity HIGH,CRITICAL /scan-target/
+
+# Runtime security verification
+FROM production AS verify
+USER root
+RUN set -ex && \
+    # Verify non-root user
+    ! id root 2>/dev/null && \
+    # Verify no setuid/setgid binaries
+    ! find / -perm -4000 -o -perm -2000 2>/dev/null | grep -v proc && \
+    # Verify file permissions
+    find /app -type f -exec test -r {} \; && \
+    # Verify network capabilities
+    ! command -v nc && ! command -v netcat && \
+    # Verify process limits
+    ulimit -c 0 && \
+    echo "Security verification passed"
+
+USER backend:nodejs

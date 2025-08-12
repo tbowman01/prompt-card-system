@@ -15,8 +15,8 @@ global.afterEach = afterEach;
 global.beforeAll = beforeAll;
 global.afterAll = afterAll;
 
-// TODO: Set up MSW for API mocking when needed
-// require('./src/__tests__/setup/msw')
+// Set up MSW for API mocking
+require('./src/__tests__/setup/msw')
 
 // Mock window.matchMedia
 Object.defineProperty(window, 'matchMedia', {

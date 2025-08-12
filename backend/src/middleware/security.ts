@@ -1,6 +1,23 @@
 import { Request, Response, NextFunction } from 'express';
 import helmet from 'helmet';
-import { randomBytes, createHash } from 'crypto';
+import { randomBytes, createHash, timingSafeEqual } from 'crypto';
+import rateLimit from 'express-rate-limit';
+
+// Enhanced interfaces for security
+interface SecurityContext {
+  requestId: string;
+  userAgent?: string;
+  ip: string;
+  timestamp: Date;
+  fingerprint?: string;
+}
+
+interface SecurityMetrics {
+  blockedRequests: number;
+  suspiciousActivity: number;
+  csrfAttempts: number;
+  rateLimitHits: number;
+}
 
 // CSRF Protection
 interface CSRFStore {
@@ -12,6 +29,18 @@ interface CSRFStore {
 
 const csrfTokens: CSRFStore = {};
 const CSRF_TOKEN_EXPIRY = 60 * 60 * 1000; // 1 hour
+
+// Security metrics tracking
+const securityMetrics: SecurityMetrics = {
+  blockedRequests: 0,
+  suspiciousActivity: 0,
+  csrfAttempts: 0,
+  rateLimitHits: 0
+};
+
+// Suspicious activity tracking
+const suspiciousIPs = new Set<string>();
+const ipAttempts = new Map<string, { count: number; lastAttempt: number }>();
 
 // Generate CSRF token
 export const generateCSRFToken = (sessionId: string): string => {
@@ -26,7 +55,7 @@ export const generateCSRFToken = (sessionId: string): string => {
   return token;
 };
 
-// Validate CSRF token
+// Validate CSRF token using timing-safe comparison
 export const validateCSRFToken = (sessionId: string, token: string): boolean => {
   const stored = csrfTokens[sessionId];
   
@@ -35,7 +64,15 @@ export const validateCSRFToken = (sessionId: string, token: string): boolean => 
     return false;
   }
   
-  return stored.token === token;
+  // Use timing-safe comparison to prevent timing attacks
+  const storedBuffer = Buffer.from(stored.token, 'hex');
+  const providedBuffer = Buffer.from(token, 'hex');
+  
+  if (storedBuffer.length !== providedBuffer.length) {
+    return false;
+  }
+  
+  return timingSafeEqual(storedBuffer, providedBuffer);
 };
 
 // Clean up expired CSRF tokens
