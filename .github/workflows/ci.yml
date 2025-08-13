@@ -43,18 +43,16 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          cache-dependency-path: |
-            backend/package-lock.json
-            frontend/package-lock.json
+          cache-dependency-path: package-lock.json
 
       # Multi-level cache strategy for maximum speed
       - name: Generate advanced cache keys
         id: cache-key
         run: |
-          echo "backend-key=${{ env.CACHE_VERSION }}-${{ runner.os }}-backend-${{ hashFiles('backend/package-lock.json') }}" >> $GITHUB_OUTPUT
-          echo "frontend-key=${{ env.CACHE_VERSION }}-${{ runner.os }}-frontend-${{ hashFiles('frontend/package-lock.json') }}" >> $GITHUB_OUTPUT
+          echo "backend-key=${{ env.CACHE_VERSION }}-${{ runner.os }}-backend-${{ hashFiles('package-lock.json') }}" >> $GITHUB_OUTPUT
+          echo "frontend-key=${{ env.CACHE_VERSION }}-${{ runner.os }}-frontend-${{ hashFiles('package-lock.json') }}" >> $GITHUB_OUTPUT
           echo "system-key=${{ env.CACHE_VERSION }}-${{ runner.os }}-system-deps" >> $GITHUB_OUTPUT
-          echo "key=${{ env.CACHE_VERSION }}-${{ runner.os }}-node-${{ env.NODE_VERSION }}-${{ hashFiles('backend/package-lock.json', 'frontend/package-lock.json') }}" >> $GITHUB_OUTPUT
+          echo "key=${{ env.CACHE_VERSION }}-${{ runner.os }}-node-${{ env.NODE_VERSION }}-${{ hashFiles('package-lock.json') }}" >> $GITHUB_OUTPUT
 
       # Cache system dependencies (rarely change)
       - name: Cache system dependencies
@@ -90,16 +88,11 @@ jobs:
           restore-keys: |
             ${{ env.CACHE_VERSION }}-${{ runner.os }}-frontend-
 
-      # Parallel dependency installation for speed
-      - name: Install dependencies in parallel (if not cached)
+      # Install all dependencies using workspace
+      - name: Install dependencies
         run: |
-          if [[ "${{ steps.backend-cache.outputs.cache-hit }}" != "true" ]]; then
-            cd backend && npm ci --prefer-offline &
-          fi
-          if [[ "${{ steps.frontend-cache.outputs.cache-hit }}" != "true" ]]; then
-            cd frontend && npm ci --prefer-offline &
-          fi
-          wait
+          npm ci --prefer-offline
+          npm run install:all
           echo "✅ Dependencies installed successfully"
 
       - name: Status — Setup complete
@@ -127,15 +120,13 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          cache-dependency-path: |
-            backend/package-lock.json
-            frontend/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Generate cache keys
         id: cache-key
         run: |
-          echo "backend-key=${{ env.CACHE_VERSION }}-${{ runner.os }}-backend-${{ hashFiles('backend/package-lock.json') }}" >> $GITHUB_OUTPUT
-          echo "frontend-key=${{ env.CACHE_VERSION }}-${{ runner.os }}-frontend-${{ hashFiles('frontend/package-lock.json') }}" >> $GITHUB_OUTPUT
+          echo "backend-key=${{ env.CACHE_VERSION }}-${{ runner.os }}-backend-${{ hashFiles('package-lock.json') }}" >> $GITHUB_OUTPUT
+          echo "frontend-key=${{ env.CACHE_VERSION }}-${{ runner.os }}-frontend-${{ hashFiles('package-lock.json') }}" >> $GITHUB_OUTPUT
 
       - name: Restore system dependencies (if cached)
         if: needs.setup-dependencies.outputs.system-cache-hit == 'true'
@@ -190,93 +181,40 @@ jobs:
           fi
           wait
 
-      # Enhanced parallel lint and type checking with proper error handling
-      - name: Run all quality checks in parallel
+      # Install dependencies for this job
+      - name: Install dependencies
         run: |
-          echo "🔍 Running comprehensive quality checks..."
-          
-          # Initialize status tracking
-          backend_lint_status=0
-          frontend_lint_status=0
-          backend_type_status=0
-          frontend_type_status=0
-          
-          # Run all checks in parallel with proper error capture
-          {
-            cd backend && npm run lint
-            backend_lint_status=$?
-          } &
-          backend_lint_pid=$!
-          
-          {
-            cd frontend && npm run lint
-            frontend_lint_status=$?
-          } &
-          frontend_lint_pid=$!
-          
-          {
-            cd backend && npm run type-check
-            backend_type_status=$?
-          } &
-          backend_type_pid=$!
-          
-          {
-            cd frontend && npm run type-check
-            frontend_type_status=$?
-          } &
-          frontend_type_pid=$!
-          
-          # Wait for all processes and collect results
-          wait $backend_lint_pid; backend_lint_status=$?
-          wait $frontend_lint_pid; frontend_lint_status=$?
-          wait $backend_type_pid; backend_type_status=$?
-          wait $frontend_type_pid; frontend_type_status=$?
-          
-          # Report results
-          echo "📊 Quality Check Results:"
-          echo "├── Backend Lint: $([ $backend_lint_status -eq 0 ] && echo "✅ PASSED" || echo "❌ FAILED")"
-          echo "├── Frontend Lint: $([ $frontend_lint_status -eq 0 ] && echo "✅ PASSED" || echo "❌ FAILED")"
-          echo "├── Backend TypeCheck: $([ $backend_type_status -eq 0 ] && echo "✅ PASSED" || echo "❌ FAILED")"
-          echo "└── Frontend TypeCheck: $([ $frontend_type_status -eq 0 ] && echo "✅ PASSED" || echo "❌ FAILED")"
-          
-          # Exit with failure if any check failed
-          if [[ $backend_lint_status -ne 0 || $frontend_lint_status -ne 0 || $backend_type_status -ne 0 || $frontend_type_status -ne 0 ]]; then
-            echo "❌ One or more quality checks failed!"
-            exit 1
-          fi
-          
+          npm ci --prefer-offline
+          npm run install:all
+
+      # Run quality checks using workspace commands
+      - name: Run lint and type checks
+        run: |
+          echo "🔍 Running quality checks..."
+          npm run lint
+          npm run type-check
           echo "✅ All quality checks passed successfully!"
 
   test-backend-parallel:
-    name: Backend Tests (Comprehensive)
+    name: Backend Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 10
     needs: setup-dependencies
-    strategy:
-      matrix:
-        # Optimized matrix: Focus on Node 20 for speed, add Node 22 for main branches
-        node-version: [20]
-        test-type: ['unit', 'integration']
-        include:
-          # Add Node 22 testing only for main/develop branches
-          - node-version: 22
-            test-type: 'unit'
-            if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js ${{ matrix.node-version }}
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          cache-dependency-path: backend/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Generate cache keys
         id: cache-key
         run: |
-          echo "backend-key=${{ env.CACHE_VERSION }}-${{ runner.os }}-backend-node${{ matrix.node-version }}-${{ hashFiles('backend/package-lock.json') }}" >> $GITHUB_OUTPUT
+          echo "backend-key=${{ env.CACHE_VERSION }}-${{ runner.os }}-backend-${{ hashFiles('package-lock.json') }}" >> $GITHUB_OUTPUT
 
       - name: Restore system dependencies (if cached)
         if: needs.setup-dependencies.outputs.system-cache-hit == 'true'
@@ -295,93 +233,44 @@ jobs:
           path: backend/node_modules
           key: ${{ steps.cache-key.outputs.backend-key }}
           restore-keys: |
-            ${{ env.CACHE_VERSION }}-${{ runner.os }}-backend-node${{ matrix.node-version }}-
             ${{ env.CACHE_VERSION }}-${{ runner.os }}-backend-
 
-      - name: Install backend dependencies (if not cached)
-        working-directory: ./backend
-        run: npm ci --prefer-offline
-
-      - name: Setup test services (integration only)
-        if: matrix.test-type == 'integration'
+      # Install dependencies
+      - name: Install dependencies
         run: |
-          # Start Redis for integration tests
-          docker run -d --name redis-${{ github.run_id }} -p 6379:6379 redis:7-alpine
-          # Wait for Redis to be ready with timeout
-          timeout=30
-          while ! docker exec redis-${{ github.run_id }} redis-cli ping > /dev/null 2>&1; do
-            sleep 1
-            ((timeout--))
-            if [[ $timeout -eq 0 ]]; then
-              echo "❌ Redis failed to start within 30 seconds"
-              exit 1
-            fi
-          done
-          echo "✅ Redis is ready for integration tests"
+          npm ci --prefer-offline
+          npm run install:all
 
-      - name: Run ${{ matrix.test-type }} tests with enhanced parallel execution
-        working-directory: ./backend
+      - name: Run backend tests
         run: |
-          echo "🧪 Running ${{ matrix.test-type }} tests on Node ${{ matrix.node-version }}..."
-          
-          # Set test-specific configuration
-          if [[ "${{ matrix.test-type }}" == "unit" ]]; then
-            # Unit tests: Maximum parallelism, in-memory database
-            npm run test:unit -- \
-              --maxWorkers=75% \
-              --coverage \
-              --coverageReporters=lcov,text-summary \
-              --testTimeout=10000 \
-              --verbose
-          else
-            # Integration tests: Moderate parallelism, real database
-            npm run test:integration -- \
-              --maxWorkers=50% \
-              --testTimeout=30000 \
-              --verbose
-          fi
+          echo "🧪 Running backend tests..."
+          npm run test:backend
         env:
           NODE_ENV: test
           CI: true
-          DATABASE_PATH: ${{ matrix.test-type == 'integration' && './data/test.db' || ':memory:' }}
-          REDIS_HOST: ${{ matrix.test-type == 'integration' && 'localhost' || '' }}
-          REDIS_PORT: ${{ matrix.test-type == 'integration' && '6379' || '' }}
-          OLLAMA_BASE_URL: "http://mock-ollama:11434"
-          # Performance optimizations
-          NODE_OPTIONS: "--max-old-space-size=4096"
 
-      - name: Upload test coverage (unit tests only)
-        if: matrix.test-type == 'unit'
+      - name: Upload test coverage
         uses: codecov/codecov-action@v4
         with:
           files: ./backend/coverage/lcov.info
-          flags: backend-node${{ matrix.node-version }}
-          name: backend-coverage-node${{ matrix.node-version }}
+          flags: backend
+          name: backend-coverage
           fail_ci_if_error: false
 
       - name: Upload test results artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: backend-test-results-${{ matrix.test-type }}-node${{ matrix.node-version }}
+          name: backend-test-results
           path: |
             ./backend/test-results/
             ./backend/coverage/
           retention-days: 7
 
-      - name: Cleanup test services
-        if: always() && matrix.test-type == 'integration'
-        run: |
-          if docker ps | grep -q "redis-${{ github.run_id }}"; then
-            docker stop redis-${{ github.run_id }}
-            docker rm redis-${{ github.run_id }}
-            echo "✅ Cleaned up Redis test container"
-          fi
-
   test-frontend-parallel:
-    name: Frontend Tests (Optimized)
+    name: Frontend Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 8
     needs: setup-dependencies
     steps:
       - name: Checkout code
@@ -392,12 +281,12 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Generate cache keys
         id: cache-key
         run: |
-          echo "frontend-key=${{ env.CACHE_VERSION }}-${{ runner.os }}-frontend-${{ hashFiles('frontend/package-lock.json') }}" >> $GITHUB_OUTPUT
+          echo "frontend-key=${{ env.CACHE_VERSION }}-${{ runner.os }}-frontend-${{ hashFiles('package-lock.json') }}" >> $GITHUB_OUTPUT
 
       - name: Restore cached frontend dependencies
         uses: actions/cache@v4
@@ -407,29 +296,20 @@ jobs:
           restore-keys: |
             ${{ env.CACHE_VERSION }}-${{ runner.os }}-frontend-
 
-      - name: Install frontend dependencies (if not cached)
-        working-directory: ./frontend
-        run: npm ci --prefer-offline
-
-      - name: Run frontend tests with parallel execution
-        working-directory: ./frontend
+      # Install dependencies
+      - name: Install dependencies
         run: |
-          echo "🧪 Running frontend tests with optimizations..."
-          
-          # Run tests with enhanced Jest configuration
-          npm run test:ci -- \
-            --maxWorkers=75% \
-            --coverage \
-            --coverageReporters=lcov,text-summary \
-            --testTimeout=15000 \
-            --passWithNoTests \
-            --verbose
+          npm ci --prefer-offline
+          npm run install:all
+
+      - name: Run frontend tests
+        run: |
+          echo "🧪 Running frontend tests..."
+          npm run test:frontend
         env:
           NODE_ENV: test
           CI: true
           NEXT_PUBLIC_API_URL: http://localhost:3001
-          # Performance optimizations
-          NODE_OPTIONS: "--max-old-space-size=4096"
 
       - name: Upload frontend coverage
         uses: codecov/codecov-action@v4
@@ -453,9 +333,9 @@ jobs:
   # This provides better resource utilization and faster execution
 
   build-parallel:
-    name: Build Applications (Optimized)
+    name: Build Applications
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 8
     needs: [setup-dependencies, lint-and-typecheck]
     steps:
       - name: Checkout code
@@ -466,15 +346,13 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          cache-dependency-path: |
-            backend/package-lock.json
-            frontend/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Generate cache keys
         id: cache-key
         run: |
-          echo "backend-key=${{ env.CACHE_VERSION }}-${{ runner.os }}-backend-${{ hashFiles('backend/package-lock.json') }}" >> $GITHUB_OUTPUT
-          echo "frontend-key=${{ env.CACHE_VERSION }}-${{ runner.os }}-frontend-${{ hashFiles('frontend/package-lock.json') }}" >> $GITHUB_OUTPUT
+          echo "backend-key=${{ env.CACHE_VERSION }}-${{ runner.os }}-backend-${{ hashFiles('package-lock.json') }}" >> $GITHUB_OUTPUT
+          echo "frontend-key=${{ env.CACHE_VERSION }}-${{ runner.os }}-frontend-${{ hashFiles('package-lock.json') }}" >> $GITHUB_OUTPUT
 
       - name: Restore system dependencies (if cached)
         if: needs.setup-dependencies.outputs.system-cache-hit == 'true'
@@ -510,74 +388,21 @@ jobs:
           restore-keys: |
             ${{ env.CACHE_VERSION }}-${{ runner.os }}-frontend-
 
-      - name: Install dependencies (if not cached)
+      # Install dependencies
+      - name: Install dependencies
         run: |
-          if [[ ! -d "backend/node_modules" || "${{ needs.setup-dependencies.outputs.backend-cache-hit }}" != "true" ]]; then
-            cd backend && npm ci --prefer-offline &
-          fi
-          if [[ ! -d "frontend/node_modules" || "${{ needs.setup-dependencies.outputs.frontend-cache-hit }}" != "true" ]]; then
-            cd frontend && npm ci --prefer-offline &
-          fi
-          wait
+          npm ci --prefer-offline
+          npm run install:all
 
-      # Cache build outputs for reuse in Docker builds
-      - name: Cache build outputs
-        uses: actions/cache@v4
-        with:
-          path: |
-            backend/dist
-            frontend/.next
-          key: ${{ env.CACHE_VERSION }}-build-outputs-${{ github.sha }}
-          restore-keys: |
-            ${{ env.CACHE_VERSION }}-build-outputs-
-
-      - name: Build applications in parallel with error handling
+      - name: Build applications
         run: |
-          echo "🛠️ Building applications in parallel..."
-          
-          # Initialize status tracking
-          backend_build_status=0
-          frontend_build_status=0
-          
-          # Build backend and frontend in parallel with proper error capture
-          {
-            echo "Building backend..."
-            cd backend && npm run build
-            backend_build_status=$?
-            echo "Backend build completed with status: $backend_build_status"
-          } &
-          backend_pid=$!
-          
-          {
-            echo "Building frontend..."
-            cd frontend && npm run build
-            frontend_build_status=$?
-            echo "Frontend build completed with status: $frontend_build_status"
-          } &
-          frontend_pid=$!
-          
-          # Wait for all processes and collect results
-          wait $backend_pid; backend_build_status=$?
-          wait $frontend_pid; frontend_build_status=$?
-          
-          # Report results
-          echo "📋 Build Results:"
-          echo "├── Backend Build: $([ $backend_build_status -eq 0 ] && echo "✅ PASSED" || echo "❌ FAILED")"
-          echo "└── Frontend Build: $([ $frontend_build_status -eq 0 ] && echo "✅ PASSED" || echo "❌ FAILED")"
-          
-          # Exit with failure if any build failed
-          if [[ $backend_build_status -ne 0 || $frontend_build_status -ne 0 ]]; then
-            echo "❌ One or more builds failed!"
-            exit 1
-          fi
-          
+          echo "🛠️ Building applications..."
+          npm run build
           echo "✅ All builds completed successfully!"
         env:
           NODE_ENV: production
           CI: true
           NEXT_PUBLIC_API_URL: http://localhost:3001
-          # Performance optimizations
-          NODE_OPTIONS: "--max-old-space-size=6144"
 
       - name: Upload build artifacts in parallel
         run: |

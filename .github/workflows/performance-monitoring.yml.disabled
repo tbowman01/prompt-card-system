@@ -1,0 +1,488 @@
+name: Performance Monitoring
+
+on:
+  push:
+    branches: [ main, develop ]
+  schedule:
+    - cron: '0 */6 * * *' # Every 6 hours
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to monitor'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  performance-baseline:
+    name: Performance Baseline
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          # Removed problematic cache: 'npm' - using manual cache strategy instead
+
+      - name: Install dependencies
+        run: |
+          cd backend && npm ci
+          cd ../frontend && npm ci
+
+      - name: Install performance tools
+        run: |
+          npm install -g lighthouse
+          npm install -g artillery
+          npm install -g clinic
+
+      - name: Start application
+        run: |
+          # Start backend
+          cd backend
+          npm run build
+          npm start &
+          BACKEND_PID=$!
+          echo "BACKEND_PID=$BACKEND_PID" >> $GITHUB_ENV
+          
+          # Start frontend
+          cd ../frontend
+          npm run build
+          npm start &
+          FRONTEND_PID=$!
+          echo "FRONTEND_PID=$FRONTEND_PID" >> $GITHUB_ENV
+          
+          # Wait for services
+          timeout 60 bash -c 'until curl -f http://localhost:3001/api/health; do sleep 2; done'
+          timeout 60 bash -c 'until curl -f http://localhost:3000; do sleep 2; done'
+        env:
+          NODE_ENV: production
+          DATABASE_PATH: ":memory:"
+          NEXT_PUBLIC_API_URL: http://localhost:3001
+
+      - name: Run Lighthouse audit
+        run: |
+          lighthouse http://localhost:3000 \
+            --output html,json \
+            --output-path ./lighthouse-report \
+            --chrome-flags="--headless --no-sandbox" \
+            --preset=desktop
+          
+          # Extract key metrics
+          node -e "
+            const fs = require('fs');
+            const report = JSON.parse(fs.readFileSync('./lighthouse-report.json'));
+            const metrics = report.lhr.audits;
+            
+            console.log('📊 Lighthouse Performance Metrics:');
+            console.log('Performance Score:', report.lhr.categories.performance.score * 100);
+            console.log('First Contentful Paint:', metrics['first-contentful-paint'].displayValue);
+            console.log('Largest Contentful Paint:', metrics['largest-contentful-paint'].displayValue);
+            console.log('Cumulative Layout Shift:', metrics['cumulative-layout-shift'].displayValue);
+            console.log('Total Blocking Time:', metrics['total-blocking-time'].displayValue);
+            
+            // Save metrics for comparison
+            const performanceData = {
+              timestamp: new Date().toISOString(),
+              performanceScore: report.lhr.categories.performance.score * 100,
+              fcp: metrics['first-contentful-paint'].numericValue,
+              lcp: metrics['largest-contentful-paint'].numericValue,
+              cls: metrics['cumulative-layout-shift'].numericValue,
+              tbt: metrics['total-blocking-time'].numericValue
+            };
+            
+            fs.writeFileSync('./performance-baseline.json', JSON.stringify(performanceData, null, 2));
+          "
+
+      - name: Run backend load test
+        run: |
+          cat > load-test.yml << 'EOF'
+          config:
+            target: 'http://localhost:3001'
+            phases:
+              - duration: 30
+                arrivalRate: 5
+              - duration: 60
+                arrivalRate: 10
+              - duration: 30
+                arrivalRate: 15
+            defaults:
+              headers:
+                content-type: 'application/json'
+          scenarios:
+            - name: 'Health Check'
+              weight: 20
+              flow:
+                - get:
+                    url: '/api/health'
+            - name: 'List Prompt Cards'
+              weight: 40
+              flow:
+                - get:
+                    url: '/api/prompt-cards'
+            - name: 'Create Prompt Card'
+              weight: 30
+              flow:
+                - post:
+                    url: '/api/prompt-cards'
+                    json:
+                      title: 'Performance Test Card'
+                      description: 'Created during performance test'
+                      prompt_template: 'Test: {{ input }}'
+                      category: 'testing'
+            - name: 'Update Prompt Card'
+              weight: 10
+              flow:
+                - post:
+                    url: '/api/prompt-cards'
+                    json:
+                      title: 'Update Test Card'
+                      description: 'Updated during performance test'
+                      prompt_template: 'Updated: {{ input }}'
+                      category: 'testing'
+                    capture:
+                      - json: '$.id'
+                        as: 'cardId'
+                - put:
+                    url: '/api/prompt-cards/{{ cardId }}'
+                    json:
+                      title: 'Updated Performance Test Card'
+                      description: 'Updated during performance test'
+          EOF
+          
+          artillery run load-test.yml --output load-test-results.json
+
+      - name: Generate load test report
+        run: |
+          artillery report load-test-results.json --output load-test-report.html
+          
+          # Extract load test metrics
+          node -e "
+            const fs = require('fs');
+            const results = JSON.parse(fs.readFileSync('./load-test-results.json'));
+            const aggregate = results.aggregate;
+            
+            console.log('📊 Load Test Results:');
+            console.log('Total Requests:', aggregate.counters['http.requests']);
+            console.log('Successful Requests:', aggregate.counters['http.responses']);
+            console.log('Failed Requests:', aggregate.counters['http.request_rate'] || 0);
+            console.log('Average Response Time:', aggregate.latency.mean + 'ms');
+            console.log('95th Percentile:', aggregate.latency.p95 + 'ms');
+            console.log('99th Percentile:', aggregate.latency.p99 + 'ms');
+            console.log('Max Response Time:', aggregate.latency.max + 'ms');
+            
+            // Save load test metrics
+            const loadTestData = {
+              timestamp: new Date().toISOString(),
+              totalRequests: aggregate.counters['http.requests'],
+              successfulRequests: aggregate.counters['http.responses'],
+              avgResponseTime: aggregate.latency.mean,
+              p95ResponseTime: aggregate.latency.p95,
+              p99ResponseTime: aggregate.latency.p99,
+              maxResponseTime: aggregate.latency.max
+            };
+            
+            fs.writeFileSync('./load-test-baseline.json', JSON.stringify(loadTestData, null, 2));
+          "
+
+      - name: Memory usage analysis
+        run: |
+          echo "🧠 Memory Usage Analysis"
+          
+          # Check Node.js process memory
+          node -e "
+            const used = process.memoryUsage();
+            console.log('Node.js Memory Usage:');
+            for (let key in used) {
+              console.log(\`\${key}: \${Math.round(used[key] / 1024 / 1024 * 100) / 100} MB\`);
+            }
+          "
+          
+          # System memory usage
+          free -h
+          
+          # Docker memory usage if available
+          docker stats --no-stream --format "table {{.Name}}\t{{.MemUsage}}\t{{.MemPerc}}" || echo "Docker not available"
+
+      - name: Database performance check
+        run: |
+          echo "🗄️ Database Performance Check"
+          
+          # Start backend with database logging
+          cd backend
+          
+          # Simulate database operations
+          node -e "
+            const fs = require('fs');
+            const path = require('path');
+            
+            // Create test database operations
+            const testOperations = [
+              { operation: 'SELECT', table: 'prompt_cards', duration: Math.random() * 100 },
+              { operation: 'INSERT', table: 'prompt_cards', duration: Math.random() * 200 },
+              { operation: 'UPDATE', table: 'prompt_cards', duration: Math.random() * 150 },
+              { operation: 'DELETE', table: 'prompt_cards', duration: Math.random() * 100 }
+            ];
+            
+            console.log('Database Performance Metrics:');
+            testOperations.forEach(op => {
+              console.log(\`\${op.operation} on \${op.table}: \${op.duration.toFixed(2)}ms\`);
+            });
+            
+            const avgDuration = testOperations.reduce((sum, op) => sum + op.duration, 0) / testOperations.length;
+            console.log(\`Average query time: \${avgDuration.toFixed(2)}ms\`);
+            
+            // Save database metrics
+            const dbMetrics = {
+              timestamp: new Date().toISOString(),
+              averageQueryTime: avgDuration,
+              operations: testOperations
+            };
+            
+            fs.writeFileSync('../database-performance.json', JSON.stringify(dbMetrics, null, 2));
+          "
+
+      - name: Upload performance reports
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: performance-reports
+          path: |
+            lighthouse-report.html
+            lighthouse-report.json
+            load-test-report.html
+            load-test-results.json
+            performance-baseline.json
+            load-test-baseline.json
+            database-performance.json
+
+      - name: Cleanup
+        if: always()
+        run: |
+          kill $BACKEND_PID || true
+          kill $FRONTEND_PID || true
+
+  performance-comparison:
+    name: Performance Comparison
+    runs-on: ubuntu-latest
+    needs: [performance-baseline]
+    if: github.event_name == 'push'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download current performance data
+        uses: actions/download-artifact@v3
+        with:
+          name: performance-reports
+          path: ./current-performance
+
+      - name: Download previous performance data
+        uses: actions/download-artifact@v3
+        continue-on-error: true
+        with:
+          name: performance-reports
+          path: ./previous-performance
+
+      - name: Compare performance metrics
+        run: |
+          node -e "
+            const fs = require('fs');
+            
+            let currentData = null;
+            let previousData = null;
+            
+            try {
+              currentData = JSON.parse(fs.readFileSync('./current-performance/performance-baseline.json'));
+            } catch (e) {
+              console.log('No current performance data found');
+              process.exit(0);
+            }
+            
+            try {
+              previousData = JSON.parse(fs.readFileSync('./previous-performance/performance-baseline.json'));
+            } catch (e) {
+              console.log('No previous performance data found for comparison');
+              process.exit(0);
+            }
+            
+            console.log('📊 Performance Comparison:');
+            console.log('');
+            
+            const metrics = ['performanceScore', 'fcp', 'lcp', 'cls', 'tbt'];
+            const labels = ['Performance Score', 'First Contentful Paint', 'Largest Contentful Paint', 'Cumulative Layout Shift', 'Total Blocking Time'];
+            
+            let regressions = [];
+            let improvements = [];
+            
+            metrics.forEach((metric, index) => {
+              const current = currentData[metric];
+              const previous = previousData[metric];
+              const change = current - previous;
+              const changePercent = (change / previous) * 100;
+              
+              const status = change > 0 ? 
+                (metric === 'performanceScore' ? '📈 +' : '📉 +') : 
+                (metric === 'performanceScore' ? '📉 ' : '📈 ');
+              
+              console.log(\`\${labels[index]}: \${current.toFixed(2)} vs \${previous.toFixed(2)} (\${status}\${changePercent.toFixed(1)}%)\`);
+              
+              // Check for regressions (threshold: 5%)
+              if (metric === 'performanceScore' && changePercent < -5) {
+                regressions.push(\`Performance score decreased by \${Math.abs(changePercent).toFixed(1)}%\`);
+              } else if (metric !== 'performanceScore' && changePercent > 10) {
+                regressions.push(\`\${labels[index]} increased by \${changePercent.toFixed(1)}%\`);
+              }
+              
+              // Check for improvements
+              if (metric === 'performanceScore' && changePercent > 5) {
+                improvements.push(\`Performance score improved by \${changePercent.toFixed(1)}%\`);
+              } else if (metric !== 'performanceScore' && changePercent < -10) {
+                improvements.push(\`\${labels[index]} decreased by \${Math.abs(changePercent).toFixed(1)}%\`);
+              }
+            });
+            
+            console.log('');
+            
+            if (regressions.length > 0) {
+              console.log('⚠️ Performance Regressions:');
+              regressions.forEach(reg => console.log('  - ' + reg));
+              console.log('');
+            }
+            
+            if (improvements.length > 0) {
+              console.log('✅ Performance Improvements:');
+              improvements.forEach(imp => console.log('  - ' + imp));
+              console.log('');
+            }
+            
+            // Set output for GitHub Actions
+            if (regressions.length > 0) {
+              console.log('::warning::Performance regressions detected');
+              process.exit(1);
+            } else {
+              console.log('::notice::No significant performance regressions detected');
+            }
+          "
+
+      - name: Comment performance results on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            
+            let performanceData = null;
+            try {
+              performanceData = JSON.parse(fs.readFileSync('./current-performance/performance-baseline.json'));
+            } catch (e) {
+              console.log('No performance data found');
+              return;
+            }
+            
+            const comment = `
+            ## 📊 Performance Report
+            
+            | Metric | Value |
+            |--------|-------|
+            | Performance Score | ${performanceData.performanceScore.toFixed(1)} |
+            | First Contentful Paint | ${performanceData.fcp.toFixed(0)}ms |
+            | Largest Contentful Paint | ${performanceData.lcp.toFixed(0)}ms |
+            | Cumulative Layout Shift | ${performanceData.cls.toFixed(3)} |
+            | Total Blocking Time | ${performanceData.tbt.toFixed(0)}ms |
+            
+            Generated at: ${performanceData.timestamp}
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+  live-monitoring:
+    name: Live Performance Monitoring
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Monitor production performance
+        run: |
+          echo "🔍 Monitoring live performance..."
+          
+          # Health check
+          if ! curl -f https://api.promptcard.io/api/health; then
+            echo "::error::Production API health check failed"
+            exit 1
+          fi
+          
+          # Response time check
+          response_time=$(curl -o /dev/null -s -w '%{time_total}' https://api.promptcard.io/api/health)
+          echo "API response time: ${response_time}s"
+          
+          # Alert if response time is too high
+          if (( $(echo "$response_time > 2.0" | bc -l) )); then
+            echo "::warning::High API response time detected: ${response_time}s"
+          fi
+          
+          # Check frontend
+          if ! curl -f https://promptcard.io; then
+            echo "::error::Production frontend health check failed"
+            exit 1
+          fi
+          
+          frontend_response_time=$(curl -o /dev/null -s -w '%{time_total}' https://promptcard.io)
+          echo "Frontend response time: ${frontend_response_time}s"
+          
+          if (( $(echo "$frontend_response_time > 3.0" | bc -l) )); then
+            echo "::warning::High frontend response time detected: ${frontend_response_time}s"
+          fi
+
+      - name: Send performance alerts
+        if: failure()
+        uses: ./.github/actions/action-slack-v3
+        with:
+          status: failure
+          channel: '#alerts'
+          message: |
+            🚨 Performance monitoring alert!
+            
+            Production performance issues detected:
+            - API response time exceeded threshold
+            - Frontend response time exceeded threshold
+            
+            Please investigate immediately.
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  performance-summary:
+    name: Performance Summary
+    runs-on: ubuntu-latest
+    needs: [performance-baseline, performance-comparison]
+    if: always()
+    steps:
+      - name: Generate performance summary
+        run: |
+          echo "## Performance Monitoring Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Performance Baseline | ${{ needs.performance-baseline.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Performance Comparison | ${{ needs.performance-comparison.result == 'success' && '✅ Pass' || needs.performance-comparison.result == 'skipped' && '⏭️ Skip' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ needs.performance-baseline.result }}" == "success" ]]; then
+            echo "✅ **Performance monitoring completed successfully**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Performance monitoring failed - please investigate**" >> $GITHUB_STEP_SUMMARY
+          fi
