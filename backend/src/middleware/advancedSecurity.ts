@@ -1,7 +1,37 @@
 import { Request, Response, NextFunction } from 'express';
 import rateLimit from 'express-rate-limit';
-import { createHash, randomBytes } from 'crypto';
+import { createHash } from 'crypto';
 import slowDown from 'express-slow-down';
+
+// Security logger interface
+interface SecurityLogger {
+  warn(message: string, meta?: any): void;
+  error(message: string, meta?: any): void;
+  info(message: string, meta?: any): void;
+}
+
+// Default security logger implementation
+const securityLogger: SecurityLogger = {
+  warn: (message: string, meta?: any) => {
+    // In production, this would be replaced with structured logging
+    if (process.env.NODE_ENV !== 'test') {
+      // eslint-disable-next-line no-console
+      console.warn(`[SECURITY] ${message}`, meta || '');
+    }
+  },
+  error: (message: string, meta?: any) => {
+    if (process.env.NODE_ENV !== 'test') {
+      // eslint-disable-next-line no-console
+      console.error(`[SECURITY] ${message}`, meta || '');
+    }
+  },
+  info: (message: string, meta?: any) => {
+    if (process.env.NODE_ENV !== 'test') {
+      // eslint-disable-next-line no-console
+      console.info(`[SECURITY] ${message}`, meta || '');
+    }
+  }
+};
 
 // Advanced Security Configuration
 interface SecurityConfig {
@@ -59,8 +89,8 @@ const threatPatterns = {
   sqlInjection: [
     /(\b(union|select|insert|delete|update|drop|create|alter|exec|execute)\b)/gi,
     /(\b(or|and)\s+\d+\s*=\s*\d+)/gi,
-    /(\'|\")(\s*)(or|and)(\s*)(\'|\")\s*=\s*(\'|\")/gi,
-    /(\;|\||\&|\$|\>|\<)/g
+    /('|")(\s*)(or|and)(\s*)('|")\s*=\s*('|")/gi,
+    /(;|\||&|\$|>|<)/g
   ],
   xss: [
     /<script[^>]*>.*?<\/script>/gi,
@@ -130,7 +160,7 @@ export const advancedThreatDetection = (config: Partial<SecurityConfig> = {}) =>
       headers: req.headers
     });
     
-    let suspiciousPatterns: string[] = [];
+    const suspiciousPatterns: string[] = [];
     
     // Check for SQL injection
     for (const pattern of threatPatterns.sqlInjection) {
@@ -178,7 +208,7 @@ export const advancedThreatDetection = (config: Partial<SecurityConfig> = {}) =>
         suspiciousIPs.add(clientIP);
         securityMetrics.suspiciousActivity++;
         
-        console.warn(`IP ${clientIP} blocked after ${attempts.count} suspicious attempts. Patterns: ${attempts.patterns.join(', ')}`);
+        securityLogger.warn(`IP ${clientIP} blocked after ${attempts.count} suspicious attempts. Patterns: ${attempts.patterns.join(', ')}`);
         
         return res.status(403).json({
           success: false,
@@ -189,7 +219,7 @@ export const advancedThreatDetection = (config: Partial<SecurityConfig> = {}) =>
       }
       
       // Log suspicious activity
-      console.warn(`Suspicious activity from IP ${clientIP}. Patterns: ${suspiciousPatterns.join(', ')}`);
+      securityLogger.warn(`Suspicious activity from IP ${clientIP}. Patterns: ${suspiciousPatterns.join(', ')}`);
     }
     
     next();
@@ -317,7 +347,7 @@ export const createAdvancedRateLimit = (options: {
       attempts.patterns.push('rate-limit-exceeded');
       ipAttempts.set(clientIP, attempts);
       
-      console.warn(`Rate limit exceeded for IP ${clientIP} on tier ${tier}`);
+      securityLogger.warn(`Rate limit exceeded for IP ${clientIP} on tier ${tier}`);
       
       res.status(429).json({
         success: false,
@@ -472,7 +502,7 @@ export const cleanupSecurityData = (): void => {
     });
   }
   
-  console.log(`Security cleanup completed. Tracking ${ipAttempts.size} IPs, ${suspiciousIPs.size} blocked.`);
+  securityLogger.info(`Security cleanup completed. Tracking ${ipAttempts.size} IPs, ${suspiciousIPs.size} blocked.`);
 };
 
 // Start cleanup interval
