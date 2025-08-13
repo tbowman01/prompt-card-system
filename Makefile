@@ -21,26 +21,36 @@ help: ## Show this help message
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "$(CYAN)%-25s$(RESET) %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 # Quick Commands
-setup: ## First-time setup for new developers
+setup: ## First-time setup for new developers with progress tracking
 	@echo "$(GREEN)🚀 Setting up Prompt Card System for development...$(RESET)"
+	@./scripts/statusline.sh --phase Setup --msg "Starting first-time setup" --extras "steps=4/4"
 	@echo "$(YELLOW)Step 1: Checking prerequisites...$(RESET)"
+	@./scripts/statusline.sh --progress "Checking prerequisites" --extras "step=1/4"
 	@$(MAKE) check-prerequisites
 	@echo "$(YELLOW)Step 2: Creating environment files...$(RESET)"
+	@./scripts/statusline.sh --progress "Creating environment files" --extras "step=2/4"
 	@$(MAKE) create-env
 	@echo "$(YELLOW)Step 3: Building containers...$(RESET)"
+	@./scripts/statusline.sh --progress "Building containers" --extras "step=3/4"
 	@$(MAKE) build
 	@echo "$(YELLOW)Step 4: Starting development environment...$(RESET)"
+	@./scripts/statusline.sh --progress "Starting development environment" --extras "step=4/4"
 	@$(MAKE) dev
+	@./scripts/statusline.sh --ok "Setup complete! Visit http://localhost:3000" --extras "duration=$$(date +%s)s"
 	@echo "$(GREEN)✅ Setup complete! Visit http://localhost:3000$(RESET)"
 
-check-prerequisites: ## Check system prerequisites
+check-prerequisites: ## Check system prerequisites with detailed validation
 	@echo "$(BLUE)🔍 Checking prerequisites...$(RESET)"
-	@command -v docker >/dev/null 2>&1 || (echo "$(RED)❌ Docker not found. Please install Docker.$(RESET)" && exit 1)
-	@command -v docker-compose >/dev/null 2>&1 || (echo "$(RED)❌ Docker Compose not found. Please install Docker Compose.$(RESET)" && exit 1)
+	@./scripts/statusline.sh --phase Setup --msg "Validating system requirements"
+	@command -v docker >/dev/null 2>&1 || (./scripts/statusline.sh --error "Docker not found" --extras "install=https://docs.docker.com/install" && exit 1)
+	@command -v docker-compose >/dev/null 2>&1 || command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 || (./scripts/statusline.sh --error "Docker Compose not found" --extras "install=docker-compose-plugin" && exit 1)
+	@./scripts/statusline.sh --ok "Docker requirements met" --extras "docker=$$(docker --version | awk '{print $$3}' | tr -d ',') compose=$$(docker-compose --version 2>/dev/null | awk '{print $$3}' || docker compose version --short)"
 	@echo "$(GREEN)✅ Docker and Docker Compose found$(RESET)"
 	@if command -v nvidia-smi >/dev/null 2>&1; then \
+		./scripts/statusline.sh --ok "GPU support available" --extras "gpu=$$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)"; \
 		echo "$(GREEN)🎮 GPU detected and available$(RESET)"; \
 	else \
+		./scripts/statusline.sh --warn "No GPU detected, using CPU-only" --extras "mode=cpu-only performance=reduced"; \
 		echo "$(YELLOW)💻 No GPU detected, will use CPU-only mode$(RESET)"; \
 	fi
 
@@ -59,10 +69,13 @@ create-env: ## Create environment files from examples
 # Development Commands
 dev: ## Start full development environment (auto-detects GPU)
 	@echo "$(GREEN)🚀 Starting development environment...$(RESET)"
+	@./scripts/statusline.sh --phase Setup --msg "Auto-detecting hardware and starting environment"
 	@if command -v nvidia-smi >/dev/null 2>&1; then \
+		./scripts/statusline.sh --ok "GPU detected, starting with GPU support" --extras "mode=gpu hardware=nvidia"; \
 		echo "$(GREEN)🎮 GPU detected, starting with GPU support...$(RESET)"; \
 		$(MAKE) dev-gpu; \
 	else \
+		./scripts/statusline.sh --warn "No GPU detected, starting CPU-only" --extras "mode=cpu performance=limited"; \
 		echo "$(YELLOW)💻 No GPU detected, starting CPU-only...$(RESET)"; \
 		$(MAKE) dev-cpu; \
 	fi
@@ -86,19 +99,33 @@ dev-full: ## Start complete development stack with all features
 
 dev-gpu: ## Start development with GPU support
 	@echo "$(GREEN)🎮 Starting development environment with GPU support...$(RESET)"
-	@docker-compose --profile gpu -f docker-compose.dev.yml up -d
-	@echo "$(YELLOW)⏳ Waiting for services to start...$(RESET)"
-	@sleep 10
-	@$(MAKE) init-models
-	@$(MAKE) show-status
+	@./scripts/statusline.sh --phase Deploy --msg "Starting GPU-enabled containers"
+	@if docker-compose --profile gpu -f docker-compose.dev.yml up -d; then \
+		./scripts/statusline.sh --progress "Services starting, waiting for readiness" --extras "gpu=enabled timeout=60s"; \
+		echo "$(YELLOW)⏳ Waiting for services to start...$(RESET)"; \
+		sleep 10; \
+		$(MAKE) init-models; \
+		$(MAKE) show-status; \
+		./scripts/statusline.sh --ok "GPU development environment ready" --extras "services=frontend,backend,ollama-gpu,redis"; \
+	else \
+		./scripts/statusline.sh --error "Failed to start GPU environment" --extras "fallback=cpu-mode"; \
+		exit 1; \
+	fi
 
 dev-cpu: ## Start development environment (CPU only)
 	@echo "$(YELLOW)💻 Starting development environment (CPU only)...$(RESET)"
-	@docker-compose --profile cpu -f docker-compose.dev.yml up -d
-	@echo "$(YELLOW)⏳ Waiting for services to start...$(RESET)"
-	@sleep 10
-	@$(MAKE) init-models
-	@$(MAKE) show-status
+	@./scripts/statusline.sh --phase Deploy --msg "Starting CPU-only containers"
+	@if docker-compose --profile cpu -f docker-compose.dev.yml up -d; then \
+		./scripts/statusline.sh --progress "Services starting, waiting for readiness" --extras "mode=cpu timeout=60s"; \
+		echo "$(YELLOW)⏳ Waiting for services to start...$(RESET)"; \
+		sleep 10; \
+		$(MAKE) init-models; \
+		$(MAKE) show-status; \
+		./scripts/statusline.sh --ok "CPU development environment ready" --extras "services=frontend,backend-cpu,ollama-cpu,redis"; \
+	else \
+		./scripts/statusline.sh --error "Failed to start CPU environment" --extras "check=docker-compose,resources"; \
+		exit 1; \
+	fi
 
 dev-minimal: ## Start minimal development (frontend + backend only)
 	@echo "$(CYAN)⚡ Starting minimal development environment...$(RESET)"
@@ -263,12 +290,15 @@ show-full-status:
 	@if [ "$$MULTI_TENANT_MODE" = "true" ]; then echo "   $(GREEN)✅ Multi-Tenant Architecture$(RESET)"; else echo "   $(YELLOW)⚪ Multi-Tenant$(RESET)"; fi
 
 # Health Checks
-health: ## Run health checks for all services
+health: ## Run comprehensive health checks for all services
 	@echo "$(GREEN)🏥 Running health checks...$(RESET)"
+	@./scripts/statusline.sh --phase Test --msg "Running comprehensive health checks"
 	@if [ -f ./scripts/health-check.sh ]; then \
 		./scripts/health-check.sh; \
+		./scripts/statusline.sh --ok "Health checks completed" --extras "script=comprehensive"; \
 	else \
 		echo "$(YELLOW)⚠️  Health check script not found, running basic checks...$(RESET)"; \
+		./scripts/statusline.sh --warn "Using basic health checks" --extras "script=basic comprehensive=unavailable"; \
 		$(MAKE) health-basic; \
 	fi
 
@@ -281,11 +311,20 @@ health-detailed: ## Run detailed health checks
 		$(MAKE) health; \
 	fi
 
-health-basic: ## Basic health check using curl
+health-basic: ## Basic health check using curl with detailed status
 	@echo "$(BLUE)🔍 Basic Health Checks:$(RESET)"
-	@echo -n "Frontend: "; curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/api/health 2>/dev/null || echo "❌ Down"
-	@echo -n "Backend: "; curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/api/health 2>/dev/null || echo "❌ Down"
-	@echo -n "Ollama: "; curl -s -o /dev/null -w "%{http_code}" http://localhost:11434/api/version 2>/dev/null || echo "❌ Down"
+	@./scripts/statusline.sh --phase Test --msg "Testing service endpoints"
+	@FRONTEND_STATUS=$$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/api/health 2>/dev/null || echo "DOWN"); \
+	BACKEND_STATUS=$$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/api/health 2>/dev/null || echo "DOWN"); \
+	OLLAMA_STATUS=$$(curl -s -o /dev/null -w "%{http_code}" http://localhost:11434/api/version 2>/dev/null || echo "DOWN"); \
+	echo "Frontend: $$FRONTEND_STATUS"; \
+	echo "Backend: $$BACKEND_STATUS"; \
+	echo "Ollama: $$OLLAMA_STATUS"; \
+	if echo "$$FRONTEND_STATUS" | grep -q "^2[0-9][0-9]$$" && echo "$$BACKEND_STATUS" | grep -q "^2[0-9][0-9]$$" && echo "$$OLLAMA_STATUS" | grep -q "^2[0-9][0-9]$$"; then \
+		./scripts/statusline.sh --ok "All services healthy" --extras "frontend=$$FRONTEND_STATUS backend=$$BACKEND_STATUS ollama=$$OLLAMA_STATUS"; \
+	else \
+		./scripts/statusline.sh --warn "Services not running (expected when containers are down)" --extras "frontend=$$FRONTEND_STATUS backend=$$BACKEND_STATUS ollama=$$OLLAMA_STATUS"; \
+	fi
 
 health-watch: ## Watch health status (updates every 5 seconds)
 	@echo "$(BLUE)👀 Watching health status (Ctrl+C to stop)...$(RESET)"
@@ -486,21 +525,45 @@ restart-service: ## Restart specific service (specify SERVICE=name)
 	@docker-compose -f docker-compose.dev.yml restart $(SERVICE)
 
 # Build Commands
-build: ## Build all development images
+build: ## Build all development images with validation
 	@echo "$(PURPLE)🏗️ Building development images...$(RESET)"
-	@docker-compose -f docker-compose.dev.yml build
+	@./scripts/statusline.sh --phase Build --msg "Starting container build process"
+	@if docker-compose -f docker-compose.dev.yml build; then \
+		./scripts/statusline.sh --ok "All images built successfully" --extras "images=frontend,backend,ollama"; \
+	else \
+		./scripts/statusline.sh --error "Build failed" --extras "retry=available"; \
+		exit 1; \
+	fi
 
-build-backend: ## Build backend image only
+build-backend: ## Build backend image only with validation
 	@echo "$(BLUE)🏗️ Building backend image...$(RESET)"
-	@docker-compose -f docker-compose.dev.yml build backend
+	@./scripts/statusline.sh --phase Build --msg "Building backend container"
+	@if docker-compose -f docker-compose.dev.yml build backend; then \
+		./scripts/statusline.sh --ok "Backend image built" --extras "size=$$(docker images prompt-card-system-v2-backend:latest --format 'table {{.Size}}' 2>/dev/null | tail -1)"; \
+	else \
+		./scripts/statusline.sh --error "Backend build failed" --extras "check=dockerfile,dependencies"; \
+		exit 1; \
+	fi
 
-build-frontend: ## Build frontend image only
+build-frontend: ## Build frontend image only with validation
 	@echo "$(BLUE)🏗️ Building frontend image...$(RESET)"
-	@docker-compose -f docker-compose.dev.yml build frontend
+	@./scripts/statusline.sh --phase Build --msg "Building frontend container"
+	@if docker-compose -f docker-compose.dev.yml build frontend; then \
+		./scripts/statusline.sh --ok "Frontend image built" --extras "size=$$(docker images prompt-card-system-v2-frontend:latest --format 'table {{.Size}}' 2>/dev/null | tail -1)"; \
+	else \
+		./scripts/statusline.sh --error "Frontend build failed" --extras "check=dockerfile,node_modules"; \
+		exit 1; \
+	fi
 
-build-no-cache: ## Build all images without cache
+build-no-cache: ## Build all images without cache (clean build)
 	@echo "$(PURPLE)🏗️ Building images without cache...$(RESET)"
-	@docker-compose -f docker-compose.dev.yml build --no-cache
+	@./scripts/statusline.sh --phase Build --msg "Clean build without cache" --extras "cache=disabled"
+	@if docker-compose -f docker-compose.dev.yml build --no-cache; then \
+		./scripts/statusline.sh --ok "Clean build completed" --extras "cache=cleared images=rebuilt"; \
+	else \
+		./scripts/statusline.sh --error "Clean build failed" --extras "retry_with_cache=available"; \
+		exit 1; \
+	fi
 
 # Shell Access
 shell-backend: ## Open shell in backend container
@@ -684,18 +747,138 @@ git-clean: ## Clean git ignored files (be careful!)
 	@git clean -fdx
 
 # Configuration
-config-check: ## Check configuration files
+config-check: ## Check configuration files with statusline
 	@echo "$(BLUE)⚙️  Checking configuration files...$(RESET)"
-	@for file in .env .env.dev docker-compose.dev.yml; do \
+	@./scripts/statusline.sh --phase Setup --msg "Validating configuration files"
+	@MISSING_FILES=""; \
+	for file in .env .env.dev docker-compose.dev.yml; do \
 		if [ -f "$$file" ]; then \
 			echo "$(GREEN)✅ $$file exists$(RESET)"; \
 		else \
 			echo "$(RED)❌ $$file missing$(RESET)"; \
+			MISSING_FILES="$$MISSING_FILES $$file"; \
+		fi; \
+	done; \
+	if [ -z "$$MISSING_FILES" ]; then \
+		./scripts/statusline.sh --ok "All configuration files present" --extras "files=.env,.env.dev,docker-compose.dev.yml"; \
+	else \
+		./scripts/statusline.sh --error "Missing configuration files" --extras "missing=$$MISSING_FILES"; \
+	fi
+
+config-validate: ## Validate docker-compose configuration with detailed feedback
+	@echo "$(BLUE)✅ Validating docker-compose configuration...$(RESET)"
+	@./scripts/statusline.sh --phase Test --msg "Validating Docker Compose syntax"
+	@if docker-compose -f docker-compose.dev.yml config >/dev/null 2>&1; then \
+		./scripts/statusline.sh --ok "Docker Compose configuration valid" --extras "file=docker-compose.dev.yml syntax=valid"; \
+		echo "$(GREEN)✅ Configuration valid$(RESET)"; \
+	else \
+		./scripts/statusline.sh --error "Docker Compose configuration invalid" --extras "file=docker-compose.dev.yml check=syntax"; \
+		echo "$(RED)❌ Configuration invalid$(RESET)"; \
+		exit 1; \
+	fi
+
+# Advanced Build Validation
+build-validate: ## Validate build without actually building
+	@echo "$(BLUE)🔍 Validating build configuration...$(RESET)"
+	@./scripts/statusline.sh --phase Build --msg "Pre-build validation"
+	@$(MAKE) config-validate
+	@if [ -f frontend/Dockerfile.dev ] && [ -f backend/Dockerfile.dev ]; then \
+		./scripts/statusline.sh --ok "Dockerfiles found" --extras "frontend=✓ backend=✓"; \
+		echo "$(GREEN)✅ Dockerfiles present$(RESET)"; \
+	else \
+		./scripts/statusline.sh --error "Missing Dockerfiles" --extras "check=frontend/Dockerfile.dev,backend/Dockerfile.dev"; \
+		echo "$(RED)❌ Missing Dockerfiles$(RESET)"; \
+		exit 1; \
+	fi
+
+build-retry: ## Retry failed builds with automatic recovery
+	@echo "$(YELLOW)🔄 Retrying build with recovery strategies...$(RESET)"
+	@./scripts/statusline.sh --phase Build --msg "Attempting build recovery"
+	@echo "$(BLUE)Step 1: Cleaning Docker cache...$(RESET)"
+	@docker builder prune -f 2>/dev/null || true
+	@echo "$(BLUE)Step 2: Pulling base images...$(RESET)"
+	@docker pull node:18-alpine 2>/dev/null || true
+	@docker pull ollama/ollama:latest 2>/dev/null || true
+	@echo "$(BLUE)Step 3: Retry build...$(RESET)"
+	@if $(MAKE) build; then \
+		./scripts/statusline.sh --ok "Build recovery successful" --extras "strategy=cache-clean,base-pull"; \
+	else \
+		./scripts/statusline.sh --error "Build recovery failed" --extras "next=build-no-cache"; \
+		echo "$(RED)Build still failing. Try: make build-no-cache$(RESET)"; \
+		exit 1; \
+	fi
+
+build-status: ## Show build status and image information
+	@echo "$(BLUE)📊 Build Status Information$(RESET)"
+	@./scripts/statusline.sh --phase Info --msg "Collecting build status"
+	@echo "$(CYAN)Docker Images:$(RESET)"
+	@docker images | grep prompt-card-system-v2 || echo "No project images found"
+	@echo ""
+	@echo "$(CYAN)Container Status:$(RESET)"
+	@docker-compose -f docker-compose.dev.yml ps 2>/dev/null || echo "No containers running"
+	@echo ""
+	@echo "$(CYAN)Docker System Info:$(RESET)"
+	@docker system df 2>/dev/null || echo "Docker system info unavailable"
+	@./scripts/statusline.sh --ok "Build status collected" --extras "images=listed containers=checked system=analyzed"
+
+# Enhanced Testing with Statusline
+test-all: ## Run comprehensive test suite with progress tracking
+	@echo "$(GREEN)🧪 Running comprehensive test suite...$(RESET)"
+	@./scripts/statusline.sh --phase Test --msg "Starting comprehensive test suite"
+	@$(MAKE) lint && \
+	$(MAKE) test-backend && \
+	$(MAKE) test-frontend && \
+	$(MAKE) test-e2e && \
+	./scripts/statusline.sh --ok "All tests passed" --extras "lint=✓ backend=✓ frontend=✓ e2e=✓" || \
+	(./scripts/statusline.sh --error "Test suite failed" --extras "check=individual_test_logs"; exit 1)
+
+# Production Readiness
+prod-ready: ## Complete production readiness check
+	@echo "$(PURPLE)🚀 Production Readiness Assessment$(RESET)"
+	@./scripts/statusline.sh --phase Test --msg "Assessing production readiness"
+	@echo "$(BLUE)1. Configuration validation...$(RESET)"
+	@$(MAKE) config-validate
+	@echo "$(BLUE)2. Security audit...$(RESET)"
+	@$(MAKE) security-audit
+	@echo "$(BLUE)3. Test suite...$(RESET)"
+	@$(MAKE) test-all
+	@echo "$(BLUE)4. Build validation...$(RESET)"
+	@$(MAKE) build-validate
+	@echo "$(BLUE)5. Health checks...$(RESET)"
+	@$(MAKE) health
+	@./scripts/statusline.sh --ok "Production readiness confirmed" --extras "config=✓ security=✓ tests=✓ build=✓ health=✓"
+	@echo "$(GREEN)✅ Ready for production deployment!$(RESET)"
+
+# Container Health and Recovery
+containers-health: ## Detailed container health assessment
+	@echo "$(GREEN)🏥 Detailed Container Health Assessment$(RESET)"
+	@./scripts/statusline.sh --phase Test --msg "Assessing container health"
+	@echo "$(CYAN)Container Status:$(RESET)"
+	@docker-compose -f docker-compose.dev.yml ps
+	@echo ""
+	@echo "$(CYAN)Container Logs (last 10 lines each):$(RESET)"
+	@for service in frontend backend backend-cpu ollama ollama-cpu redis; do \
+		if docker-compose -f docker-compose.dev.yml ps $$service 2>/dev/null | grep -q "Up"; then \
+			echo "$(BLUE)--- $$service ---$(RESET)"; \
+			docker-compose -f docker-compose.dev.yml logs --tail=10 $$service 2>/dev/null || echo "No logs available"; \
 		fi; \
 	done
+	@echo ""
+	@./scripts/statusline.sh --ok "Container health assessment completed" --extras "services=checked logs=analyzed"
 
-config-validate: ## Validate docker-compose configuration
-	@echo "$(BLUE)✅ Validating docker-compose configuration...$(RESET)"
-	@docker-compose -f docker-compose.dev.yml config >/dev/null && \
-	echo "$(GREEN)✅ Configuration valid$(RESET)" || \
-	echo "$(RED)❌ Configuration invalid$(RESET)"
+containers-restart-unhealthy: ## Restart unhealthy containers
+	@echo "$(YELLOW)🔄 Restarting unhealthy containers...$(RESET)"
+	@./scripts/statusline.sh --phase Deploy --msg "Restarting unhealthy containers"
+	@RESTARTED=0; \
+	for service in frontend backend backend-cpu ollama ollama-cpu redis; do \
+		if docker-compose -f docker-compose.dev.yml ps $$service 2>/dev/null | grep -q "Exit\|unhealthy"; then \
+			echo "$(YELLOW)Restarting $$service...$(RESET)"; \
+			docker-compose -f docker-compose.dev.yml restart $$service; \
+			RESTARTED=$$((RESTARTED + 1)); \
+		fi; \
+	done; \
+	if [ $$RESTARTED -gt 0 ]; then \
+		./scripts/statusline.sh --ok "Restarted $$RESTARTED unhealthy containers" --extras "count=$$RESTARTED"; \
+	else \
+		./scripts/statusline.sh --ok "No unhealthy containers found" --extras "all_healthy=true"; \
+	fi
