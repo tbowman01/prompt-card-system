@@ -1,9 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import { randomBytes } from 'crypto';
-import speakeasy from 'speakeasy';
-import QRCode from 'qrcode';
 
 // User role and permission types
 export type UserRole = 'admin' | 'moderator' | 'user' | 'readonly';
