@@ -1,0 +1,382 @@
+name: 🔗 Security Integration - Main CI Pipeline
+
+# This workflow integrates enhanced security scanning into the main CI pipeline
+# It runs security checks in parallel with other CI jobs for maximum efficiency
+
+on:
+  workflow_call:
+    inputs:
+      security_level:
+        description: 'Security scanning level'
+        required: false
+        default: 'standard'
+        type: string
+      skip_security:
+        description: 'Skip security checks (emergency only)'
+        required: false
+        default: false
+        type: boolean
+    secrets:
+      SNYK_TOKEN:
+        description: 'Snyk token for vulnerability scanning'
+        required: false
+      SEMGREP_APP_TOKEN:
+        description: 'Semgrep token for SAST analysis'
+        required: false
+
+env:
+  SECURITY_LEVEL: ${{ inputs.security_level || 'standard' }}
+  SKIP_SECURITY: ${{ inputs.skip_security || false }}
+
+jobs:
+  # ===== SECURITY GATE - FAST CHECKS =====
+  security-gate:
+    name: 🚨 Security Gate - Fast Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: ${{ !inputs.skip_security }}
+    outputs:
+      security-status: ${{ steps.gate.outputs.status }}
+      critical-issues: ${{ steps.gate.outputs.critical-issues }}
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🔍 Quick security assessment
+        id: gate
+        run: |
+          echo "🚨 Running security gate checks..."
+          
+          critical_issues=0
+          
+          # Check for secrets in diff
+          if git diff --name-only HEAD~1..HEAD | xargs grep -l "secret\|password\|key\|token" 2>/dev/null; then
+            echo "⚠️ Potential secrets in changed files"
+            ((critical_issues++))
+          fi
+          
+          # Check for security-sensitive file changes
+          if git diff --name-only HEAD~1..HEAD | grep -E "(auth|security|crypto|password)" 2>/dev/null; then
+            echo "⚠️ Security-sensitive files modified"
+          fi
+          
+          # Check package.json for dependency changes
+          if git diff --name-only HEAD~1..HEAD | grep "package.*\.json"; then
+            echo "📦 Dependencies modified - full scan required"
+          fi
+          
+          # Set outputs
+          if [ $critical_issues -gt 0 ]; then
+            echo "status=critical" >> $GITHUB_OUTPUT
+            echo "critical-issues=$critical_issues" >> $GITHUB_OUTPUT
+          else
+            echo "status=passed" >> $GITHUB_OUTPUT
+            echo "critical-issues=0" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "✅ Security gate assessment complete"
+
+  # ===== PARALLEL SECURITY SCANNING =====
+  quick-security-scan:
+    name: 🔍 Quick Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: security-gate
+    if: ${{ !inputs.skip_security }}
+    strategy:
+      fail-fast: false
+      matrix:
+        scan_type: [secrets, dependencies, linting]
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # Secrets scanning
+      - name: 🔐 Quick secrets scan
+        if: matrix.scan_type == 'secrets'
+        run: |
+          echo "🔍 Running quick secrets scan..."
+          
+          # Install GitLeaks
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks_linux_x64.tar.gz | tar -xz
+          chmod +x gitleaks
+          
+          # Quick scan of changed files
+          if ! ./gitleaks detect --source . --config .gitleaks.toml --no-git --exit-code; then
+            echo "🚨 Secrets detected in repository!"
+            exit 1
+          fi
+          
+          echo "✅ No secrets detected"
+
+      # Quick dependency scan
+      - name: 🔗 Quick dependency scan
+        if: matrix.scan_type == 'dependencies'
+        run: |
+          echo "🔍 Running quick dependency scan..."
+          
+          # Install dependencies
+          npm ci --prefer-offline --quiet
+          
+          # Backend audit
+          cd backend
+          npm ci --prefer-offline --quiet
+          if ! npm audit --audit-level=high --quiet; then
+            echo "🚨 High/critical vulnerabilities in backend dependencies!"
+            exit 1
+          fi
+          
+          # Frontend audit
+          cd ../frontend
+          npm ci --prefer-offline --quiet
+          if ! npm audit --audit-level=high --quiet; then
+            echo "🚨 High/critical vulnerabilities in frontend dependencies!"
+            exit 1
+          fi
+          
+          echo "✅ No high/critical dependency vulnerabilities"
+
+      # Security linting
+      - name: 🔍 Security linting
+        if: matrix.scan_type == 'linting'
+        run: |
+          echo "🔍 Running security linting..."
+          
+          # Install security plugins
+          npm install -g eslint-plugin-security eslint-plugin-no-secrets --quiet
+          
+          # Backend security linting
+          cd backend
+          npm ci --prefer-offline --quiet
+          npx eslint src --ext .ts --plugin security --rule "security/detect-object-injection: error" --quiet || {
+            echo "🚨 Security linting issues in backend!"
+            exit 1
+          }
+          
+          # Frontend security linting
+          cd ../frontend
+          npm ci --prefer-offline --quiet
+          npx eslint src --ext .tsx,.ts --plugin security --rule "security/detect-object-injection: error" --quiet || {
+            echo "🚨 Security linting issues in frontend!"
+            exit 1
+          }
+          
+          echo "✅ Security linting passed"
+
+      - name: 📊 Upload quick scan results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: quick-security-scan-${{ matrix.scan_type }}
+          path: |
+            gitleaks-report.json
+            security-lint-results.json
+          retention-days: 7
+
+  # ===== COMPREHENSIVE SECURITY SCAN (CONDITIONAL) =====
+  comprehensive-security:
+    name: 🔬 Comprehensive Security Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [security-gate, quick-security-scan]
+    if: |
+      !inputs.skip_security && 
+      (inputs.security_level == 'comprehensive' || 
+       needs.security-gate.outputs.security-status == 'critical' ||
+       github.event_name == 'schedule' ||
+       github.ref == 'refs/heads/main')
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # CodeQL Analysis
+      - name: 🔍 Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript,typescript
+          queries: security-extended
+
+      - name: 🏗️ CodeQL Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: 🔎 Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+
+      # Semgrep SAST (if token available)
+      - name: 🔍 Semgrep SAST Analysis
+        if: env.SEMGREP_APP_TOKEN != ''
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: p/security-audit
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+
+      # Snyk vulnerability scan (if token available)
+      - name: 🔍 Snyk vulnerability scan
+        if: env.SNYK_TOKEN != ''
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high
+
+      - name: 📊 Upload comprehensive scan results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: comprehensive-security-results
+          path: |
+            semgrep-results.json
+            snyk-results.json
+          retention-days: 30
+
+  # ===== SECURITY SUMMARY & REPORTING =====
+  security-summary:
+    name: 📊 Security Summary & Integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [security-gate, quick-security-scan, comprehensive-security]
+    if: always() && !inputs.skip_security
+    outputs:
+      security-passed: ${{ steps.summary.outputs.passed }}
+      critical-count: ${{ steps.summary.outputs.critical-count }}
+      recommendation: ${{ steps.summary.outputs.recommendation }}
+    steps:
+      - name: 📊 Generate security summary
+        id: summary
+        run: |
+          echo "📊 Generating security integration summary..."
+          
+          # Collect results
+          gate_status="${{ needs.security-gate.result }}"
+          quick_scan_status="${{ needs.quick-security-scan.result }}"
+          comprehensive_status="${{ needs.comprehensive-security.result }}"
+          
+          critical_count="${{ needs.security-gate.outputs.critical-issues || 0 }}"
+          
+          # Determine overall security status
+          if [[ "$gate_status" == "success" && "$quick_scan_status" == "success" ]]; then
+            if [[ "$comprehensive_status" == "success" || "$comprehensive_status" == "skipped" ]]; then
+              security_passed="true"
+              recommendation="proceed"
+            else
+              security_passed="false"
+              recommendation="review-comprehensive"
+            fi
+          else
+            security_passed="false"
+            recommendation="fix-issues"
+          fi
+          
+          # Set outputs
+          echo "passed=$security_passed" >> $GITHUB_OUTPUT
+          echo "critical-count=$critical_count" >> $GITHUB_OUTPUT
+          echo "recommendation=$recommendation" >> $GITHUB_OUTPUT
+          
+          echo "✅ Security integration summary complete"
+
+      - name: 📋 Update Step Summary
+        run: |
+          echo "# 🛡️ Security Integration Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status | Result |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Security Gate | ${{ needs.security-gate.result == 'success' && '✅ PASSED' || '❌ FAILED' }} | ${{ needs.security-gate.outputs.critical-issues || 0 }} critical issues |" >> $GITHUB_STEP_SUMMARY
+          echo "| Quick Scan | ${{ needs.quick-security-scan.result == 'success' && '✅ PASSED' || '❌ FAILED' }} | Secrets, Dependencies, Linting |" >> $GITHUB_STEP_SUMMARY
+          echo "| Comprehensive | ${{ needs.comprehensive-security.result == 'success' && '✅ PASSED' || needs.comprehensive-security.result == 'skipped' && '⚠️ SKIPPED' || '❌ FAILED' }} | CodeQL, SAST, Advanced scanning |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Overall Security Status**: ${{ steps.summary.outputs.passed == 'true' && '✅ SECURITY CLEARED' || '🚨 SECURITY ISSUES DETECTED' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Recommendation**: ${{ steps.summary.outputs.recommendation }}" >> $GITHUB_STEP_SUMMARY
+
+      # Notify on security failures
+      - name: 🚨 Security failure notification
+        if: steps.summary.outputs.passed == 'false'
+        run: |
+          echo "🚨 SECURITY INTEGRATION FAILURE"
+          echo "Critical issues detected: ${{ steps.summary.outputs.critical-count }}"
+          echo "Recommendation: ${{ steps.summary.outputs.recommendation }}"
+          echo ""
+          echo "Action required before merge!"
+          exit 1
+
+  # ===== SECURITY METRICS COLLECTION =====
+  security-metrics:
+    name: 📈 Security Metrics Collection
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    needs: [security-summary]
+    if: always() && !inputs.skip_security
+    steps:
+      - name: 📊 Collect security metrics
+        run: |
+          echo "📈 Collecting security metrics..."
+          
+          # Create metrics payload
+          cat > security-metrics.json << EOF
+          {
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "repository": "${{ github.repository }}",
+            "branch": "${{ github.ref_name }}",
+            "commit": "${{ github.sha }}",
+            "workflow_run_id": "${{ github.run_id }}",
+            "security_level": "${{ env.SECURITY_LEVEL }}",
+            "results": {
+              "security_passed": ${{ needs.security-summary.outputs.security-passed }},
+              "critical_issues": ${{ needs.security-summary.outputs.critical-count }},
+              "gate_status": "${{ needs.security-gate.result }}",
+              "scan_status": "${{ needs.quick-security-scan.result }}",
+              "comprehensive_status": "${{ needs.comprehensive-security.result }}"
+            },
+            "performance": {
+              "total_time_minutes": $(( ($(date +%s) - ${{ github.event.head_commit.timestamp && 'strtotime("${{ github.event.head_commit.timestamp }}")' || '0' }}) / 60 )),
+              "scan_efficiency": "optimized"
+            }
+          }
+          EOF
+          
+          echo "✅ Security metrics collected"
+
+      - name: 📊 Upload security metrics
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-metrics-integration
+          path: security-metrics.json
+          retention-days: 90
+
+# ===== WORKFLOW OUTPUTS =====
+# This workflow provides the following outputs for integration:
+#
+# security-summary.outputs.security-passed: "true" | "false"
+# security-summary.outputs.critical-count: number
+# security-summary.outputs.recommendation: "proceed" | "review-comprehensive" | "fix-issues"
+#
+# Usage in main CI pipeline:
+#
+# jobs:
+#   security-integration:
+#     uses: ./.github/workflows/security-integration.yml
+#     secrets: inherit
+#     
+#   build:
+#     needs: security-integration
+#     if: needs.security-integration.outputs.security-passed == 'true'
+#     # ... build steps
+#
+# This ensures security checks pass before proceeding with build/deployment

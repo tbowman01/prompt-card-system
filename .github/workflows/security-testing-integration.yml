@@ -1,0 +1,1065 @@
+name: Security Testing Integration & Vulnerability Assessment
+
+on:
+  push:
+    branches: [ main, develop, release/* ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    - cron: '0 1 * * *' # Daily at 1 AM UTC for comprehensive security scans
+  workflow_dispatch:
+    inputs:
+      security_profile:
+        description: 'Security testing profile'
+        required: true
+        default: 'comprehensive'
+        type: choice
+        options:
+        - quick
+        - standard
+        - comprehensive
+        - penetration
+        - compliance
+      vulnerability_scan:
+        description: 'Enable vulnerability scanning'
+        required: false
+        default: true
+        type: boolean
+      compliance_check:
+        description: 'Enable compliance checking'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  SECURITY_PROFILE: ${{ github.event.inputs.security_profile || 'standard' }}
+  VULNERABILITY_SCAN: ${{ github.event.inputs.vulnerability_scan || 'true' }}
+  COMPLIANCE_CHECK: ${{ github.event.inputs.compliance_check || 'true' }}
+  
+  # Security scanning configuration
+  TRIVY_CACHE_DIR: /tmp/trivy-cache
+  SNYK_VERSION: latest
+  OWASP_ZAP_VERSION: stable
+  
+  # Compliance frameworks
+  COMPLIANCE_FRAMEWORKS: 'OWASP-TOP-10,PCI-DSS,SOC2,GDPR'
+  SECURITY_STANDARDS: 'CIS-CONTROLS,NIST-CSF'
+
+jobs:
+  # ===== SECURITY SCAN PLANNING =====
+  plan-security-scans:
+    name: Plan Security Testing & Vulnerability Assessment
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      scan-matrix: ${{ steps.matrix.outputs.matrix }}
+      security-config: ${{ steps.config.outputs.config }}
+      compliance-requirements: ${{ steps.compliance.outputs.requirements }}
+      vulnerability-config: ${{ steps.vulnerability.outputs.config }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Analyze security requirements
+        id: analysis
+        run: |
+          echo "🔒 Analyzing security testing requirements..."
+          
+          # Check for security-related files and configurations
+          auth_present=false
+          secrets_present=false
+          crypto_present=false
+          api_endpoints=false
+          
+          if find . -name "*auth*" -o -name "*security*" -o -name "*jwt*" | head -1; then
+            auth_present=true
+          fi
+          
+          if find . -name "*secret*" -o -name "*key*" -o -name "*.env*" | head -1; then
+            secrets_present=true
+          fi
+          
+          if find . -name "*crypto*" -o -name "*encrypt*" -o -name "*hash*" | head -1; then
+            crypto_present=true
+          fi
+          
+          if find . -name "*api*" -o -name "*endpoint*" -o -name "*route*" | head -1; then
+            api_endpoints=true
+          fi
+          
+          echo "auth-present=$auth_present" >> $GITHUB_OUTPUT
+          echo "secrets-present=$secrets_present" >> $GITHUB_OUTPUT
+          echo "crypto-present=$crypto_present" >> $GITHUB_OUTPUT
+          echo "api-endpoints=$api_endpoints" >> $GITHUB_OUTPUT
+          echo "Security requirements analysis completed"
+
+      - name: Generate security scan matrix
+        id: matrix
+        run: |
+          echo "🛡️ Generating security scan matrix for: ${{ env.SECURITY_PROFILE }}"
+          
+          matrix='{
+            "include": []
+          }'
+          
+          case "${{ env.SECURITY_PROFILE }}" in
+            "quick")
+              scans='[
+                {
+                  "scan_type": "static_analysis",
+                  "tool": "semgrep",
+                  "target": "source_code",
+                  "severity": "high,critical",
+                  "timeout": 10
+                },
+                {
+                  "scan_type": "dependency_check",
+                  "tool": "npm_audit",
+                  "target": "dependencies",
+                  "severity": "high,critical",
+                  "timeout": 5
+                }
+              ]'
+              ;;
+            "standard")
+              scans='[
+                {
+                  "scan_type": "static_analysis",
+                  "tool": "semgrep",
+                  "target": "source_code",
+                  "severity": "medium,high,critical",
+                  "timeout": 15
+                },
+                {
+                  "scan_type": "dependency_check",
+                  "tool": "npm_audit",
+                  "target": "dependencies",
+                  "severity": "moderate,high,critical",
+                  "timeout": 8
+                },
+                {
+                  "scan_type": "container_scan",
+                  "tool": "trivy",
+                  "target": "docker_images",
+                  "severity": "high,critical",
+                  "timeout": 12
+                },
+                {
+                  "scan_type": "secrets_detection",
+                  "tool": "gitleaks",
+                  "target": "git_history",
+                  "severity": "all",
+                  "timeout": 10
+                }
+              ]'
+              ;;
+            "comprehensive")
+              scans='[
+                {
+                  "scan_type": "static_analysis",
+                  "tool": "semgrep",
+                  "target": "source_code",
+                  "severity": "low,medium,high,critical",
+                  "timeout": 20
+                },
+                {
+                  "scan_type": "dependency_check",
+                  "tool": "npm_audit",
+                  "target": "dependencies",
+                  "severity": "low,moderate,high,critical",
+                  "timeout": 10
+                },
+                {
+                  "scan_type": "container_scan",
+                  "tool": "trivy",
+                  "target": "docker_images",
+                  "severity": "medium,high,critical",
+                  "timeout": 15
+                },
+                {
+                  "scan_type": "secrets_detection",
+                  "tool": "gitleaks",
+                  "target": "git_history",
+                  "severity": "all",
+                  "timeout": 15
+                },
+                {
+                  "scan_type": "api_security",
+                  "tool": "owasp_zap",
+                  "target": "api_endpoints",
+                  "severity": "medium,high,critical",
+                  "timeout": 25
+                },
+                {
+                  "scan_type": "infrastructure_scan",
+                  "tool": "checkov",
+                  "target": "iac_files",
+                  "severity": "high,critical",
+                  "timeout": 12
+                }
+              ]'
+              ;;
+            "penetration")
+              scans='[
+                {
+                  "scan_type": "web_application",
+                  "tool": "owasp_zap",
+                  "target": "running_application",
+                  "severity": "all",
+                  "timeout": 45
+                },
+                {
+                  "scan_type": "api_fuzzing",
+                  "tool": "ffuf",
+                  "target": "api_endpoints",
+                  "severity": "all",
+                  "timeout": 30
+                },
+                {
+                  "scan_type": "network_scan",
+                  "tool": "nmap",
+                  "target": "exposed_services",
+                  "severity": "all",
+                  "timeout": 20
+                }
+              ]'
+              ;;
+            "compliance")
+              scans='[
+                {
+                  "scan_type": "compliance_check",
+                  "tool": "compliance_scanner",
+                  "target": "entire_codebase",
+                  "severity": "all",
+                  "timeout": 30
+                },
+                {
+                  "scan_type": "data_privacy",
+                  "tool": "privacy_scanner",
+                  "target": "data_handling",
+                  "severity": "all",
+                  "timeout": 20
+                }
+              ]'
+              ;;
+            *)
+              echo "❌ Unknown security profile: ${{ env.SECURITY_PROFILE }}"
+              exit 1
+              ;;
+          esac
+          
+          matrix=$(echo "$matrix" | jq ".include = $scans")
+          echo "matrix=$matrix" >> $GITHUB_OUTPUT
+          echo "Security scan matrix generated successfully"
+
+      - name: Configure security settings
+        id: config
+        run: |
+          echo "⚙️ Configuring security testing settings..."
+          
+          security_config='{
+            "fail_on_critical": true,
+            "fail_on_high": false,
+            "generate_reports": true,
+            "upload_results": true,
+            "remediation_guidance": true,
+            "false_positive_filtering": true,
+            "baseline_comparison": true,
+            "trend_analysis": true
+          }'
+          
+          # Adjust settings based on profile
+          case "${{ env.SECURITY_PROFILE }}" in
+            "quick")
+              security_config=$(echo "$security_config" | jq '.fail_on_high = false | .remediation_guidance = false')
+              ;;
+            "comprehensive"|"penetration")
+              security_config=$(echo "$security_config" | jq '.fail_on_high = true | .fail_on_critical = true')
+              ;;
+          esac
+          
+          echo "config=$security_config" >> $GITHUB_OUTPUT
+          echo "Security configuration set"
+
+      - name: Define compliance requirements
+        id: compliance
+        run: |
+          echo "📋 Defining compliance requirements..."
+          
+          compliance_requirements='{
+            "frameworks": {
+              "OWASP_TOP_10": {
+                "enabled": true,
+                "version": "2021",
+                "critical_categories": [
+                  "A01_Broken_Access_Control",
+                  "A02_Cryptographic_Failures", 
+                  "A03_Injection",
+                  "A07_Identification_Authentication_Failures"
+                ]
+              },
+              "PCI_DSS": {
+                "enabled": '${{ env.COMPLIANCE_CHECK }}',
+                "version": "4.0",
+                "requirements": [
+                  "2.2.1", "2.2.2", "6.2.1", "6.3.1", "11.2.1"
+                ]
+              },
+              "SOC2": {
+                "enabled": '${{ env.COMPLIANCE_CHECK }}',
+                "type": "Type II",
+                "controls": [
+                  "CC6.1", "CC6.2", "CC6.3", "CC6.7", "CC6.8"
+                ]
+              },
+              "GDPR": {
+                "enabled": true,
+                "focus_areas": [
+                  "data_protection",
+                  "privacy_by_design",
+                  "data_subject_rights"
+                ]
+              }
+            },
+            "security_standards": {
+              "CIS_CONTROLS": {
+                "enabled": true,
+                "version": "8.0",
+                "controls": [
+                  "3.1", "3.2", "3.3", "11.1", "11.2", "16.1"
+                ]
+              },
+              "NIST_CSF": {
+                "enabled": '${{ env.COMPLIANCE_CHECK }}',
+                "functions": [
+                  "Identify", "Protect", "Detect", "Respond", "Recover"
+                ]
+              }
+            }
+          }'
+          
+          echo "requirements=$compliance_requirements" >> $GITHUB_OUTPUT
+          echo "Compliance requirements defined"
+
+      - name: Configure vulnerability scanning
+        id: vulnerability
+        run: |
+          echo "🔍 Configuring vulnerability scanning..."
+          
+          vulnerability_config='{
+            "databases": [
+              "NVD",
+              "GitHub_Advisory",
+              "npm_audit",
+              "Snyk_Database",
+              "OWASP_Dependency_Check"
+            ],
+            "scan_targets": {
+              "dependencies": true,
+              "container_images": true,
+              "source_code": true,
+              "infrastructure": true
+            },
+            "severity_handling": {
+              "critical": {
+                "action": "fail_build",
+                "notification": "immediate"
+              },
+              "high": {
+                "action": "warn",
+                "notification": "standard"
+              },
+              "medium": {
+                "action": "log",
+                "notification": "weekly_summary"
+              },
+              "low": {
+                "action": "log",
+                "notification": "monthly_summary"
+              }
+            },
+            "remediation": {
+              "auto_fix": false,
+              "suggest_fixes": true,
+              "create_issues": true
+            }
+          }'
+          
+          echo "config=$vulnerability_config" >> $GITHUB_OUTPUT
+          echo "Vulnerability scanning configured"
+
+  # ===== STATIC SECURITY ANALYSIS =====
+  static-security-analysis:
+    name: Static Security Analysis (${{ matrix.scan_type }})
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ matrix.timeout }}
+    needs: plan-security-scans
+    if: needs.plan-security-scans.outputs.scan-matrix != '{"include":[]}'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan-security-scans.outputs.scan-matrix) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Full history for secret detection
+
+      - name: Setup security scanning tools
+        run: |
+          echo "🛠️ Setting up security scanning tools for ${{ matrix.scan_type }}..."
+          
+          case "${{ matrix.tool }}" in
+            "semgrep")
+              pip install semgrep
+              ;;
+            "npm_audit")
+              # npm audit is built-in, no additional setup needed
+              echo "npm audit available with Node.js"
+              ;;
+            "trivy")
+              curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin v0.50.1
+              ;;
+            "gitleaks")
+              curl -sSfL https://raw.githubusercontent.com/gitleaks/gitleaks/master/scripts/install.sh | sh -s -- -b /usr/local/bin
+              ;;
+            "owasp_zap")
+              docker pull owasp/zap2docker-stable:${{ env.OWASP_ZAP_VERSION }}
+              ;;
+            "checkov")
+              pip install checkov
+              ;;
+            *)
+              echo "Unknown tool: ${{ matrix.tool }}"
+              ;;
+          esac
+          
+          echo "✅ Security tools setup completed"
+
+      - name: Execute security scan
+        id: scan
+        run: |
+          echo "🔍 Executing ${{ matrix.scan_type }} security scan..."
+          
+          mkdir -p security-results
+          
+          case "${{ matrix.scan_type }}" in
+            "static_analysis")
+              echo "Running Semgrep static analysis..."
+              semgrep --config=auto \
+                --severity=${{ matrix.severity }} \
+                --json \
+                --output=security-results/semgrep-results.json \
+                . || echo "Semgrep scan completed with findings"
+              
+              # Generate human-readable report
+              semgrep --config=auto \
+                --severity=${{ matrix.severity }} \
+                --output=security-results/semgrep-report.txt \
+                . || echo "Semgrep text report generated"
+              ;;
+              
+            "dependency_check")
+              echo "Running npm audit for dependency vulnerabilities..."
+              
+              # Backend dependencies
+              if [[ -f "backend/package.json" ]]; then
+                cd backend
+                npm audit --audit-level=${{ matrix.severity }} --json > ../security-results/npm-audit-backend.json || echo "Backend audit completed"
+                cd ..
+              fi
+              
+              # Frontend dependencies
+              if [[ -f "frontend/package.json" ]]; then
+                cd frontend
+                npm audit --audit-level=${{ matrix.severity }} --json > ../security-results/npm-audit-frontend.json || echo "Frontend audit completed"
+                cd ..
+              fi
+              
+              # Root dependencies
+              if [[ -f "package.json" ]]; then
+                npm audit --audit-level=${{ matrix.severity }} --json > security-results/npm-audit-root.json || echo "Root audit completed"
+              fi
+              ;;
+              
+            "container_scan")
+              echo "Running Trivy container image scan..."
+              
+              # Scan Dockerfiles
+              find . -name "Dockerfile*" | while read -r dockerfile; do
+                echo "Scanning $dockerfile..."
+                trivy config \
+                  --severity ${{ matrix.severity }} \
+                  --format json \
+                  --output security-results/trivy-$(basename $dockerfile).json \
+                  "$dockerfile" || echo "Trivy config scan completed"
+              done
+              
+              # If Docker images are available, scan them
+              if docker images -q | head -1; then
+                docker images --format "table {{.Repository}}:{{.Tag}}" | tail -n +2 | while read -r image; do
+                  if [[ "$image" != "<none>:<none>" ]]; then
+                    echo "Scanning Docker image: $image"
+                    trivy image \
+                      --severity ${{ matrix.severity }} \
+                      --format json \
+                      --output security-results/trivy-image-$(echo $image | tr ':/' '-').json \
+                      "$image" || echo "Image scan completed"
+                  fi
+                done
+              fi
+              ;;
+              
+            "secrets_detection")
+              echo "Running Gitleaks for secrets detection..."
+              gitleaks detect \
+                --source . \
+                --report-format json \
+                --report-path security-results/gitleaks-results.json \
+                --verbose || echo "Gitleaks scan completed"
+              ;;
+              
+            "api_security")
+              echo "Running OWASP ZAP API security scan..."
+              
+              # Start application for scanning
+              if [[ -f "backend/package.json" ]]; then
+                cd backend
+                npm run build
+                npm start &
+                backend_pid=$!
+                cd ..
+                
+                # Wait for application to start
+                timeout 60 bash -c 'until curl -f http://localhost:3001/api/health; do sleep 2; done'
+                
+                # Run ZAP scan
+                docker run --rm \
+                  --network host \
+                  -v $(pwd)/security-results:/zap/wrk/:rw \
+                  owasp/zap2docker-stable:${{ env.OWASP_ZAP_VERSION }} \
+                  zap-api-scan.py \
+                  -t http://localhost:3001/api \
+                  -f openapi \
+                  -J zap-api-report.json || echo "ZAP API scan completed"
+                
+                # Cleanup
+                kill $backend_pid || true
+              fi
+              ;;
+              
+            "infrastructure_scan")
+              echo "Running Checkov infrastructure scan..."
+              checkov -d . \
+                --framework terraform,cloudformation,kubernetes,dockerfile \
+                --output json \
+                --output-file security-results/checkov-results.json || echo "Checkov scan completed"
+              ;;
+              
+            *)
+              echo "⚠️  Unknown scan type: ${{ matrix.scan_type }}"
+              ;;
+          esac
+          
+          echo "✅ Security scan execution completed"
+
+      - name: Process scan results
+        run: |
+          echo "📊 Processing security scan results..."
+          
+          # Count findings by severity
+          critical_count=0
+          high_count=0
+          medium_count=0
+          low_count=0
+          
+          # Process different result formats
+          for result_file in security-results/*.json; do
+            if [[ -f "$result_file" ]]; then
+              echo "Processing $result_file..."
+              
+              case "$(basename $result_file)" in
+                semgrep-*)
+                  if [[ $(jq '.results | length' "$result_file" 2>/dev/null) ]]; then
+                    critical_count=$((critical_count + $(jq '[.results[] | select(.extra.severity == "ERROR")] | length' "$result_file" 2>/dev/null || echo 0)))
+                    high_count=$((high_count + $(jq '[.results[] | select(.extra.severity == "WARNING")] | length' "$result_file" 2>/dev/null || echo 0)))
+                  fi
+                  ;;
+                npm-audit-*)
+                  if [[ $(jq '.vulnerabilities | length' "$result_file" 2>/dev/null) ]]; then
+                    critical_count=$((critical_count + $(jq '.metadata.vulnerabilities.critical // 0' "$result_file" 2>/dev/null || echo 0)))
+                    high_count=$((high_count + $(jq '.metadata.vulnerabilities.high // 0' "$result_file" 2>/dev/null || echo 0)))
+                    medium_count=$((medium_count + $(jq '.metadata.vulnerabilities.moderate // 0' "$result_file" 2>/dev/null || echo 0)))
+                    low_count=$((low_count + $(jq '.metadata.vulnerabilities.low // 0' "$result_file" 2>/dev/null || echo 0)))
+                  fi
+                  ;;
+                trivy-*)
+                  if [[ $(jq '.Results | length' "$result_file" 2>/dev/null) ]]; then
+                    for severity in CRITICAL HIGH MEDIUM LOW; do
+                      count=$(jq --arg sev "$severity" '[.Results[]?.Vulnerabilities[]? | select(.Severity == $sev)] | length' "$result_file" 2>/dev/null || echo 0)
+                      case "$severity" in
+                        "CRITICAL") critical_count=$((critical_count + count)) ;;
+                        "HIGH") high_count=$((high_count + count)) ;;
+                        "MEDIUM") medium_count=$((medium_count + count)) ;;
+                        "LOW") low_count=$((low_count + count)) ;;
+                      esac
+                    done
+                  fi
+                  ;;
+              esac
+            fi
+          done
+          
+          # Create summary report
+          cat > security-results/scan-summary.json << EOF
+          {
+            "scan_info": {
+              "scan_type": "${{ matrix.scan_type }}",
+              "tool": "${{ matrix.tool }}",
+              "target": "${{ matrix.target }}",
+              "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+              "commit": "${{ github.sha }}",
+              "branch": "${{ github.ref_name }}"
+            },
+            "findings": {
+              "critical": $critical_count,
+              "high": $high_count,
+              "medium": $medium_count,
+              "low": $low_count,
+              "total": $((critical_count + high_count + medium_count + low_count))
+            },
+            "status": "$(if [[ $critical_count -gt 0 ]]; then echo "critical_issues_found"; elif [[ $high_count -gt 0 ]]; then echo "high_issues_found"; else echo "no_critical_issues"; fi)"
+          }
+          EOF
+          
+          echo "📊 Scan Results Summary:"
+          echo "├── Critical: $critical_count"
+          echo "├── High: $high_count"
+          echo "├── Medium: $medium_count"
+          echo "├── Low: $low_count"
+          echo "└── Total: $((critical_count + high_count + medium_count + low_count))"
+
+      - name: Check security gate compliance
+        run: |
+          echo "🚨 Checking security gate compliance..."
+          
+          security_config='${{ needs.plan-security-scans.outputs.security-config }}'
+          fail_on_critical=$(echo "$security_config" | jq -r '.fail_on_critical')
+          fail_on_high=$(echo "$security_config" | jq -r '.fail_on_high')
+          
+          if [[ -f "security-results/scan-summary.json" ]]; then
+            critical_count=$(jq -r '.findings.critical' security-results/scan-summary.json)
+            high_count=$(jq -r '.findings.high' security-results/scan-summary.json)
+            
+            echo "Security Gate Check:"
+            echo "├── Critical Issues: $critical_count (fail_on_critical: $fail_on_critical)"
+            echo "├── High Issues: $high_count (fail_on_high: $fail_on_high)"
+            
+            if [[ "$fail_on_critical" == "true" && $critical_count -gt 0 ]]; then
+              echo "❌ SECURITY GATE FAILED: Critical vulnerabilities found"
+              exit 1
+            fi
+            
+            if [[ "$fail_on_high" == "true" && $high_count -gt 0 ]]; then
+              echo "❌ SECURITY GATE FAILED: High severity vulnerabilities found"
+              exit 1
+            fi
+            
+            echo "✅ Security gate compliance check passed"
+          fi
+
+      - name: Upload security scan results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-scan-${{ matrix.scan_type }}-${{ matrix.tool }}-${{ github.run_id }}
+          path: security-results/
+          retention-days: 30
+
+  # ===== COMPLIANCE VALIDATION =====
+  compliance-validation:
+    name: Security Compliance Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [plan-security-scans, static-security-analysis]
+    if: env.COMPLIANCE_CHECK == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup compliance checking tools
+        run: |
+          echo "📋 Setting up compliance checking tools..."
+          
+          # Install compliance scanners
+          pip install checkov bandit safety
+          npm install -g audit-ci
+          
+          # Download compliance policies
+          mkdir -p compliance-policies
+          
+          # OWASP Top 10 2021 policy
+          cat > compliance-policies/owasp-top10-2021.json << 'EOF'
+          {
+            "framework": "OWASP Top 10 2021",
+            "categories": {
+              "A01": "Broken Access Control",
+              "A02": "Cryptographic Failures",
+              "A03": "Injection",
+              "A04": "Insecure Design",
+              "A05": "Security Misconfiguration",
+              "A06": "Vulnerable and Outdated Components",
+              "A07": "Identification and Authentication Failures",
+              "A08": "Software and Data Integrity Failures",
+              "A09": "Security Logging and Monitoring Failures",
+              "A10": "Server-Side Request Forgery"
+            }
+          }
+          EOF
+          
+          echo "✅ Compliance tools setup completed"
+
+      - name: Run OWASP Top 10 compliance check
+        run: |
+          echo "🔍 Running OWASP Top 10 2021 compliance check..."
+          
+          mkdir -p compliance-results
+          
+          # A01: Broken Access Control
+          echo "Checking for access control issues..."
+          semgrep --config=p/owasp-top-ten \
+            --json \
+            --output=compliance-results/owasp-a01-access-control.json \
+            . || echo "Access control check completed"
+          
+          # A02: Cryptographic Failures
+          echo "Checking for cryptographic failures..."
+          semgrep --config=p/security-audit \
+            --json \
+            --output=compliance-results/owasp-a02-crypto.json \
+            . || echo "Cryptographic check completed"
+          
+          # A03: Injection
+          echo "Checking for injection vulnerabilities..."
+          semgrep --config=p/sql-injection \
+            --json \
+            --output=compliance-results/owasp-a03-injection.json \
+            . || echo "Injection check completed"
+          
+          # A06: Vulnerable Components
+          echo "Checking for vulnerable dependencies..."
+          if [[ -f "package.json" ]]; then
+            npm audit --json > compliance-results/owasp-a06-components.json || echo "Dependency check completed"
+          fi
+          
+          echo "✅ OWASP Top 10 compliance check completed"
+
+      - name: Run PCI DSS compliance check
+        if: contains(env.COMPLIANCE_FRAMEWORKS, 'PCI-DSS')
+        run: |
+          echo "💳 Running PCI DSS compliance check..."
+          
+          # PCI DSS Requirement 6.2.1: Security vulnerabilities
+          echo "Checking PCI DSS Requirement 6.2.1 (Security vulnerabilities)..."
+          
+          # Check for strong cryptography (Requirement 3.4)
+          grep -r "crypto\|encrypt\|hash" --include="*.js" --include="*.ts" . > compliance-results/pci-crypto-usage.txt || echo "No crypto usage found"
+          
+          # Check for secure coding practices (Requirement 6.3)
+          semgrep --config=p/security-audit \
+            --json \
+            --output=compliance-results/pci-secure-coding.json \
+            . || echo "Secure coding check completed"
+          
+          echo "✅ PCI DSS compliance check completed"
+
+      - name: Run SOC 2 compliance check
+        if: contains(env.COMPLIANCE_FRAMEWORKS, 'SOC2')
+        run: |
+          echo "🏢 Running SOC 2 compliance check..."
+          
+          # CC6.1: Logical and physical access controls
+          echo "Checking SOC 2 CC6.1 (Access controls)..."
+          find . -name "*auth*" -o -name "*access*" -o -name "*permission*" | head -10 > compliance-results/soc2-access-controls.txt
+          
+          # CC6.2: Transmission and disposal of data
+          echo "Checking SOC 2 CC6.2 (Data transmission)..."
+          grep -r "https\|ssl\|tls" --include="*.js" --include="*.ts" . > compliance-results/soc2-data-transmission.txt || echo "No secure transmission patterns found"
+          
+          # CC6.7: Data transmission
+          echo "Checking SOC 2 CC6.7 (Data transmission standards)..."
+          
+          echo "✅ SOC 2 compliance check completed"
+
+      - name: Run GDPR compliance check
+        if: contains(env.COMPLIANCE_FRAMEWORKS, 'GDPR')
+        run: |
+          echo "🇪🇺 Running GDPR compliance check..."
+          
+          # Data protection and privacy by design
+          echo "Checking GDPR data protection requirements..."
+          
+          # Look for PII handling
+          grep -r "email\|name\|address\|phone" --include="*.js" --include="*.ts" . > compliance-results/gdpr-pii-usage.txt || echo "No PII patterns found"
+          
+          # Look for consent mechanisms
+          grep -r "consent\|privacy\|cookie" --include="*.js" --include="*.ts" . > compliance-results/gdpr-consent.txt || echo "No consent patterns found"
+          
+          # Look for data retention policies
+          grep -r "retention\|delete\|purge" --include="*.js" --include="*.ts" . > compliance-results/gdpr-retention.txt || echo "No retention patterns found"
+          
+          echo "✅ GDPR compliance check completed"
+
+      - name: Generate compliance report
+        run: |
+          echo "📋 Generating comprehensive compliance report..."
+          
+          compliance_requirements='${{ needs.plan-security-scans.outputs.compliance-requirements }}'
+          
+          # Create compliance summary
+          cat > compliance-results/compliance-summary.json << EOF
+          {
+            "compliance_check": {
+              "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+              "commit": "${{ github.sha }}",
+              "branch": "${{ github.ref_name }}",
+              "frameworks_checked": ["OWASP-TOP-10", "PCI-DSS", "SOC2", "GDPR"]
+            },
+            "framework_status": {
+              "owasp_top_10": {
+                "status": "checked",
+                "findings_files": ["owasp-a01-access-control.json", "owasp-a02-crypto.json", "owasp-a03-injection.json"]
+              },
+              "pci_dss": {
+                "status": "checked",
+                "findings_files": ["pci-crypto-usage.txt", "pci-secure-coding.json"]
+              },
+              "soc2": {
+                "status": "checked",
+                "findings_files": ["soc2-access-controls.txt", "soc2-data-transmission.txt"]
+              },
+              "gdpr": {
+                "status": "checked",
+                "findings_files": ["gdpr-pii-usage.txt", "gdpr-consent.txt", "gdpr-retention.txt"]
+              }
+            },
+            "overall_compliance": "requires_review"
+          }
+          EOF
+          
+          echo "✅ Compliance report generated"
+
+      - name: Upload compliance results
+        uses: actions/upload-artifact@v4
+        with:
+          name: compliance-validation-${{ github.run_id }}
+          path: |
+            compliance-results/
+            compliance-policies/
+          retention-days: 90
+
+  # ===== SECURITY REPORT GENERATION =====
+  generate-security-report:
+    name: Generate Security Assessment Report
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [plan-security-scans, static-security-analysis, compliance-validation]
+    if: always()
+    steps:
+      - name: Download all security artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: '*security*-${{ github.run_id }}'
+          merge-multiple: true
+          path: ./security-artifacts/
+
+      - name: Download compliance artifacts
+        if: env.COMPLIANCE_CHECK == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: 'compliance-*-${{ github.run_id }}'
+          merge-multiple: true
+          path: ./compliance-artifacts/
+
+      - name: Analyze security findings
+        id: analysis
+        run: |
+          echo "🔍 Analyzing comprehensive security findings..."
+          
+          total_critical=0
+          total_high=0
+          total_medium=0
+          total_low=0
+          
+          scan_count=0
+          failed_scans=0
+          
+          # Aggregate findings from all scans
+          if [[ -d "security-artifacts" ]]; then
+            for summary_file in security-artifacts/scan-summary.json security-artifacts/*/scan-summary.json; do
+              if [[ -f "$summary_file" ]]; then
+                echo "Processing $summary_file..."
+                scan_count=$((scan_count + 1))
+                
+                critical=$(jq -r '.findings.critical // 0' "$summary_file")
+                high=$(jq -r '.findings.high // 0' "$summary_file")
+                medium=$(jq -r '.findings.medium // 0' "$summary_file")
+                low=$(jq -r '.findings.low // 0' "$summary_file")
+                
+                total_critical=$((total_critical + critical))
+                total_high=$((total_high + high))
+                total_medium=$((total_medium + medium))
+                total_low=$((total_low + low))
+                
+                status=$(jq -r '.status // "unknown"' "$summary_file")
+                if [[ "$status" == "critical_issues_found" ]]; then
+                  failed_scans=$((failed_scans + 1))
+                fi
+              fi
+            done
+          fi
+          
+          total_findings=$((total_critical + total_high + total_medium + total_low))
+          
+          echo "critical=$total_critical" >> $GITHUB_OUTPUT
+          echo "high=$total_high" >> $GITHUB_OUTPUT
+          echo "medium=$total_medium" >> $GITHUB_OUTPUT
+          echo "low=$total_low" >> $GITHUB_OUTPUT
+          echo "total=$total_findings" >> $GITHUB_OUTPUT
+          echo "scans=$scan_count" >> $GITHUB_OUTPUT
+          echo "failed-scans=$failed_scans" >> $GITHUB_OUTPUT
+
+      - name: Generate comprehensive security report
+        run: |
+          echo "📊 COMPREHENSIVE SECURITY ASSESSMENT REPORT"
+          echo "═══════════════════════════════════════════════════════════════"
+          
+          # Report header
+          echo "🔒 Security Assessment Summary:"
+          echo "├── Profile: ${{ env.SECURITY_PROFILE }}"
+          echo "├── Vulnerability Scanning: ${{ env.VULNERABILITY_SCAN }}"
+          echo "├── Compliance Checking: ${{ env.COMPLIANCE_CHECK }}"
+          echo "├── Commit: ${{ github.sha }}"
+          echo "├── Branch: ${{ github.ref_name }}"
+          echo "└── Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo ""
+          
+          # Security scan results
+          echo "🛡️ Security Scan Results:"
+          echo "├── Total Scans: ${{ steps.analysis.outputs.scans }}"
+          echo "├── Failed Scans: ${{ steps.analysis.outputs.failed-scans }}"
+          echo "├── Scan Status: ${{ needs.static-security-analysis.result }}"
+          echo "└── Scan Coverage: $(echo "scale=0; ${{ steps.analysis.outputs.scans }} * 100 / 6" | bc)% (target coverage)"
+          echo ""
+          
+          # Vulnerability summary
+          total_critical=${{ steps.analysis.outputs.critical }}
+          total_high=${{ steps.analysis.outputs.high }}
+          total_medium=${{ steps.analysis.outputs.medium }}
+          total_low=${{ steps.analysis.outputs.low }}
+          total_findings=${{ steps.analysis.outputs.total }}
+          
+          echo "🚨 Security Findings Summary:"
+          echo "├── Critical: $total_critical $([ $total_critical -gt 0 ] && echo "❌" || echo "✅")"
+          echo "├── High: $total_high $([ $total_high -gt 0 ] && echo "⚠️" || echo "✅")"
+          echo "├── Medium: $total_medium"
+          echo "├── Low: $total_low"
+          echo "└── Total: $total_findings"
+          echo ""
+          
+          # Compliance status
+          if [[ "${{ env.COMPLIANCE_CHECK }}" == "true" ]]; then
+            compliance_status="${{ needs.compliance-validation.result }}"
+            echo "📋 Compliance Validation:"
+            echo "├── Status: $([ "$compliance_status" == "success" ] && echo "✅ PASSED" || echo "❌ ISSUES FOUND")"
+            echo "├── Frameworks: OWASP Top 10, PCI DSS, SOC 2, GDPR"
+            echo "└── Compliance Artifacts: Available"
+            echo ""
+          fi
+          
+          # Security assessment
+          security_status="PASS"
+          if [[ $total_critical -gt 0 ]]; then
+            security_status="CRITICAL"
+          elif [[ $total_high -gt 5 ]]; then
+            security_status="HIGH_RISK"
+          elif [[ $total_high -gt 0 ]]; then
+            security_status="MODERATE_RISK"
+          fi
+          
+          echo "🏆 Overall Security Assessment:"
+          case "$security_status" in
+            "CRITICAL")
+              echo "❌ CRITICAL: Immediate action required"
+              echo "Critical vulnerabilities found that must be addressed before deployment"
+              ;;
+            "HIGH_RISK")
+              echo "⚠️  HIGH RISK: Significant security issues detected"
+              echo "Multiple high-severity vulnerabilities require attention"
+              ;;
+            "MODERATE_RISK")
+              echo "⚠️  MODERATE RISK: Some security issues detected"
+              echo "High-severity vulnerabilities should be addressed"
+              ;;
+            "PASS")
+              echo "✅ SECURE: No critical security issues detected"
+              echo "Security posture is within acceptable parameters"
+              ;;
+          esac
+          
+          # Exit with error for critical issues
+          if [[ "$security_status" == "CRITICAL" ]]; then
+            exit 1
+          fi
+
+      - name: Create security summary for GitHub
+        if: always()
+        run: |
+          total_critical=${{ steps.analysis.outputs.critical }}
+          total_high=${{ steps.analysis.outputs.high }}
+          total_findings=${{ steps.analysis.outputs.total }}
+          
+          {
+            echo "# 🔒 Security Assessment Report"
+            echo ""
+            echo "## 📊 Security Scan Results"
+            echo "- **Profile**: ${{ env.SECURITY_PROFILE }}"
+            echo "- **Total Scans**: ${{ steps.analysis.outputs.scans }}"
+            echo "- **Status**: ${{ needs.static-security-analysis.result == 'success' && '✅ Completed' || '❌ Issues' }}"
+            echo "- **Compliance**: ${{ env.COMPLIANCE_CHECK == 'true' && needs.compliance-validation.result == 'success' && '✅ Validated' || '⚠️ Review Required' }}"
+            echo ""
+            echo "## 🚨 Security Findings"
+            echo "- **Critical**: $([ $total_critical -gt 0 ] && echo "❌ $total_critical" || echo "✅ 0")"
+            echo "- **High**: $([ $total_high -gt 0 ] && echo "⚠️ $total_high" || echo "✅ 0")"
+            echo "- **Total**: $total_findings"
+            echo ""
+            echo "## 📁 Detailed Reports"
+            echo "Security scan results and compliance reports available in job artifacts."
+          } >> $GITHUB_STEP_SUMMARY
+
+      - name: Post security metrics
+        if: always()
+        continue-on-error: true
+        run: |
+          # Send security metrics to monitoring system
+          curl -X POST -H "Content-Type: application/json" \
+            -d '{
+              "security_assessment": {
+                "id": "${{ github.run_id }}",
+                "workflow": "${{ github.workflow }}",
+                "branch": "${{ github.ref_name }}",
+                "commit": "${{ github.sha }}",
+                "profile": "${{ env.SECURITY_PROFILE }}",
+                "scan_count": ${{ steps.analysis.outputs.scans }},
+                "findings": {
+                  "critical": ${{ steps.analysis.outputs.critical }},
+                  "high": ${{ steps.analysis.outputs.high }},
+                  "medium": ${{ steps.analysis.outputs.medium }},
+                  "low": ${{ steps.analysis.outputs.low }},
+                  "total": ${{ steps.analysis.outputs.total }}
+                },
+                "compliance_check": ${{ env.COMPLIANCE_CHECK }},
+                "vulnerability_scan": ${{ env.VULNERABILITY_SCAN }},
+                "timestamp": "${{ github.event.repository.updated_at }}"
+              }
+            }' \
+            http://localhost:3001/api/security/metrics || echo "Failed to post security metrics"

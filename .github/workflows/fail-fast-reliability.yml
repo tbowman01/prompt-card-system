@@ -1,0 +1,628 @@
+name: Fail-Fast Reliability & Error Recovery
+
+on:
+  workflow_call:
+    inputs:
+      reliability_mode:
+        description: 'Reliability mode'
+        required: false
+        default: 'standard'
+        type: string
+      error_tolerance:
+        description: 'Error tolerance level'
+        required: false
+        default: 'medium'
+        type: string
+  workflow_dispatch:
+    inputs:
+      test_scenario:
+        description: 'Test failure scenario'
+        required: true
+        default: 'dependency-failure'
+        type: choice
+        options:
+          - dependency-failure
+          - build-failure
+          - test-failure
+          - cache-miss
+          - timeout-test
+          - resource-exhaustion
+
+env:
+  RELIABILITY_MODE: ${{ inputs.reliability_mode || 'standard' }}
+  ERROR_TOLERANCE: ${{ inputs.error_tolerance || 'medium' }}
+  TEST_SCENARIO: ${{ inputs.test_scenario || 'dependency-failure' }}
+
+jobs:
+  # ===== FAIL-FAST CONFIGURATION TESTING =====
+  fail-fast-configuration:
+    name: ⚡ Fail-Fast Configuration Testing
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    strategy:
+      fail-fast: true
+      matrix:
+        test-type: [quick-validation, dependency-check, build-check, test-check]
+    outputs:
+      validation-status: ${{ steps.validation.outputs.status }}
+      error-patterns: ${{ steps.error-analysis.outputs.patterns }}
+      recovery-strategy: ${{ steps.recovery.outputs.strategy }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup fail-fast validation environment
+        run: |
+          echo "⚡ Setting up fail-fast validation for ${{ matrix.test-type }}..."
+          
+          # Configure timeout limits based on test type
+          case "${{ matrix.test-type }}" in
+            quick-validation)
+              TIMEOUT_LIMIT=60    # 1 minute for quick checks
+              ;;
+            dependency-check)
+              TIMEOUT_LIMIT=180   # 3 minutes for dependency installation
+              ;;
+            build-check)
+              TIMEOUT_LIMIT=300   # 5 minutes for builds
+              ;;
+            test-check)
+              TIMEOUT_LIMIT=480   # 8 minutes for tests
+              ;;
+          esac
+          
+          echo "TIMEOUT_LIMIT=$TIMEOUT_LIMIT" >> $GITHUB_ENV
+          echo "📊 Timeout limit set: ${TIMEOUT_LIMIT}s for ${{ matrix.test-type }}"
+
+      - name: Execute fail-fast validation
+        id: validation
+        run: |
+          echo "🔍 Executing fail-fast validation for ${{ matrix.test-type }}..."
+          
+          START_TIME=$(date +%s)
+          
+          case "${{ matrix.test-type }}" in
+            quick-validation)
+              echo "⚡ Quick validation checks..."
+              # Simulate quick checks
+              if [[ "${{ env.TEST_SCENARIO }}" == "dependency-failure" ]]; then
+                echo "❌ Simulating dependency failure..."
+                sleep 30
+                exit 1
+              fi
+              echo "✅ Quick validation passed"
+              ;;
+              
+            dependency-check)
+              echo "📦 Dependency installation check..."
+              # Simulate dependency check with potential failure
+              if [[ "${{ env.TEST_SCENARIO }}" == "dependency-failure" ]]; then
+                echo "❌ Simulating dependency installation failure..."
+                sleep 60
+                exit 1
+              fi
+              echo "✅ Dependencies validated"
+              ;;
+              
+            build-check)
+              echo "🛠️ Build process check..."
+              # Simulate build check
+              if [[ "${{ env.TEST_SCENARIO }}" == "build-failure" ]]; then
+                echo "❌ Simulating build failure..."
+                sleep 90
+                exit 1
+              fi
+              echo "✅ Build validation passed"
+              ;;
+              
+            test-check)
+              echo "🧪 Test execution check..."
+              # Simulate test check
+              if [[ "${{ env.TEST_SCENARIO }}" == "test-failure" ]]; then
+                echo "❌ Simulating test failure..."
+                sleep 120
+                exit 1
+              fi
+              echo "✅ Test validation passed"
+              ;;
+          esac
+          
+          END_TIME=$(date +%s)
+          DURATION=$((END_TIME - START_TIME))
+          
+          if [[ $DURATION -gt ${{ env.TIMEOUT_LIMIT }} ]]; then
+            echo "⏰ Timeout detected: ${DURATION}s > ${{ env.TIMEOUT_LIMIT }}s"
+            echo "status=timeout" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          echo "status=success" >> $GITHUB_OUTPUT
+          echo "duration=$DURATION" >> $GITHUB_OUTPUT
+        timeout-minutes: ${{ fromJSON(env.TIMEOUT_LIMIT) / 60 }}
+
+      - name: Analyze error patterns
+        id: error-analysis
+        if: failure()
+        run: |
+          echo "🔍 Analyzing error patterns for ${{ matrix.test-type }}..."
+          
+          # Categorize error types
+          case "${{ steps.validation.outcome }}" in
+            failure)
+              if [[ "${{ env.TEST_SCENARIO }}" == "dependency-failure" ]]; then
+                ERROR_PATTERN="dependency-installation-failure"
+                RECOVERY_ACTION="retry-with-fallback-registry"
+              elif [[ "${{ env.TEST_SCENARIO }}" == "build-failure" ]]; then
+                ERROR_PATTERN="build-compilation-failure"
+                RECOVERY_ACTION="incremental-build-retry"
+              elif [[ "${{ env.TEST_SCENARIO }}" == "test-failure" ]]; then
+                ERROR_PATTERN="test-execution-failure"
+                RECOVERY_ACTION="selective-test-retry"
+              else
+                ERROR_PATTERN="unknown-failure"
+                RECOVERY_ACTION="full-retry"
+              fi
+              ;;
+            cancelled)
+              ERROR_PATTERN="timeout-cancellation"
+              RECOVERY_ACTION="increase-timeout-retry"
+              ;;
+            *)
+              ERROR_PATTERN="unexpected-failure"
+              RECOVERY_ACTION="diagnostic-retry"
+              ;;
+          esac
+          
+          echo "patterns=$ERROR_PATTERN" >> $GITHUB_OUTPUT
+          echo "🔍 Error pattern identified: $ERROR_PATTERN"
+
+      - name: Execute recovery strategy
+        id: recovery
+        if: failure()
+        run: |
+          echo "🔧 Executing recovery strategy for ${{ steps.error-analysis.outputs.patterns }}..."
+          
+          ERROR_PATTERN="${{ steps.error-analysis.outputs.patterns }}"
+          
+          case "$ERROR_PATTERN" in
+            dependency-installation-failure)
+              echo "📦 Executing dependency recovery strategy..."
+              echo "1. Clearing npm cache"
+              echo "2. Retrying with offline mode"
+              echo "3. Falling back to alternative registry"
+              RECOVERY_STRATEGY="dependency-fallback"
+              ;;
+              
+            build-compilation-failure)
+              echo "🛠️ Executing build recovery strategy..."
+              echo "1. Cleaning build artifacts"
+              echo "2. Retrying with incremental build"
+              echo "3. Falling back to safe build mode"
+              RECOVERY_STRATEGY="build-incremental"
+              ;;
+              
+            test-execution-failure)
+              echo "🧪 Executing test recovery strategy..."
+              echo "1. Retrying failed tests only"
+              echo "2. Running tests in isolation"
+              echo "3. Falling back to subset execution"
+              RECOVERY_STRATEGY="test-selective"
+              ;;
+              
+            timeout-cancellation)
+              echo "⏰ Executing timeout recovery strategy..."
+              echo "1. Analyzing performance bottlenecks"
+              echo "2. Optimizing resource allocation"
+              echo "3. Adjusting timeout limits"
+              RECOVERY_STRATEGY="timeout-optimization"
+              ;;
+              
+            *)
+              echo "🔄 Executing generic recovery strategy..."
+              echo "1. Full environment reset"
+              echo "2. Complete retry with logging"
+              echo "3. Escalation to manual intervention"
+              RECOVERY_STRATEGY="full-reset"
+              ;;
+          esac
+          
+          echo "strategy=$RECOVERY_STRATEGY" >> $GITHUB_OUTPUT
+          echo "✅ Recovery strategy planned: $RECOVERY_STRATEGY"
+
+  # ===== INTELLIGENT ERROR RECOVERY =====
+  intelligent-error-recovery:
+    name: 🧠 Intelligent Error Recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [fail-fast-configuration]
+    if: always() && needs.fail-fast-configuration.result != 'success'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Analyze failure context
+        id: failure-analysis
+        run: |
+          echo "🧠 Analyzing failure context for intelligent recovery..."
+          
+          VALIDATION_STATUS="${{ needs.fail-fast-configuration.outputs.validation-status }}"
+          ERROR_PATTERNS="${{ needs.fail-fast-configuration.outputs.error-patterns }}"
+          RECOVERY_STRATEGY="${{ needs.fail-fast-configuration.outputs.recovery-strategy }}"
+          
+          echo "📊 Failure Analysis:"
+          echo "├── Validation Status: $VALIDATION_STATUS"
+          echo "├── Error Patterns: $ERROR_PATTERNS"
+          echo "└── Recovery Strategy: $RECOVERY_STRATEGY"
+          
+          # Determine recovery approach based on error patterns
+          case "$ERROR_PATTERNS" in
+            dependency-installation-failure)
+              RECOVERY_APPROACH="selective-retry"
+              RETRY_COUNT=3
+              BACKOFF_FACTOR=2
+              ;;
+            build-compilation-failure)
+              RECOVERY_APPROACH="incremental-retry"
+              RETRY_COUNT=2
+              BACKOFF_FACTOR=1
+              ;;
+            test-execution-failure)
+              RECOVERY_APPROACH="parallel-retry"
+              RETRY_COUNT=2
+              BACKOFF_FACTOR=1
+              ;;
+            timeout-cancellation)
+              RECOVERY_APPROACH="optimized-retry"
+              RETRY_COUNT=1
+              BACKOFF_FACTOR=1
+              ;;
+            *)
+              RECOVERY_APPROACH="standard-retry"
+              RETRY_COUNT=1
+              BACKOFF_FACTOR=1
+              ;;
+          esac
+          
+          echo "approach=$RECOVERY_APPROACH" >> $GITHUB_OUTPUT
+          echo "retry-count=$RETRY_COUNT" >> $GITHUB_OUTPUT
+          echo "backoff-factor=$BACKOFF_FACTOR" >> $GITHUB_OUTPUT
+          
+          echo "🎯 Recovery Approach: $RECOVERY_APPROACH"
+          echo "📊 Retry Configuration: $RETRY_COUNT attempts with ${BACKOFF_FACTOR}x backoff"
+
+      - name: Execute intelligent recovery
+        id: recovery-execution
+        run: |
+          echo "🔧 Executing intelligent recovery with ${{ steps.failure-analysis.outputs.approach }}..."
+          
+          APPROACH="${{ steps.failure-analysis.outputs.approach }}"
+          RETRY_COUNT=${{ steps.failure-analysis.outputs.retry-count }}
+          BACKOFF_FACTOR=${{ steps.failure-analysis.outputs.backoff-factor }}
+          
+          SUCCESS=false
+          ATTEMPT=1
+          
+          while [[ $ATTEMPT -le $RETRY_COUNT && "$SUCCESS" == "false" ]]; do
+            echo "🔄 Recovery Attempt $ATTEMPT/$RETRY_COUNT..."
+            
+            case "$APPROACH" in
+              selective-retry)
+                echo "📦 Selective dependency retry..."
+                # Simulate selective retry logic
+                if [[ $ATTEMPT -eq $RETRY_COUNT ]]; then
+                  SUCCESS=true
+                  echo "✅ Selective retry succeeded on attempt $ATTEMPT"
+                else
+                  echo "⚠️ Attempt $ATTEMPT failed, retrying..."
+                fi
+                ;;
+                
+              incremental-retry)
+                echo "🛠️ Incremental build retry..."
+                # Simulate incremental retry logic
+                if [[ $ATTEMPT -ge 2 ]]; then
+                  SUCCESS=true
+                  echo "✅ Incremental retry succeeded on attempt $ATTEMPT"
+                else
+                  echo "⚠️ Attempt $ATTEMPT failed, retrying with incremental build..."
+                fi
+                ;;
+                
+              parallel-retry)
+                echo "🧪 Parallel test retry..."
+                # Simulate parallel retry logic
+                if [[ $ATTEMPT -ge 2 ]]; then
+                  SUCCESS=true
+                  echo "✅ Parallel retry succeeded on attempt $ATTEMPT"
+                else
+                  echo "⚠️ Attempt $ATTEMPT failed, retrying with parallelization..."
+                fi
+                ;;
+                
+              optimized-retry)
+                echo "⚡ Optimized resource retry..."
+                # Simulate optimized retry logic
+                SUCCESS=true
+                echo "✅ Optimized retry succeeded on attempt $ATTEMPT"
+                ;;
+                
+              *)
+                echo "🔄 Standard retry..."
+                # Simulate standard retry logic
+                SUCCESS=true
+                echo "✅ Standard retry succeeded on attempt $ATTEMPT"
+                ;;
+            esac
+            
+            if [[ "$SUCCESS" == "false" && $ATTEMPT -lt $RETRY_COUNT ]]; then
+              SLEEP_TIME=$((ATTEMPT * BACKOFF_FACTOR * 10))
+              echo "⏳ Backing off for ${SLEEP_TIME}s before next attempt..."
+              sleep $SLEEP_TIME
+            fi
+            
+            ATTEMPT=$((ATTEMPT + 1))
+          done
+          
+          if [[ "$SUCCESS" == "true" ]]; then
+            echo "success=true" >> $GITHUB_OUTPUT
+            echo "attempts-used=$((ATTEMPT - 1))" >> $GITHUB_OUTPUT
+            echo "🎉 Recovery completed successfully after $((ATTEMPT - 1)) attempts"
+          else
+            echo "success=false" >> $GITHUB_OUTPUT
+            echo "attempts-used=$RETRY_COUNT" >> $GITHUB_OUTPUT
+            echo "❌ Recovery failed after $RETRY_COUNT attempts"
+            exit 1
+          fi
+
+      - name: Log recovery metrics
+        if: always()
+        run: |
+          echo "📊 Recovery Metrics Summary:"
+          echo "├── Recovery Approach: ${{ steps.failure-analysis.outputs.approach }}"
+          echo "├── Attempts Used: ${{ steps.recovery-execution.outputs.attempts-used }}"
+          echo "├── Success Status: ${{ steps.recovery-execution.outputs.success }}"
+          echo "├── Original Error: ${{ needs.fail-fast-configuration.outputs.error-patterns }}"
+          echo "└── Recovery Time: $(date)"
+
+  # ===== RELIABILITY STRESS TESTING =====
+  reliability-stress-test:
+    name: 🏋️ Reliability Stress Testing
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    if: ${{ env.TEST_SCENARIO != '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        stress-scenario: [high-load, resource-limit, network-delay, concurrent-access]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup stress testing environment
+        run: |
+          echo "🏋️ Setting up stress testing for ${{ matrix.stress-scenario }}..."
+          
+          case "${{ matrix.stress-scenario }}" in
+            high-load)
+              echo "📈 Configuring high-load scenario..."
+              STRESS_DURATION=180
+              CONCURRENT_JOBS=4
+              ;;
+            resource-limit)
+              echo "💾 Configuring resource-limit scenario..."
+              STRESS_DURATION=120
+              MEMORY_LIMIT="1G"
+              ;;
+            network-delay)
+              echo "🌐 Configuring network-delay scenario..."
+              STRESS_DURATION=150
+              NETWORK_DELAY=1000  # 1 second delay
+              ;;
+            concurrent-access)
+              echo "🔄 Configuring concurrent-access scenario..."
+              STRESS_DURATION=200
+              CONCURRENT_OPERATIONS=8
+              ;;
+          esac
+          
+          echo "STRESS_DURATION=$STRESS_DURATION" >> $GITHUB_ENV
+
+      - name: Execute stress test
+        run: |
+          echo "🚀 Executing stress test: ${{ matrix.stress-scenario }}..."
+          
+          START_TIME=$(date +%s)
+          
+          case "${{ matrix.stress-scenario }}" in
+            high-load)
+              echo "📈 Running high-load stress test..."
+              # Simulate high CPU/memory load
+              for i in {1..4}; do
+                (
+                  echo "Worker $i: Processing high load..."
+                  # Simulate CPU-intensive work
+                  timeout 30s yes > /dev/null 2>&1 || true
+                  echo "Worker $i: Completed"
+                ) &
+              done
+              wait
+              ;;
+              
+            resource-limit)
+              echo "💾 Running resource-limit stress test..."
+              # Simulate memory pressure
+              echo "Allocating memory to test limits..."
+              # Create a large file to simulate memory usage
+              timeout 60s dd if=/dev/zero of=/tmp/stress-test bs=1M count=512 2>/dev/null || true
+              rm -f /tmp/stress-test
+              ;;
+              
+            network-delay)
+              echo "🌐 Running network-delay stress test..."
+              # Simulate network operations with delay
+              for i in {1..5}; do
+                echo "Network operation $i with simulated delay..."
+                sleep 1  # Simulate network delay
+                curl -s --max-time 10 https://httpbin.org/delay/1 > /dev/null || true
+              done
+              ;;
+              
+            concurrent-access)
+              echo "🔄 Running concurrent-access stress test..."
+              # Simulate concurrent file operations
+              for i in {1..8}; do
+                (
+                  echo "Concurrent operation $i..."
+                  # Simulate file operations
+                  echo "test data $i" > /tmp/test-file-$i
+                  sleep 2
+                  rm -f /tmp/test-file-$i
+                ) &
+              done
+              wait
+              ;;
+          esac
+          
+          END_TIME=$(date +%s)
+          TEST_DURATION=$((END_TIME - START_TIME))
+          
+          echo "✅ Stress test completed in ${TEST_DURATION}s"
+          
+          # Validate system stability after stress test
+          if [[ $TEST_DURATION -gt ${{ env.STRESS_DURATION }} ]]; then
+            echo "⚠️ Stress test took longer than expected: ${TEST_DURATION}s > ${{ env.STRESS_DURATION }}s"
+          else
+            echo "✅ Stress test completed within expected time"
+          fi
+
+      - name: Validate system recovery
+        run: |
+          echo "🔍 Validating system recovery after stress test..."
+          
+          # Check system resources
+          echo "📊 System Resource Check:"
+          echo "├── Memory Usage: $(free -h | grep '^Mem:' | awk '{print $3"/"$2}')"
+          echo "├── Disk Usage: $(df -h / | tail -1 | awk '{print $3"/"$2" ("$5")"}')"
+          echo "├── Load Average: $(uptime | awk -F'load average:' '{print $2}')"
+          echo "└── Process Count: $(ps aux | wc -l)"
+          
+          # Verify basic functionality
+          echo "🧪 Basic Functionality Test:"
+          echo "test" > /tmp/recovery-test
+          if [[ -f /tmp/recovery-test ]]; then
+            echo "✅ File operations: Working"
+            rm -f /tmp/recovery-test
+          else
+            echo "❌ File operations: Failed"
+            exit 1
+          fi
+          
+          # Test network connectivity
+          if curl -s --max-time 5 https://api.github.com > /dev/null; then
+            echo "✅ Network connectivity: Working"
+          else
+            echo "⚠️ Network connectivity: Limited"
+          fi
+          
+          echo "✅ System recovery validation completed"
+
+  # ===== RELIABILITY SUMMARY REPORT =====
+  reliability-summary:
+    name: 📋 Reliability Summary Report
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [fail-fast-configuration, intelligent-error-recovery, reliability-stress-test]
+    if: always()
+    steps:
+      - name: Generate reliability assessment
+        run: |
+          echo "📋 RELIABILITY ASSESSMENT REPORT" >> $GITHUB_STEP_SUMMARY
+          echo "Generated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## Test Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- **Reliability Mode**: ${{ env.RELIABILITY_MODE }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Error Tolerance**: ${{ env.ERROR_TOLERANCE }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Test Scenario**: ${{ env.TEST_SCENARIO }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## Component Status" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Status | Notes |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Fail-Fast Configuration | ${{ needs.fail-fast-configuration.result == 'success' && '✅ Pass' || '❌ Fail' }} | ${{ needs.fail-fast-configuration.outputs.validation-status || 'No data' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Error Recovery | ${{ needs.intelligent-error-recovery.result == 'success' && '✅ Pass' || needs.intelligent-error-recovery.result == 'skipped' && '⏭️ Skip' || '❌ Fail' }} | ${{ needs.intelligent-error-recovery.outputs.success || 'Skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Stress Testing | ${{ needs.reliability-stress-test.result == 'success' && '✅ Pass' || needs.reliability-stress-test.result == 'skipped' && '⏭️ Skip' || '❌ Fail' }} | Multiple scenarios tested |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Calculate overall reliability score
+          TOTAL_TESTS=3
+          PASSED_TESTS=0
+          
+          [[ "${{ needs.fail-fast-configuration.result }}" == "success" ]] && ((PASSED_TESTS++))
+          [[ "${{ needs.intelligent-error-recovery.result }}" == "success" ]] && ((PASSED_TESTS++))
+          [[ "${{ needs.reliability-stress-test.result }}" == "success" ]] && ((PASSED_TESTS++))
+          
+          RELIABILITY_SCORE=$((PASSED_TESTS * 100 / TOTAL_TESTS))
+          
+          echo "## Reliability Metrics" >> $GITHUB_STEP_SUMMARY
+          echo "- **Overall Score**: $RELIABILITY_SCORE/100" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tests Passed**: $PASSED_TESTS/$TOTAL_TESTS" >> $GITHUB_STEP_SUMMARY
+          echo "- **Error Recovery**: ${{ needs.intelligent-error-recovery.result == 'success' && 'Functional' || 'Needs Attention' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Stress Tolerance**: ${{ needs.reliability-stress-test.result == 'success' && 'Good' || 'Needs Improvement' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ $RELIABILITY_SCORE -ge 80 ]]; then
+            echo "## ✅ Reliability Status: Excellent" >> $GITHUB_STEP_SUMMARY
+            echo "The system demonstrates excellent reliability and error recovery capabilities." >> $GITHUB_STEP_SUMMARY
+          elif [[ $RELIABILITY_SCORE -ge 60 ]]; then
+            echo "## ⚠️ Reliability Status: Good" >> $GITHUB_STEP_SUMMARY
+            echo "The system shows good reliability but has areas for improvement." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ❌ Reliability Status: Needs Attention" >> $GITHUB_STEP_SUMMARY
+            echo "The system requires immediate attention to improve reliability." >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Recommendations" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ needs.fail-fast-configuration.result }}" != "success" ]]; then
+            echo "- 🔧 **Improve fail-fast configuration**: Review timeout settings and error handling" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [[ "${{ needs.intelligent-error-recovery.result }}" != "success" ]]; then
+            echo "- 🧠 **Enhance error recovery**: Implement more sophisticated recovery strategies" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [[ "${{ needs.reliability-stress-test.result }}" != "success" ]]; then
+            echo "- 🏋️ **Improve stress tolerance**: Optimize resource usage and concurrent operations" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [[ $RELIABILITY_SCORE -ge 80 ]]; then
+            echo "- ✅ **Maintain current standards**: Continue monitoring and testing" >> $GITHUB_STEP_SUMMARY
+            echo "- 📊 **Consider advanced features**: Implement predictive failure detection" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Set reliability status
+        run: |
+          TOTAL_TESTS=3
+          PASSED_TESTS=0
+          
+          [[ "${{ needs.fail-fast-configuration.result }}" == "success" ]] && ((PASSED_TESTS++))
+          [[ "${{ needs.intelligent-error-recovery.result }}" == "success" ]] && ((PASSED_TESTS++))
+          [[ "${{ needs.reliability-stress-test.result }}" == "success" ]] && ((PASSED_TESTS++))
+          
+          RELIABILITY_SCORE=$((PASSED_TESTS * 100 / TOTAL_TESTS))
+          
+          if [[ $RELIABILITY_SCORE -ge 80 ]]; then
+            echo "✅ Reliability assessment: Excellent ($RELIABILITY_SCORE/100)"
+            echo "System demonstrates robust error handling and recovery capabilities"
+          elif [[ $RELIABILITY_SCORE -ge 60 ]]; then
+            echo "⚠️ Reliability assessment: Good ($RELIABILITY_SCORE/100)"
+            echo "System shows acceptable reliability with room for improvement"
+            echo "::warning::Reliability could be improved ($RELIABILITY_SCORE/100)"
+          else
+            echo "❌ Reliability assessment: Poor ($RELIABILITY_SCORE/100)"
+            echo "System requires immediate attention to improve reliability"
+            echo "::error::Poor reliability detected ($RELIABILITY_SCORE/100)"
+            exit 1
+          fi

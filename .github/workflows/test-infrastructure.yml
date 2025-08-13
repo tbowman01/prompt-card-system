@@ -1,0 +1,1167 @@
+name: Test Infrastructure & Mock Services Automation
+
+on:
+  push:
+    branches: [ main, develop, feature/*, hotfix/* ]
+    paths:
+      - 'backend/src/tests/**'
+      - 'frontend/src/__tests__/**'
+      - '**/jest.config.*'
+      - '**/playwright.config.*'
+      - '.github/workflows/test-infrastructure.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'backend/src/tests/**'
+      - 'frontend/src/__tests__/**'
+      - '**/jest.config.*'
+      - '**/playwright.config.*'
+  schedule:
+    - cron: '0 3 * * *' # Daily at 3 AM UTC for infrastructure health checks
+  workflow_dispatch:
+    inputs:
+      infrastructure_mode:
+        description: 'Infrastructure deployment mode'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+        - minimal
+        - standard
+        - full
+        - performance
+      mock_data_refresh:
+        description: 'Refresh mock data sets'
+        required: false
+        default: true
+        type: boolean
+      performance_baseline:
+        description: 'Update performance baselines'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  INFRASTRUCTURE_MODE: ${{ github.event.inputs.infrastructure_mode || 'standard' }}
+  MOCK_DATA_REFRESH: ${{ github.event.inputs.mock_data_refresh || 'true' }}
+  PERFORMANCE_BASELINE: ${{ github.event.inputs.performance_baseline || 'false' }}
+  
+  # Test infrastructure configuration
+  TEST_DB_VERSION: '15'
+  REDIS_VERSION: '7'
+  ELASTICSEARCH_VERSION: '8.11'
+  MOCK_SERVER_VERSION: '5.15'
+  
+  # Performance monitoring
+  PERFORMANCE_MONITORING: true
+  METRICS_COLLECTION: true
+  REGRESSION_DETECTION: true
+
+jobs:
+  # ===== INFRASTRUCTURE PLANNING =====
+  plan-test-infrastructure:
+    name: Plan Test Infrastructure Deployment
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      infrastructure-config: ${{ steps.config.outputs.config }}
+      services-matrix: ${{ steps.services.outputs.matrix }}
+      mock-data-config: ${{ steps.mock-data.outputs.config }}
+      monitoring-config: ${{ steps.monitoring.outputs.config }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Analyze test requirements
+        id: analysis
+        run: |
+          echo "🔍 Analyzing test infrastructure requirements..."
+          
+          # Analyze backend test requirements
+          backend_services='[]'
+          if [[ -d "backend/src/tests" ]]; then
+            echo "Analyzing backend test dependencies..."
+            
+            # Check for database tests
+            if find backend/src/tests -name "*.test.ts" -exec grep -l "database\|postgres\|sqlite" {} \; | head -1; then
+              backend_services=$(echo "$backend_services" | jq '. += ["postgresql", "sqlite"]')
+            fi
+            
+            # Check for cache tests
+            if find backend/src/tests -name "*.test.ts" -exec grep -l "redis\|cache" {} \; | head -1; then
+              backend_services=$(echo "$backend_services" | jq '. += ["redis"]')
+            fi
+            
+            # Check for search tests
+            if find backend/src/tests -name "*.test.ts" -exec grep -l "search\|elasticsearch" {} \; | head -1; then
+              backend_services=$(echo "$backend_services" | jq '. += ["elasticsearch"]')
+            fi
+            
+            # Check for external API tests
+            if find backend/src/tests -name "*.test.ts" -exec grep -l "api\|http\|fetch" {} \; | head -1; then
+              backend_services=$(echo "$backend_services" | jq '. += ["mock-server"]')
+            fi
+          fi
+          
+          # Analyze frontend test requirements
+          frontend_services='[]'
+          if [[ -d "frontend/src/__tests__" ]]; then
+            echo "Analyzing frontend test dependencies..."
+            
+            # Check for API tests
+            if find frontend/src/__tests__ -name "*.test.*" -exec grep -l "api\|fetch\|axios" {} \; | head -1; then
+              frontend_services=$(echo "$frontend_services" | jq '. += ["mock-server"]')
+            fi
+            
+            # Check for browser tests
+            if find frontend/src/__tests__ -name "*.test.*" -exec grep -l "browser\|playwright\|selenium" {} \; | head -1; then
+              frontend_services=$(echo "$frontend_services" | jq '. += ["browser-stack"]')
+            fi
+          fi
+          
+          # Combine all services
+          all_services=$(echo "$backend_services $frontend_services" | jq -s 'add | unique')
+          
+          echo "required-services=$all_services" >> $GITHUB_OUTPUT
+          echo "Required services: $all_services"
+
+      - name: Configure infrastructure based on mode
+        id: config
+        run: |
+          echo "⚙️ Configuring infrastructure for mode: ${{ env.INFRASTRUCTURE_MODE }}"
+          
+          required_services='${{ steps.analysis.outputs.required-services }}'
+          
+          case "${{ env.INFRASTRUCTURE_MODE }}" in
+            "minimal")
+              config='{
+                "databases": ["sqlite"],
+                "cache": [],
+                "mock_services": ["basic-mock"],
+                "monitoring": false,
+                "performance_tools": false,
+                "parallel_execution": true,
+                "resource_limits": {
+                  "memory": "2Gi",
+                  "cpu": "1000m"
+                }
+              }'
+              ;;
+            "standard")
+              config='{
+                "databases": ["postgresql", "sqlite"],
+                "cache": ["redis"],
+                "mock_services": ["mock-server"],
+                "monitoring": true,
+                "performance_tools": false,
+                "parallel_execution": true,
+                "resource_limits": {
+                  "memory": "4Gi", 
+                  "cpu": "2000m"
+                }
+              }'
+              ;;
+            "full")
+              config='{
+                "databases": ["postgresql", "sqlite"],
+                "cache": ["redis"],
+                "search": ["elasticsearch"],
+                "mock_services": ["mock-server", "wiremock"],
+                "monitoring": true,
+                "performance_tools": true,
+                "parallel_execution": true,
+                "resource_limits": {
+                  "memory": "8Gi",
+                  "cpu": "4000m"
+                }
+              }'
+              ;;
+            "performance")
+              config='{
+                "databases": ["postgresql"],
+                "cache": ["redis"],
+                "search": ["elasticsearch"],
+                "mock_services": ["mock-server"],
+                "monitoring": true,
+                "performance_tools": true,
+                "parallel_execution": false,
+                "resource_limits": {
+                  "memory": "16Gi",
+                  "cpu": "8000m"
+                }
+              }'
+              ;;
+            *)
+              echo "❌ Unknown infrastructure mode: ${{ env.INFRASTRUCTURE_MODE }}"
+              exit 1
+              ;;
+          esac
+          
+          echo "config=$config" >> $GITHUB_OUTPUT
+          echo "Infrastructure configuration set"
+
+      - name: Generate services deployment matrix
+        id: services
+        run: |
+          echo "🏗️ Generating services deployment matrix..."
+          
+          config='${{ steps.config.outputs.config }}'
+          
+          matrix='{
+            "include": []
+          }'
+          
+          # Add database services
+          databases=$(echo "$config" | jq -r '.databases[]? // empty')
+          for db in $databases; do
+            case "$db" in
+              "postgresql")
+                service_config='{
+                  "service": "postgresql",
+                  "image": "postgres:'$TEST_DB_VERSION'-alpine",
+                  "ports": ["5432:5432"],
+                  "environment": {
+                    "POSTGRES_PASSWORD": "testpass",
+                    "POSTGRES_USER": "testuser", 
+                    "POSTGRES_DB": "testdb"
+                  },
+                  "health_check": "pg_isready -U testuser -d testdb",
+                  "wait_timeout": 60
+                }'
+                matrix=$(echo "$matrix" | jq ".include += [$service_config]")
+                ;;
+              "sqlite")
+                service_config='{
+                  "service": "sqlite",
+                  "setup": "file-based",
+                  "health_check": "sqlite3 test.db \"SELECT 1\"",
+                  "wait_timeout": 5
+                }'
+                matrix=$(echo "$matrix" | jq ".include += [$service_config]")
+                ;;
+            esac
+          done
+          
+          # Add cache services
+          caches=$(echo "$config" | jq -r '.cache[]? // empty')
+          for cache in $caches; do
+            case "$cache" in
+              "redis")
+                service_config='{
+                  "service": "redis",
+                  "image": "redis:'$REDIS_VERSION'-alpine",
+                  "ports": ["6379:6379"],
+                  "health_check": "redis-cli ping",
+                  "wait_timeout": 30
+                }'
+                matrix=$(echo "$matrix" | jq ".include += [$service_config]")
+                ;;
+            esac
+          done
+          
+          # Add search services
+          search_services=$(echo "$config" | jq -r '.search[]? // empty')
+          for search in $search_services; do
+            case "$search" in
+              "elasticsearch")
+                service_config='{
+                  "service": "elasticsearch",
+                  "image": "elasticsearch:'$ELASTICSEARCH_VERSION'",
+                  "ports": ["9200:9200"],
+                  "environment": {
+                    "discovery.type": "single-node",
+                    "ES_JAVA_OPTS": "-Xms512m -Xmx512m"
+                  },
+                  "health_check": "curl -f http://localhost:9200/_cluster/health",
+                  "wait_timeout": 120
+                }'
+                matrix=$(echo "$matrix" | jq ".include += [$service_config]")
+                ;;
+            esac
+          done
+          
+          # Add mock services
+          mock_services=$(echo "$config" | jq -r '.mock_services[]? // empty')
+          for mock in $mock_services; do
+            case "$mock" in
+              "mock-server")
+                service_config='{
+                  "service": "mock-server",
+                  "image": "mockserver/mockserver:'$MOCK_SERVER_VERSION'",
+                  "ports": ["1080:1080"],
+                  "health_check": "curl -f http://localhost:1080/mockserver/status",
+                  "wait_timeout": 30
+                }'
+                matrix=$(echo "$matrix" | jq ".include += [$service_config]")
+                ;;
+            esac
+          done
+          
+          echo "matrix=$matrix" >> $GITHUB_OUTPUT
+          echo "Services matrix generated successfully"
+
+      - name: Configure mock data sets
+        id: mock-data
+        run: |
+          echo "📊 Configuring mock data sets..."
+          
+          mock_data_config='{
+            "refresh_enabled": '${{ env.MOCK_DATA_REFRESH }}',
+            "datasets": [
+              {
+                "name": "sample_prompts",
+                "type": "json",
+                "size": "medium",
+                "refresh_interval": "daily"
+              },
+              {
+                "name": "test_users",
+                "type": "json", 
+                "size": "small",
+                "refresh_interval": "weekly"
+              },
+              {
+                "name": "api_responses",
+                "type": "wiremock",
+                "size": "large", 
+                "refresh_interval": "on_demand"
+              },
+              {
+                "name": "performance_data",
+                "type": "csv",
+                "size": "large",
+                "refresh_interval": "monthly"
+              }
+            ],
+            "generators": [
+              {
+                "name": "user_generator",
+                "type": "faker",
+                "output": "json"
+              },
+              {
+                "name": "prompt_generator", 
+                "type": "custom",
+                "output": "json"
+              }
+            ]
+          }'
+          
+          echo "config=$mock_data_config" >> $GITHUB_OUTPUT
+          echo "Mock data configuration set"
+
+      - name: Configure monitoring and metrics
+        id: monitoring
+        run: |
+          echo "📊 Configuring monitoring and metrics collection..."
+          
+          config='${{ steps.config.outputs.config }}'
+          monitoring_enabled=$(echo "$config" | jq -r '.monitoring')
+          performance_tools=$(echo "$config" | jq -r '.performance_tools')
+          
+          monitoring_config='{
+            "enabled": '$monitoring_enabled',
+            "performance_tools": '$performance_tools',
+            "metrics": {
+              "test_duration": true,
+              "resource_usage": true,
+              "failure_rates": true,
+              "coverage_trends": true,
+              "performance_regression": '${{ env.REGRESSION_DETECTION }}'
+            },
+            "collectors": [
+              {
+                "name": "prometheus",
+                "enabled": '$monitoring_enabled',
+                "port": 9090
+              },
+              {
+                "name": "jaeger",
+                "enabled": '$performance_tools',
+                "port": 14268
+              }
+            ],
+            "dashboards": [
+              {
+                "name": "test_overview",
+                "type": "grafana",
+                "enabled": '$monitoring_enabled'
+              },
+              {
+                "name": "performance_metrics",
+                "type": "custom",
+                "enabled": '$performance_tools'
+              }
+            ]
+          }'
+          
+          echo "config=$monitoring_config" >> $GITHUB_OUTPUT
+          echo "Monitoring configuration set"
+
+  # ===== DEPLOY TEST SERVICES =====
+  deploy-test-services:
+    name: Deploy Test Services (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: plan-test-infrastructure
+    if: needs.plan-test-infrastructure.outputs.services-matrix != '{"include":[]}'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan-test-infrastructure.outputs.services-matrix) }}
+    outputs:
+      service-health: ${{ steps.health.outputs.status }}
+    steps:
+      - name: Deploy ${{ matrix.service }} service
+        id: deploy
+        run: |
+          echo "🚀 Deploying ${{ matrix.service }} test service..."
+          
+          service_name="${{ matrix.service }}"
+          
+          case "$service_name" in
+            "postgresql")
+              echo "Starting PostgreSQL test database..."
+              docker run -d \
+                --name test-postgres \
+                -e POSTGRES_PASSWORD=${{ matrix.environment.POSTGRES_PASSWORD }} \
+                -e POSTGRES_USER=${{ matrix.environment.POSTGRES_USER }} \
+                -e POSTGRES_DB=${{ matrix.environment.POSTGRES_DB }} \
+                -p 5432:5432 \
+                ${{ matrix.image }}
+              ;;
+            "redis")
+              echo "Starting Redis test cache..."
+              docker run -d \
+                --name test-redis \
+                -p 6379:6379 \
+                ${{ matrix.image }}
+              ;;
+            "elasticsearch")
+              echo "Starting Elasticsearch test search..."
+              docker run -d \
+                --name test-elasticsearch \
+                -e discovery.type=single-node \
+                -e ES_JAVA_OPTS="-Xms512m -Xmx512m" \
+                -p 9200:9200 \
+                ${{ matrix.image }}
+              ;;
+            "mock-server")
+              echo "Starting MockServer for API mocking..."
+              docker run -d \
+                --name test-mock-server \
+                -p 1080:1080 \
+                ${{ matrix.image }}
+              ;;
+            "sqlite")
+              echo "Setting up SQLite test database..."
+              sqlite3 test.db "CREATE TABLE IF NOT EXISTS health_check (id INTEGER PRIMARY KEY, status TEXT);"
+              sqlite3 test.db "INSERT INTO health_check (status) VALUES ('ok');"
+              ;;
+            *)
+              echo "❌ Unknown service: $service_name"
+              exit 1
+              ;;
+          esac
+          
+          echo "✅ $service_name deployment initiated"
+
+      - name: Wait for service health
+        id: health
+        run: |
+          echo "⏳ Waiting for ${{ matrix.service }} to be healthy..."
+          
+          service_name="${{ matrix.service }}"
+          health_check="${{ matrix.health_check }}"
+          wait_timeout="${{ matrix.wait_timeout }}"
+          
+          start_time=$(date +%s)
+          
+          while true; do
+            current_time=$(date +%s)
+            elapsed=$((current_time - start_time))
+            
+            if [[ $elapsed -gt $wait_timeout ]]; then
+              echo "❌ Health check timeout for $service_name after ${wait_timeout}s"
+              echo "status=unhealthy" >> $GITHUB_OUTPUT
+              exit 1
+            fi
+            
+            echo "Checking health for $service_name (${elapsed}s elapsed)..."
+            
+            case "$service_name" in
+              "postgresql")
+                if pg_isready -h localhost -p 5432 -U testuser; then
+                  echo "✅ PostgreSQL is healthy"
+                  break
+                fi
+                ;;
+              "redis")
+                if redis-cli -h localhost -p 6379 ping | grep -q PONG; then
+                  echo "✅ Redis is healthy"
+                  break
+                fi
+                ;;
+              "elasticsearch")
+                if curl -sf http://localhost:9200/_cluster/health > /dev/null; then
+                  echo "✅ Elasticsearch is healthy"
+                  break
+                fi
+                ;;
+              "mock-server")
+                if curl -sf http://localhost:1080/mockserver/status > /dev/null; then
+                  echo "✅ MockServer is healthy"
+                  break
+                fi
+                ;;
+              "sqlite")
+                if sqlite3 test.db "SELECT 1" > /dev/null; then
+                  echo "✅ SQLite is healthy"
+                  break
+                fi
+                ;;
+            esac
+            
+            sleep 2
+          done
+          
+          echo "status=healthy" >> $GITHUB_OUTPUT
+          echo "✅ $service_name is healthy and ready"
+
+      - name: Initialize service data
+        run: |
+          echo "📊 Initializing test data for ${{ matrix.service }}..."
+          
+          service_name="${{ matrix.service }}"
+          
+          case "$service_name" in
+            "postgresql")
+              echo "Creating test schemas and data..."
+              PGPASSWORD=testpass psql -h localhost -U testuser -d testdb << 'EOF'
+              CREATE SCHEMA IF NOT EXISTS test_schema;
+              
+              CREATE TABLE IF NOT EXISTS test_schema.prompt_cards (
+                id SERIAL PRIMARY KEY,
+                title VARCHAR(255) NOT NULL,
+                content TEXT NOT NULL,
+                category VARCHAR(100),
+                created_at TIMESTAMP DEFAULT NOW()
+              );
+              
+              CREATE TABLE IF NOT EXISTS test_schema.test_results (
+                id SERIAL PRIMARY KEY,
+                test_name VARCHAR(255) NOT NULL,
+                status VARCHAR(50) NOT NULL,
+                duration INTEGER,
+                created_at TIMESTAMP DEFAULT NOW()
+              );
+              
+              INSERT INTO test_schema.prompt_cards (title, content, category) VALUES
+                ('Test Prompt 1', 'This is a test prompt for testing purposes', 'test'),
+                ('Test Prompt 2', 'Another test prompt for validation', 'validation'),
+                ('Performance Test', 'Performance testing prompt', 'performance');
+              EOF
+              ;;
+            "redis")
+              echo "Setting up Redis test data..."
+              redis-cli -h localhost -p 6379 SET test:key "test_value"
+              redis-cli -h localhost -p 6379 SET cache:test "cached_data"
+              redis-cli -h localhost -p 6379 EXPIRE test:key 3600
+              ;;
+            "elasticsearch")
+              echo "Creating Elasticsearch test indices..."
+              curl -X PUT "localhost:9200/test_prompts" -H 'Content-Type: application/json' -d '{
+                "mappings": {
+                  "properties": {
+                    "title": {"type": "text"},
+                    "content": {"type": "text"},
+                    "category": {"type": "keyword"},
+                    "created_at": {"type": "date"}
+                  }
+                }
+              }'
+              
+              curl -X POST "localhost:9200/test_prompts/_doc/1" -H 'Content-Type: application/json' -d '{
+                "title": "Test Search Prompt",
+                "content": "This prompt is for testing search functionality",
+                "category": "test",
+                "created_at": "2024-01-01T00:00:00Z"
+              }'
+              ;;
+            "mock-server")
+              echo "Setting up MockServer expectations..."
+              curl -X PUT "http://localhost:1080/mockserver/expectation" -H 'Content-Type: application/json' -d '{
+                "httpRequest": {
+                  "path": "/api/test",
+                  "method": "GET"
+                },
+                "httpResponse": {
+                  "statusCode": 200,
+                  "headers": {
+                    "Content-Type": ["application/json"]
+                  },
+                  "body": {
+                    "message": "Test response from mock server",
+                    "timestamp": "2024-01-01T00:00:00Z"
+                  }
+                }
+              }'
+              ;;
+            "sqlite")
+              echo "Populating SQLite with test data..."
+              sqlite3 test.db << 'EOF'
+              CREATE TABLE IF NOT EXISTS prompt_cards (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                category TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+              );
+              
+              INSERT INTO prompt_cards (title, content, category) VALUES
+                ('SQLite Test Prompt', 'Testing SQLite functionality', 'test'),
+                ('Local Database Test', 'Local database testing prompt', 'local');
+              EOF
+              ;;
+          esac
+          
+          echo "✅ Test data initialized for ${{ matrix.service }}"
+
+      - name: Service health report
+        if: always()
+        run: |
+          echo "📋 Service Health Report for ${{ matrix.service }}"
+          echo "════════════════════════════════════════════════════════"
+          echo "Service: ${{ matrix.service }}"
+          echo "Status: ${{ steps.health.outputs.status }}"
+          echo "Health Check: ${{ matrix.health_check }}"
+          echo "Wait Timeout: ${{ matrix.wait_timeout }}s"
+          
+          # Additional service-specific diagnostics
+          case "${{ matrix.service }}" in
+            "postgresql")
+              echo "PostgreSQL Info:"
+              docker logs test-postgres --tail 10 || echo "No logs available"
+              ;;
+            "redis")
+              echo "Redis Info:"
+              redis-cli -h localhost -p 6379 INFO server | head -5 || echo "Redis not accessible"
+              ;;
+            "elasticsearch")
+              echo "Elasticsearch Cluster Health:"
+              curl -s http://localhost:9200/_cluster/health | jq . || echo "Elasticsearch not accessible"
+              ;;
+            "mock-server")
+              echo "MockServer Status:"
+              curl -s http://localhost:1080/mockserver/status || echo "MockServer not accessible"
+              ;;
+          esac
+
+  # ===== MOCK DATA MANAGEMENT =====
+  manage-mock-data:
+    name: Mock Data Generation & Management
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [plan-test-infrastructure, deploy-test-services]
+    if: needs.plan-test-infrastructure.outputs.mock-data-config != ''
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install mock data tools
+        run: |
+          echo "🛠️ Installing mock data generation tools..."
+          npm install -g faker @faker-js/faker json-server
+          
+          # Install custom data generators
+          npm install --save-dev chance casual
+
+      - name: Generate mock datasets
+        run: |
+          echo "📊 Generating comprehensive mock datasets..."
+          
+          mock_config='${{ needs.plan-test-infrastructure.outputs.mock-data-config }}'
+          
+          mkdir -p mock-data
+          
+          # Generate sample prompts dataset
+          node -e "
+          const { faker } = require('@faker-js/faker');
+          
+          const prompts = Array.from({length: 100}, (_, i) => ({
+            id: i + 1,
+            title: faker.lorem.sentence(4),
+            content: faker.lorem.paragraphs(2),
+            category: faker.helpers.arrayElement(['technical', 'creative', 'business', 'educational']),
+            tags: faker.helpers.arrayElements(['ai', 'prompt', 'test', 'automation', 'quality'], 3),
+            difficulty: faker.helpers.arrayElement(['beginner', 'intermediate', 'advanced']),
+            author: faker.person.fullName(),
+            created_at: faker.date.past(),
+            updated_at: faker.date.recent(),
+            usage_count: faker.number.int({ min: 0, max: 1000 }),
+            rating: faker.number.float({ min: 1, max: 5, precision: 0.1 })
+          }));
+          
+          require('fs').writeFileSync('mock-data/sample_prompts.json', JSON.stringify(prompts, null, 2));
+          console.log('Generated sample_prompts.json with', prompts.length, 'entries');
+          "
+          
+          # Generate test users dataset
+          node -e "
+          const { faker } = require('@faker-js/faker');
+          
+          const users = Array.from({length: 50}, (_, i) => ({
+            id: i + 1,
+            username: faker.internet.userName(),
+            email: faker.internet.email(),
+            firstName: faker.person.firstName(),
+            lastName: faker.person.lastName(),
+            role: faker.helpers.arrayElement(['admin', 'user', 'moderator']),
+            status: faker.helpers.arrayElement(['active', 'inactive', 'pending']),
+            preferences: {
+              theme: faker.helpers.arrayElement(['light', 'dark']),
+              notifications: faker.datatype.boolean(),
+              language: faker.helpers.arrayElement(['en', 'es', 'fr', 'de'])
+            },
+            created_at: faker.date.past(),
+            last_login: faker.date.recent()
+          }));
+          
+          require('fs').writeFileSync('mock-data/test_users.json', JSON.stringify(users, null, 2));
+          console.log('Generated test_users.json with', users.length, 'entries');
+          "
+          
+          # Generate API response templates
+          cat > mock-data/api_responses.json << 'EOF'
+          {
+            "health_check": {
+              "status": "ok",
+              "timestamp": "2024-01-01T00:00:00Z",
+              "version": "1.0.0",
+              "uptime": 3600
+            },
+            "prompt_list": {
+              "data": [
+                {
+                  "id": 1,
+                  "title": "Sample Prompt",
+                  "content": "This is a sample prompt for testing"
+                }
+              ],
+              "total": 1,
+              "page": 1,
+              "limit": 10
+            },
+            "error_responses": {
+              "404": {
+                "error": "Not Found",
+                "message": "The requested resource was not found",
+                "code": 404
+              },
+              "500": {
+                "error": "Internal Server Error", 
+                "message": "An unexpected error occurred",
+                "code": 500
+              }
+            }
+          }
+          EOF
+          
+          echo "✅ Mock datasets generated successfully"
+
+      - name: Generate performance test data
+        run: |
+          echo "📈 Generating performance test datasets..."
+          
+          # Generate large dataset for performance testing
+          node -e "
+          const { faker } = require('@faker-js/faker');
+          
+          const largeDataset = Array.from({length: 10000}, (_, i) => ({
+            id: i + 1,
+            title: faker.lorem.sentence(),
+            content: faker.lorem.paragraphs(5),
+            metadata: {
+              wordCount: faker.number.int({ min: 100, max: 1000 }),
+              complexity: faker.number.float({ min: 0.1, max: 1.0, precision: 0.01 }),
+              processingTime: faker.number.int({ min: 10, max: 5000 })
+            },
+            timestamps: Array.from({length: 24}, () => faker.date.recent())
+          }));
+          
+          require('fs').writeFileSync('mock-data/performance_data.json', JSON.stringify(largeDataset, null, 2));
+          console.log('Generated performance_data.json with', largeDataset.length, 'entries');
+          "
+          
+          echo "✅ Performance test data generated"
+
+      - name: Setup mock API server
+        run: |
+          echo "🔧 Setting up mock API server..."
+          
+          # Create db.json for json-server
+          cat > mock-data/db.json << 'EOF'
+          {
+            "prompts": [],
+            "users": [],
+            "tests": [],
+            "metrics": []
+          }
+          EOF
+          
+          # Populate with generated data
+          jq '.prompts = input' mock-data/db.json mock-data/sample_prompts.json > temp.json && mv temp.json mock-data/db.json
+          jq '.users = input' mock-data/db.json mock-data/test_users.json > temp.json && mv temp.json mock-data/db.json
+          
+          # Start mock API server in background
+          cd mock-data && json-server --watch db.json --port 3001 &
+          mock_server_pid=$!
+          
+          # Wait for server to start
+          sleep 5
+          
+          # Test mock API
+          if curl -f http://localhost:3001/prompts > /dev/null; then
+            echo "✅ Mock API server running on port 3001"
+          else
+            echo "❌ Failed to start mock API server"
+            exit 1
+          fi
+          
+          # Store PID for cleanup
+          echo $mock_server_pid > mock-server.pid
+
+      - name: Validate mock data quality
+        run: |
+          echo "🔍 Validating mock data quality..."
+          
+          # Validate JSON structure
+          for file in mock-data/*.json; do
+            if [[ -f "$file" ]]; then
+              echo "Validating $file..."
+              if jq empty "$file" 2>/dev/null; then
+                echo "✅ $file is valid JSON"
+              else
+                echo "❌ $file is invalid JSON"
+                exit 1
+              fi
+            fi
+          done
+          
+          # Validate data completeness
+          prompt_count=$(jq length mock-data/sample_prompts.json)
+          user_count=$(jq length mock-data/test_users.json)
+          
+          echo "Data completeness check:"
+          echo "├── Prompts: $prompt_count"
+          echo "├── Users: $user_count"
+          echo "└── API Templates: Available"
+          
+          if [[ $prompt_count -ge 50 && $user_count -ge 25 ]]; then
+            echo "✅ Mock data quality validation passed"
+          else
+            echo "❌ Insufficient mock data generated"
+            exit 1
+          fi
+
+      - name: Upload mock data artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mock-data-${{ github.run_id }}
+          path: mock-data/
+          retention-days: 7
+
+  # ===== PERFORMANCE MONITORING SETUP =====
+  setup-performance-monitoring:
+    name: Setup Performance Monitoring & Metrics
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: [plan-test-infrastructure, deploy-test-services]
+    if: fromJson(needs.plan-test-infrastructure.outputs.monitoring-config).enabled == true
+    steps:
+      - name: Setup monitoring infrastructure
+        run: |
+          echo "📊 Setting up performance monitoring infrastructure..."
+          
+          # Start Prometheus for metrics collection
+          docker run -d \
+            --name test-prometheus \
+            -p 9090:9090 \
+            -v $(pwd)/prometheus.yml:/etc/prometheus/prometheus.yml \
+            prom/prometheus:latest
+          
+          # Start Grafana for dashboards
+          docker run -d \
+            --name test-grafana \
+            -p 3000:3000 \
+            -e GF_SECURITY_ADMIN_PASSWORD=admin \
+            grafana/grafana:latest
+          
+          echo "✅ Monitoring infrastructure started"
+
+      - name: Configure metric collection
+        run: |
+          echo "⚙️ Configuring metric collection..."
+          
+          # Create Prometheus configuration
+          cat > prometheus.yml << 'EOF'
+          global:
+            scrape_interval: 15s
+            evaluation_interval: 15s
+          
+          scrape_configs:
+            - job_name: 'test-metrics'
+              static_configs:
+                - targets: ['localhost:3001']
+              metrics_path: '/metrics'
+              scrape_interval: 5s
+          
+            - job_name: 'node-exporter'
+              static_configs:
+                - targets: ['localhost:9100']
+          EOF
+          
+          # Start Node Exporter for system metrics
+          docker run -d \
+            --name test-node-exporter \
+            -p 9100:9100 \
+            prom/node-exporter:latest
+          
+          echo "✅ Metric collection configured"
+
+      - name: Setup performance baselines
+        if: env.PERFORMANCE_BASELINE == 'true'
+        run: |
+          echo "📏 Setting up performance baselines..."
+          
+          # Create baseline configuration
+          cat > performance-baselines.json << 'EOF'
+          {
+            "test_execution": {
+              "unit_tests": {
+                "max_duration": 60,
+                "target_duration": 30,
+                "memory_limit": "512MB"
+              },
+              "integration_tests": {
+                "max_duration": 180,
+                "target_duration": 120,
+                "memory_limit": "1GB"
+              },
+              "e2e_tests": {
+                "max_duration": 300,
+                "target_duration": 180,
+                "memory_limit": "2GB"
+              }
+            },
+            "api_performance": {
+              "response_time": {
+                "p50": 100,
+                "p95": 500,
+                "p99": 1000
+              },
+              "throughput": {
+                "requests_per_second": 100,
+                "concurrent_users": 50
+              }
+            },
+            "resource_usage": {
+              "cpu_usage": {
+                "average": 50,
+                "peak": 80
+              },
+              "memory_usage": {
+                "average": 60,
+                "peak": 85
+              }
+            }
+          }
+          EOF
+          
+          echo "✅ Performance baselines configured"
+
+      - name: Create monitoring dashboards
+        run: |
+          echo "📊 Creating monitoring dashboards..."
+          
+          # Create Grafana dashboard configuration
+          mkdir -p dashboards
+          
+          cat > dashboards/test-overview.json << 'EOF'
+          {
+            "dashboard": {
+              "id": null,
+              "title": "Test Infrastructure Overview",
+              "tags": ["testing", "infrastructure"],
+              "timezone": "browser",
+              "panels": [
+                {
+                  "id": 1,
+                  "title": "Test Execution Time",
+                  "type": "graph",
+                  "targets": [
+                    {
+                      "expr": "test_duration_seconds",
+                      "refId": "A"
+                    }
+                  ]
+                },
+                {
+                  "id": 2,
+                  "title": "Resource Usage",
+                  "type": "graph",
+                  "targets": [
+                    {
+                      "expr": "node_memory_MemAvailable_bytes",
+                      "refId": "B"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+          EOF
+          
+          echo "✅ Monitoring dashboards created"
+
+      - name: Test monitoring endpoints
+        run: |
+          echo "🧪 Testing monitoring endpoints..."
+          
+          # Wait for services to be ready
+          sleep 10
+          
+          # Test Prometheus
+          if curl -f http://localhost:9090/api/v1/targets > /dev/null; then
+            echo "✅ Prometheus is accessible"
+          else
+            echo "❌ Prometheus is not accessible"
+          fi
+          
+          # Test Grafana
+          if curl -f http://localhost:3000/api/health > /dev/null; then
+            echo "✅ Grafana is accessible"
+          else
+            echo "❌ Grafana is not accessible"
+          fi
+          
+          # Test Node Exporter
+          if curl -f http://localhost:9100/metrics > /dev/null; then
+            echo "✅ Node Exporter is accessible"
+          else
+            echo "❌ Node Exporter is not accessible"
+          fi
+
+  # ===== INFRASTRUCTURE HEALTH CHECK =====
+  infrastructure-health-check:
+    name: Infrastructure Health Check & Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [deploy-test-services, manage-mock-data, setup-performance-monitoring]
+    if: always()
+    steps:
+      - name: Comprehensive infrastructure health check
+        run: |
+          echo "🏥 COMPREHENSIVE INFRASTRUCTURE HEALTH CHECK"
+          echo "═══════════════════════════════════════════════════════════"
+          
+          # Check deployed services
+          services_status="unknown"
+          if [[ "${{ needs.deploy-test-services.result }}" == "success" ]]; then
+            services_status="healthy"
+          elif [[ "${{ needs.deploy-test-services.result }}" == "failure" ]]; then
+            services_status="unhealthy"
+          fi
+          
+          mock_data_status="unknown"
+          if [[ "${{ needs.manage-mock-data.result }}" == "success" ]]; then
+            mock_data_status="ready"
+          elif [[ "${{ needs.manage-mock-data.result }}" == "failure" ]]; then
+            mock_data_status="failed"
+          fi
+          
+          monitoring_status="unknown"
+          if [[ "${{ needs.setup-performance-monitoring.result }}" == "success" ]]; then
+            monitoring_status="active"
+          elif [[ "${{ needs.setup-performance-monitoring.result }}" == "failure" ]]; then
+            monitoring_status="inactive"
+          fi
+          
+          echo "📊 Infrastructure Status Summary:"
+          echo "├── Services: $services_status"
+          echo "├── Mock Data: $mock_data_status"
+          echo "├── Monitoring: $monitoring_status"
+          echo "└── Mode: ${{ env.INFRASTRUCTURE_MODE }}"
+          echo ""
+          
+          # Overall health assessment
+          overall_health="healthy"
+          if [[ "$services_status" == "unhealthy" ]]; then
+            overall_health="degraded"
+          fi
+          
+          if [[ "$mock_data_status" == "failed" ]]; then
+            overall_health="degraded"
+          fi
+          
+          echo "🏆 Overall Infrastructure Health: $overall_health"
+          
+          case "$overall_health" in
+            "healthy")
+              echo "✅ Test infrastructure is fully operational"
+              ;;
+            "degraded")
+              echo "⚠️  Test infrastructure has some issues but is partially functional"
+              ;;
+            *)
+              echo "❌ Test infrastructure has critical issues"
+              exit 1
+              ;;
+          esac
+
+      - name: Generate infrastructure summary
+        if: always()
+        run: |
+          {
+            echo "# 🏗️ Test Infrastructure Summary"
+            echo ""
+            echo "## 📊 Infrastructure Status"
+            echo "- **Mode**: ${{ env.INFRASTRUCTURE_MODE }}"
+            echo "- **Services**: ${{ needs.deploy-test-services.result == 'success' && '✅ Healthy' || '❌ Issues' }}"
+            echo "- **Mock Data**: ${{ needs.manage-mock-data.result == 'success' && '✅ Ready' || '❌ Failed' }}"
+            echo "- **Monitoring**: ${{ needs.setup-performance-monitoring.result == 'success' && '✅ Active' || '❌ Inactive' }}"
+            echo ""
+            echo "## 🔧 Configuration"
+            echo "- **Mock Data Refresh**: ${{ env.MOCK_DATA_REFRESH }}"
+            echo "- **Performance Baseline**: ${{ env.PERFORMANCE_BASELINE }}"
+            echo "- **Regression Detection**: ${{ env.REGRESSION_DETECTION }}"
+            echo ""
+            echo "## 📁 Available Resources"
+            echo "Test infrastructure and mock data are ready for use in testing workflows."
+          } >> $GITHUB_STEP_SUMMARY
+
+      - name: Post infrastructure metrics
+        if: always()
+        continue-on-error: true
+        run: |
+          # Send infrastructure metrics to monitoring system
+          curl -X POST -H "Content-Type: application/json" \
+            -d '{
+              "test_infrastructure": {
+                "id": "${{ github.run_id }}",
+                "workflow": "${{ github.workflow }}",
+                "branch": "${{ github.ref_name }}",
+                "commit": "${{ github.sha }}",
+                "mode": "${{ env.INFRASTRUCTURE_MODE }}",
+                "services_status": "${{ needs.deploy-test-services.result }}",
+                "mock_data_status": "${{ needs.manage-mock-data.result }}",
+                "monitoring_status": "${{ needs.setup-performance-monitoring.result }}",
+                "timestamp": "${{ github.event.repository.updated_at }}"
+              }
+            }' \
+            http://localhost:3001/api/infrastructure/metrics || echo "Failed to post infrastructure metrics"
