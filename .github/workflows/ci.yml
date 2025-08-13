@@ -23,7 +23,9 @@ jobs:
   setup-dependencies:
     name: Setup Dependencies & System Cache
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
+    strategy:
+      fail-fast: true
     outputs:
       cache-key: ${{ steps.cache-key.outputs.key }}
       backend-cache-hit: ${{ steps.backend-cache.outputs.cache-hit }}
@@ -102,8 +104,10 @@ jobs:
   lint-and-typecheck:
     name: Lint & TypeScript Validation
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 5
     needs: setup-dependencies
+    strategy:
+      fail-fast: true
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -198,8 +202,35 @@ jobs:
   test-backend-parallel:
     name: Backend Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 8
     needs: setup-dependencies
+    strategy:
+      fail-fast: true
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          --name redis-test
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_USER: testuser
+          POSTGRES_DB: testdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U testuser -d testdb"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          --name postgres-test
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -241,13 +272,16 @@ jobs:
           npm ci --prefer-offline
           npm run install:all
 
-      - name: Run backend tests
+      - name: Run backend tests (CI-optimized)
         run: |
-          echo "🧪 Running backend tests..."
-          npm run test:backend
+          echo "🧪 Running backend tests (CI-optimized)..."
+          cd backend && npm run test:ci
         env:
           NODE_ENV: test
           CI: true
+          REDIS_URL: redis://localhost:6379
+          DATABASE_URL: postgresql://testuser:testpass@localhost:5432/testdb
+        timeout-minutes: 3
 
       - name: Upload test coverage
         uses: codecov/codecov-action@v4
@@ -270,8 +304,10 @@ jobs:
   test-frontend-parallel:
     name: Frontend Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 5
     needs: setup-dependencies
+    strategy:
+      fail-fast: true
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -335,8 +371,10 @@ jobs:
   build-parallel:
     name: Build Applications
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 6
     needs: [setup-dependencies, lint-and-typecheck]
+    strategy:
+      fail-fast: true
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -442,9 +480,11 @@ jobs:
   docker-build-optimized:
     name: Docker Build (Multi-stage Optimized)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 12
     needs: [build-parallel, test-backend-parallel, test-frontend-parallel]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    strategy:
+      fail-fast: true
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

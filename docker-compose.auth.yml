@@ -1,0 +1,352 @@
+# 🔐 SECURITY-FIRST vLLM Authentication Stack
+# Zero-trust authentication service with full observability
+version: '3.8'
+
+services:
+  # 🔐 Authentication Service - Zero-trust JWT/API key management
+  auth-service:
+    build:
+      context: ./auth
+      dockerfile: Dockerfile
+      target: production
+    container_name: vllm-auth-service
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:docker-default
+      - seccomp:default
+    user: "1001:1001"
+    environment:
+      - NODE_ENV=production
+      - PORT=8005
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - JWT_EXPIRY=15m
+      - JWT_REFRESH_EXPIRY=7d
+      - REDIS_URL=redis://redis:6379
+      - POSTGRES_URL=postgresql://authuser:${DB_PASSWORD}@postgres:5432/authdb
+      - RATE_LIMIT_WINDOW=15m
+      - RATE_LIMIT_MAX_REQUESTS=100
+      - ENABLE_AUDIT_LOG=true
+      - AUDIT_LOG_LEVEL=verbose
+      - BCRYPT_ROUNDS=12
+      - API_KEY_PREFIX=vllm_
+      - ENABLE_2FA=true
+      - ENABLE_SAML=true
+      - ENABLE_OAUTH=true
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=50m
+      - /var/log:noexec,nosuid,size=100m
+    volumes:
+      - ./auth/certs:/certs:ro
+      - auth-logs:/var/log/auth:rw
+    ports:
+      - "8005:8005"
+    networks:
+      - vllm-network
+    depends_on:
+      - redis
+      - postgres
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.auth.rule=PathPrefix(`/auth`)"
+      - "traefik.http.services.auth.loadbalancer.server.port=8005"
+      - "traefik.http.middlewares.auth-ratelimit.ratelimit.average=100"
+
+  # 🧠 Memory Service - Persistent agent memory with anti-collision
+  memory-service:
+    build:
+      context: ./memory
+      dockerfile: Dockerfile
+      target: production
+    container_name: vllm-memory-service
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    user: "1001:1001"
+    environment:
+      - NODE_ENV=production
+      - PORT=8007
+      - REDIS_URL=redis://redis:6379
+      - QDRANT_URL=http://qdrant:6333
+      - POSTGRES_URL=postgresql://memuser:${DB_PASSWORD}@postgres:5432/memorydb
+      - ENABLE_ENCRYPTION=true
+      - ENCRYPTION_KEY=${MEMORY_ENCRYPTION_KEY}
+      - ANTI_COLLISION_ENABLED=true
+      - MEMORY_RETENTION_DAYS=90
+      - AUDIT_MEMORY_ACCESS=true
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=100m
+    volumes:
+      - memory-data:/data:rw
+      - memory-logs:/var/log/memory:rw
+    ports:
+      - "8007:8007"
+    networks:
+      - vllm-network
+    depends_on:
+      - redis
+      - qdrant
+      - postgres
+      - auth-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-H", "Authorization: Bearer ${HEALTH_CHECK_TOKEN}", "http://localhost:8007/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 🔄 Agent Orchestrator - SPARC workflow with anti-collision
+  orchestrator-auth:
+    build:
+      context: ./orchestrator
+      dockerfile: Dockerfile
+      target: production
+    container_name: vllm-orchestrator-auth
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    user: "1001:1001"
+    environment:
+      - NODE_ENV=production
+      - PORT=8006
+      - AUTH_SERVICE_URL=http://auth-service:8005
+      - MEMORY_SERVICE_URL=http://memory-service:8007
+      - VLLM_PHI_URL=http://vllm-phi:8000
+      - VLLM_LARGE_URL=http://vllm-large:8001
+      - REDIS_URL=redis://redis:6379
+      - POSTGRES_URL=postgresql://orchuser:${DB_PASSWORD}@postgres:5432/orchestratordb
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - ENABLE_AGENT_ROTATION=true
+      - MAX_AGENTS=8
+      - AGENT_TIMEOUT_MS=30000
+      - ENABLE_CONSENSUS=true
+      - CONSENSUS_THRESHOLD=0.6
+      - AUDIT_AGENT_ACTIONS=true
+      - TRACE_ALL_WORKFLOWS=true
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=100m
+    volumes:
+      - orchestrator-logs:/var/log/orchestrator:rw
+    ports:
+      - "8006:8006"
+    networks:
+      - vllm-network
+    depends_on:
+      - auth-service
+      - memory-service
+      - redis
+      - postgres
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-H", "Authorization: Bearer ${HEALTH_CHECK_TOKEN}", "http://localhost:8006/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 📊 Observability Service - Full transparency and audit logging
+  observability-service:
+    build:
+      context: ./observability
+      dockerfile: Dockerfile
+      target: production
+    container_name: vllm-observability
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    user: "1001:1001"
+    environment:
+      - NODE_ENV=production
+      - PORT=8008
+      - CLICKHOUSE_URL=http://clickhouse:8123
+      - PROMETHEUS_URL=http://prometheus:9090
+      - LANGFUSE_URL=http://langfuse-web:3000
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - ENABLE_REAL_TIME_MONITORING=true
+      - AUDIT_LOG_RETENTION_DAYS=2555
+      - ENABLE_ANOMALY_DETECTION=true
+      - ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL}
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=50m
+    volumes:
+      - observability-logs:/var/log/observability:rw
+    ports:
+      - "8008:8008"
+    networks:
+      - vllm-network
+    depends_on:
+      - auth-service
+      - clickhouse
+      - prometheus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8008/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 🔒 Nginx Reverse Proxy with Auth
+  nginx-auth:
+    image: nginx:1.27-alpine
+    container_name: vllm-nginx-auth
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    user: "101:101"
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./nginx/auth.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+      - nginx-cache:/var/cache/nginx:rw
+    networks:
+      - vllm-network
+    depends_on:
+      - auth-service
+      - orchestrator-auth
+      - memory-service
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 🗄️ PostgreSQL for Auth, Memory, and Orchestrator
+  postgres:
+    image: postgres:16-alpine
+    container_name: vllm-postgres
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_MULTIPLE_DATABASES=authdb,memorydb,orchestratordb
+      - POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256 --auth-local=scram-sha-256
+    volumes:
+      - postgres-data:/var/lib/postgresql/data:rw
+      - ./database/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - vllm-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 📊 ClickHouse for audit logs and analytics
+  clickhouse:
+    image: clickhouse/clickhouse-server:24-alpine
+    container_name: vllm-clickhouse
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      - CLICKHOUSE_USER=audit
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
+      - CLICKHOUSE_DB=audit_logs
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse:rw
+      - ./clickhouse/config.xml:/etc/clickhouse-server/config.xml:ro
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    networks:
+      - vllm-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  auth-logs:
+    driver: local
+  memory-data:
+    driver: local
+  memory-logs:
+    driver: local
+  orchestrator-logs:
+    driver: local
+  observability-logs:
+    driver: local
+  nginx-cache:
+    driver: local
+  postgres-data:
+    driver: local
+  clickhouse-data:
+    driver: local
+
+networks:
+  vllm-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
