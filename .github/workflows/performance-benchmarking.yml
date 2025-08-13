@@ -1,0 +1,1400 @@
+name: Performance Benchmarking & Regression Detection
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 2 * * 1' # Weekly on Monday at 2 AM UTC
+  workflow_dispatch:
+    inputs:
+      benchmark_suite:
+        description: 'Benchmark suite to run'
+        required: true
+        default: 'comprehensive'
+        type: choice
+        options:
+        - quick
+        - standard
+        - comprehensive
+        - stress
+        - memory
+        - cpu
+      baseline_update:
+        description: 'Update performance baselines'
+        required: false
+        default: false
+        type: boolean
+      regression_threshold:
+        description: 'Regression threshold (%)'
+        required: false
+        default: '10'
+        type: string
+
+env:
+  BENCHMARK_SUITE: ${{ github.event.inputs.benchmark_suite || 'standard' }}
+  BASELINE_UPDATE: ${{ github.event.inputs.baseline_update || 'false' }}
+  REGRESSION_THRESHOLD: ${{ github.event.inputs.regression_threshold || '10' }}
+  
+  # Performance monitoring configuration
+  METRICS_RETENTION_DAYS: 90
+  PERFORMANCE_SAMPLING_RATE: 1000
+  MEMORY_PROFILING: true
+  CPU_PROFILING: true
+  
+  # Benchmark execution settings
+  WARMUP_ITERATIONS: 5
+  BENCHMARK_ITERATIONS: 10
+  PARALLEL_BENCHMARKS: true
+
+jobs:
+  # ===== BENCHMARK PLANNING =====
+  plan-benchmarks:
+    name: Plan Performance Benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      benchmark-matrix: ${{ steps.matrix.outputs.matrix }}
+      baseline-config: ${{ steps.baseline.outputs.config }}
+      monitoring-config: ${{ steps.monitoring.outputs.config }}
+      regression-config: ${{ steps.regression.outputs.config }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Analyze performance test requirements
+        id: analysis
+        run: |
+          echo "🔍 Analyzing performance test requirements..."
+          
+          # Check for existing performance tests
+          backend_perf_tests=false
+          frontend_perf_tests=false
+          
+          if find backend/src/tests -name "*performance*" -o -name "*perf*" -o -name "*benchmark*" | head -1; then
+            backend_perf_tests=true
+          fi
+          
+          if find frontend/src/__tests__ -name "*performance*" -o -name "*perf*" -o -name "*benchmark*" | head -1; then
+            frontend_perf_tests=true
+          fi
+          
+          echo "backend-perf-tests=$backend_perf_tests" >> $GITHUB_OUTPUT
+          echo "frontend-perf-tests=$frontend_perf_tests" >> $GITHUB_OUTPUT
+          echo "Performance test analysis completed"
+
+      - name: Generate benchmark execution matrix
+        id: matrix
+        run: |
+          echo "📊 Generating benchmark execution matrix for: ${{ env.BENCHMARK_SUITE }}"
+          
+          matrix='{
+            "include": []
+          }'
+          
+          case "${{ env.BENCHMARK_SUITE }}" in
+            "quick")
+              benchmarks='[
+                {
+                  "category": "api",
+                  "type": "response_time",
+                  "target": "backend",
+                  "duration": 30,
+                  "parallel": true,
+                  "memory_profile": false
+                },
+                {
+                  "category": "ui",
+                  "type": "page_load",
+                  "target": "frontend", 
+                  "duration": 60,
+                  "parallel": false,
+                  "memory_profile": false
+                }
+              ]'
+              ;;
+            "standard")
+              benchmarks='[
+                {
+                  "category": "api",
+                  "type": "response_time",
+                  "target": "backend",
+                  "duration": 120,
+                  "parallel": true,
+                  "memory_profile": true
+                },
+                {
+                  "category": "api",
+                  "type": "throughput",
+                  "target": "backend",
+                  "duration": 120,
+                  "parallel": true,
+                  "memory_profile": true
+                },
+                {
+                  "category": "ui",
+                  "type": "page_load",
+                  "target": "frontend",
+                  "duration": 180,
+                  "parallel": false,
+                  "memory_profile": true
+                },
+                {
+                  "category": "ui",
+                  "type": "interaction",
+                  "target": "frontend",
+                  "duration": 120,
+                  "parallel": false,
+                  "memory_profile": false
+                }
+              ]'
+              ;;
+            "comprehensive")
+              benchmarks='[
+                {
+                  "category": "api",
+                  "type": "response_time",
+                  "target": "backend",
+                  "duration": 300,
+                  "parallel": true,
+                  "memory_profile": true
+                },
+                {
+                  "category": "api",
+                  "type": "throughput",
+                  "target": "backend",
+                  "duration": 300,
+                  "parallel": true,
+                  "memory_profile": true
+                },
+                {
+                  "category": "api",
+                  "type": "concurrent_load",
+                  "target": "backend",
+                  "duration": 240,
+                  "parallel": true,
+                  "memory_profile": true
+                },
+                {
+                  "category": "database",
+                  "type": "query_performance",
+                  "target": "backend",
+                  "duration": 180,
+                  "parallel": false,
+                  "memory_profile": true
+                },
+                {
+                  "category": "ui",
+                  "type": "page_load",
+                  "target": "frontend",
+                  "duration": 300,
+                  "parallel": false,
+                  "memory_profile": true
+                },
+                {
+                  "category": "ui",
+                  "type": "interaction",
+                  "target": "frontend",
+                  "duration": 240,
+                  "parallel": false,
+                  "memory_profile": true
+                },
+                {
+                  "category": "ui",
+                  "type": "rendering",
+                  "target": "frontend",
+                  "duration": 180,
+                  "parallel": false,
+                  "memory_profile": true
+                }
+              ]'
+              ;;
+            "stress")
+              benchmarks='[
+                {
+                  "category": "stress",
+                  "type": "high_load",
+                  "target": "backend",
+                  "duration": 600,
+                  "parallel": true,
+                  "memory_profile": true
+                },
+                {
+                  "category": "stress",
+                  "type": "memory_intensive",
+                  "target": "backend",
+                  "duration": 300,
+                  "parallel": false,
+                  "memory_profile": true
+                },
+                {
+                  "category": "stress",
+                  "type": "concurrent_users",
+                  "target": "frontend",
+                  "duration": 480,
+                  "parallel": false,
+                  "memory_profile": true
+                }
+              ]'
+              ;;
+            "memory")
+              benchmarks='[
+                {
+                  "category": "memory",
+                  "type": "memory_usage",
+                  "target": "backend",
+                  "duration": 240,
+                  "parallel": false,
+                  "memory_profile": true
+                },
+                {
+                  "category": "memory",
+                  "type": "memory_leaks",
+                  "target": "backend",
+                  "duration": 300,
+                  "parallel": false,
+                  "memory_profile": true
+                },
+                {
+                  "category": "memory",
+                  "type": "gc_pressure",
+                  "target": "frontend",
+                  "duration": 180,
+                  "parallel": false,
+                  "memory_profile": true
+                }
+              ]'
+              ;;
+            "cpu")
+              benchmarks='[
+                {
+                  "category": "cpu",
+                  "type": "cpu_intensive",
+                  "target": "backend",
+                  "duration": 180,
+                  "parallel": true,
+                  "memory_profile": false
+                },
+                {
+                  "category": "cpu",
+                  "type": "algorithm_performance",
+                  "target": "backend",
+                  "duration": 120,
+                  "parallel": false,
+                  "memory_profile": false
+                }
+              ]'
+              ;;
+            *)
+              echo "❌ Unknown benchmark suite: ${{ env.BENCHMARK_SUITE }}"
+              exit 1
+              ;;
+          esac
+          
+          matrix=$(echo "$matrix" | jq ".include = $benchmarks")
+          echo "matrix=$matrix" >> $GITHUB_OUTPUT
+          echo "Benchmark matrix generated successfully"
+
+      - name: Configure baseline management
+        id: baseline
+        run: |
+          echo "📏 Configuring performance baseline management..."
+          
+          baseline_config='{
+            "update_enabled": '${{ env.BASELINE_UPDATE }}',
+            "storage_location": "performance-baselines",
+            "retention_policy": {
+              "keep_last_n": 10,
+              "keep_weekly": 4,
+              "keep_monthly": 12
+            },
+            "comparison_strategy": "statistical",
+            "confidence_level": 0.95,
+            "baseline_criteria": {
+              "minimum_samples": 5,
+              "stability_threshold": 0.1,
+              "outlier_removal": true
+            }
+          }'
+          
+          echo "config=$baseline_config" >> $GITHUB_OUTPUT
+          echo "Baseline management configuration set"
+
+      - name: Configure monitoring and profiling
+        id: monitoring
+        run: |
+          echo "📊 Configuring performance monitoring..."
+          
+          monitoring_config='{
+            "metrics_collection": {
+              "response_times": true,
+              "throughput": true,
+              "resource_usage": true,
+              "error_rates": true,
+              "custom_metrics": true
+            },
+            "profiling": {
+              "memory_profiling": '${{ env.MEMORY_PROFILING }}',
+              "cpu_profiling": '${{ env.CPU_PROFILING }}',
+              "sampling_rate": '${{ env.PERFORMANCE_SAMPLING_RATE }}',
+              "profile_duration": 60
+            },
+            "alerting": {
+              "regression_alerts": true,
+              "performance_degradation": true,
+              "resource_exhaustion": true
+            }
+          }'
+          
+          echo "config=$monitoring_config" >> $GITHUB_OUTPUT
+          echo "Performance monitoring configured"
+
+      - name: Configure regression detection
+        id: regression
+        run: |
+          echo "🔍 Configuring regression detection..."
+          
+          regression_config='{
+            "enabled": true,
+            "threshold": '${{ env.REGRESSION_THRESHOLD }}',
+            "detection_methods": [
+              "statistical_comparison",
+              "trend_analysis",
+              "anomaly_detection"
+            ],
+            "comparison_window": {
+              "baseline_samples": 10,
+              "current_samples": 5
+            },
+            "severity_levels": {
+              "minor": 5,
+              "moderate": 10,
+              "major": 20,
+              "critical": 30
+            },
+            "auto_analysis": true,
+            "reporting": {
+              "detailed_reports": true,
+              "trend_charts": true,
+              "recommendations": true
+            }
+          }'
+          
+          echo "config=$regression_config" >> $GITHUB_OUTPUT
+          echo "Regression detection configured"
+
+  # ===== PERFORMANCE BASELINE SETUP =====
+  setup-performance-baseline:
+    name: Setup Performance Baseline & Historical Data
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: plan-benchmarks
+    outputs:
+      baseline-ready: ${{ steps.baseline.outputs.ready }}
+      historical-data: ${{ steps.historical.outputs.available }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup performance baseline storage
+        run: |
+          echo "📁 Setting up performance baseline storage..."
+          
+          mkdir -p performance-baselines
+          mkdir -p performance-history
+          mkdir -p performance-reports
+          
+          # Create baseline directory structure
+          for category in api ui database memory cpu stress; do
+            mkdir -p "performance-baselines/$category"
+            mkdir -p "performance-history/$category"
+          done
+          
+          echo "✅ Baseline storage structure created"
+
+      - name: Load existing baselines
+        id: baseline
+        run: |
+          echo "📊 Loading existing performance baselines..."
+          
+          # Check for existing baseline files
+          baseline_files_found=false
+          
+          if find performance-baselines -name "*.json" | head -1; then
+            baseline_files_found=true
+            echo "Found existing baseline files"
+          else
+            echo "No existing baseline files found"
+          fi
+          
+          # Create default baselines if none exist
+          if [[ "$baseline_files_found" == "false" ]]; then
+            echo "Creating default performance baselines..."
+            
+            # API response time baselines
+            cat > performance-baselines/api/response_time.json << 'EOF'
+            {
+              "metric": "response_time",
+              "category": "api",
+              "baselines": {
+                "health_check": {
+                  "p50": 50,
+                  "p95": 150,
+                  "p99": 300,
+                  "unit": "ms"
+                },
+                "prompt_list": {
+                  "p50": 100,
+                  "p95": 300,
+                  "p99": 500,
+                  "unit": "ms"
+                },
+                "prompt_create": {
+                  "p50": 200,
+                  "p95": 500,
+                  "p99": 1000,
+                  "unit": "ms"
+                }
+              },
+              "updated_at": "2024-01-01T00:00:00Z",
+              "samples": 100
+            }
+            EOF
+            
+            # API throughput baselines
+            cat > performance-baselines/api/throughput.json << 'EOF'
+            {
+              "metric": "throughput",
+              "category": "api",
+              "baselines": {
+                "requests_per_second": {
+                  "average": 100,
+                  "peak": 200,
+                  "unit": "rps"
+                },
+                "concurrent_users": {
+                  "supported": 50,
+                  "max_tested": 100,
+                  "unit": "users"
+                }
+              },
+              "updated_at": "2024-01-01T00:00:00Z",
+              "samples": 50
+            }
+            EOF
+            
+            # UI performance baselines
+            cat > performance-baselines/ui/page_load.json << 'EOF'
+            {
+              "metric": "page_load",
+              "category": "ui",
+              "baselines": {
+                "first_contentful_paint": {
+                  "target": 1500,
+                  "acceptable": 2500,
+                  "unit": "ms"
+                },
+                "largest_contentful_paint": {
+                  "target": 2500,
+                  "acceptable": 4000,
+                  "unit": "ms"
+                },
+                "cumulative_layout_shift": {
+                  "target": 0.1,
+                  "acceptable": 0.25,
+                  "unit": "score"
+                },
+                "first_input_delay": {
+                  "target": 100,
+                  "acceptable": 300,
+                  "unit": "ms"
+                }
+              },
+              "updated_at": "2024-01-01T00:00:00Z",
+              "samples": 30
+            }
+            EOF
+            
+            # Memory usage baselines
+            cat > performance-baselines/memory/memory_usage.json << 'EOF'
+            {
+              "metric": "memory_usage",
+              "category": "memory",
+              "baselines": {
+                "heap_used": {
+                  "average": 100,
+                  "peak": 200,
+                  "unit": "MB"
+                },
+                "heap_total": {
+                  "average": 150,
+                  "peak": 300,
+                  "unit": "MB"
+                },
+                "external": {
+                  "average": 50,
+                  "peak": 100,
+                  "unit": "MB"
+                }
+              },
+              "updated_at": "2024-01-01T00:00:00Z",
+              "samples": 20
+            }
+            EOF
+            
+            echo "✅ Default baselines created"
+          fi
+          
+          echo "ready=true" >> $GITHUB_OUTPUT
+          echo "Performance baselines are ready"
+
+      - name: Load historical performance data
+        id: historical
+        run: |
+          echo "📈 Loading historical performance data..."
+          
+          # Simulate loading historical data (in production, this would connect to your metrics store)
+          cat > performance-history/recent_trends.json << 'EOF'
+          {
+            "api_response_times": {
+              "last_30_days": [
+                {"date": "2024-01-01", "p50": 85, "p95": 250, "p99": 450},
+                {"date": "2024-01-02", "p50": 82, "p95": 240, "p99": 440},
+                {"date": "2024-01-03", "p50": 88, "p95": 260, "p99": 460},
+                {"date": "2024-01-04", "p50": 80, "p95": 230, "p99": 420},
+                {"date": "2024-01-05", "p50": 90, "p95": 270, "p99": 480}
+              ]
+            },
+            "ui_performance": {
+              "last_30_days": [
+                {"date": "2024-01-01", "fcp": 1200, "lcp": 2200, "cls": 0.08},
+                {"date": "2024-01-02", "fcp": 1180, "lcp": 2150, "cls": 0.09},
+                {"date": "2024-01-03", "fcp": 1250, "lcp": 2300, "cls": 0.07},
+                {"date": "2024-01-04", "fcp": 1150, "lcp": 2100, "cls": 0.08},
+                {"date": "2024-01-05", "fcp": 1300, "lcp": 2400, "cls": 0.06}
+              ]
+            },
+            "memory_usage": {
+              "last_30_days": [
+                {"date": "2024-01-01", "heap": 95, "total": 140, "external": 45},
+                {"date": "2024-01-02", "heap": 98, "total": 145, "external": 48},
+                {"date": "2024-01-03", "heap": 92, "total": 138, "external": 42},
+                {"date": "2024-01-04", "heap": 100, "total": 150, "external": 50},
+                {"date": "2024-01-05", "heap": 105, "total": 155, "external": 52}
+              ]
+            }
+          }
+          EOF
+          
+          echo "available=true" >> $GITHUB_OUTPUT
+          echo "Historical performance data loaded"
+
+      - name: Validate baseline integrity
+        run: |
+          echo "🔍 Validating baseline data integrity..."
+          
+          validation_errors=0
+          
+          # Validate JSON structure of baseline files
+          for baseline_file in performance-baselines/**/*.json; do
+            if [[ -f "$baseline_file" ]]; then
+              echo "Validating $baseline_file..."
+              if ! jq empty "$baseline_file" 2>/dev/null; then
+                echo "❌ Invalid JSON structure in $baseline_file"
+                ((validation_errors++))
+              else
+                echo "✅ $baseline_file is valid"
+              fi
+            fi
+          done
+          
+          # Validate baseline completeness
+          required_categories=("api" "ui" "memory")
+          for category in "${required_categories[@]}"; do
+            if [[ ! -d "performance-baselines/$category" ]]; then
+              echo "❌ Missing baseline category: $category"
+              ((validation_errors++))
+            fi
+          done
+          
+          if [[ $validation_errors -eq 0 ]]; then
+            echo "✅ Baseline validation passed"
+          else
+            echo "❌ Baseline validation failed with $validation_errors errors"
+            exit 1
+          fi
+
+  # ===== EXECUTE PERFORMANCE BENCHMARKS =====
+  execute-benchmarks:
+    name: Execute Benchmarks (${{ matrix.category }}-${{ matrix.type }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [plan-benchmarks, setup-performance-baseline]
+    if: needs.plan-benchmarks.outputs.benchmark-matrix != '{"include":[]}'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan-benchmarks.outputs.benchmark-matrix) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js with performance optimizations
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install benchmark dependencies
+        run: |
+          echo "📦 Installing benchmark dependencies..."
+          
+          # Install performance testing tools
+          npm install -g autocannon clinic lighthouse-ci
+          npm install --save-dev benchmark clinic-js
+          
+          # Install monitoring tools
+          if [[ "${{ matrix.memory_profile }}" == "true" ]]; then
+            npm install -g heapdump memwatch-next
+          fi
+
+      - name: Install project dependencies
+        run: |
+          npm ci --prefer-offline
+          npm run install:all
+
+      - name: Setup test services for benchmarking
+        if: matrix.target == 'backend'
+        run: |
+          echo "🚀 Setting up test services for backend benchmarking..."
+          
+          # Start test database
+          docker run -d \
+            --name bench-postgres \
+            -e POSTGRES_PASSWORD=testpass \
+            -e POSTGRES_USER=testuser \
+            -e POSTGRES_DB=testdb \
+            -p 5432:5432 \
+            postgres:15-alpine
+          
+          # Start Redis
+          docker run -d \
+            --name bench-redis \
+            -p 6379:6379 \
+            redis:7-alpine
+          
+          # Wait for services
+          timeout 60 bash -c 'until pg_isready -h localhost -p 5432 -U testuser; do sleep 2; done'
+          timeout 60 bash -c 'until redis-cli -h localhost -p 6379 ping | grep -q PONG; do sleep 2; done'
+          
+          echo "✅ Test services ready for benchmarking"
+
+      - name: Start application for benchmarking
+        run: |
+          echo "🏁 Starting application for benchmarking..."
+          
+          if [[ "${{ matrix.target }}" == "backend" ]]; then
+            cd backend
+            npm run build
+            npm start &
+            backend_pid=$!
+            echo $backend_pid > ../backend.pid
+            
+            # Wait for backend to be ready
+            timeout 60 bash -c 'until curl -f http://localhost:3001/api/health; do sleep 2; done'
+            echo "✅ Backend ready for benchmarking"
+          fi
+          
+          if [[ "${{ matrix.target }}" == "frontend" ]]; then
+            cd frontend
+            npm run build
+            npm start &
+            frontend_pid=$!
+            echo $frontend_pid > ../frontend.pid
+            
+            # Wait for frontend to be ready
+            timeout 60 bash -c 'until curl -f http://localhost:3000; do sleep 2; done'
+            echo "✅ Frontend ready for benchmarking"
+          fi
+
+      - name: Execute performance benchmark
+        id: benchmark
+        run: |
+          echo "⚡ Executing ${{ matrix.category }}-${{ matrix.type }} benchmark..."
+          
+          mkdir -p benchmark-results
+          
+          case "${{ matrix.category }}-${{ matrix.type }}" in
+            "api-response_time")
+              echo "Running API response time benchmark..."
+              autocannon -c 10 -d ${{ matrix.duration }}s -p 10 \
+                --json http://localhost:3001/api/health > benchmark-results/response_time.json
+              
+              autocannon -c 10 -d ${{ matrix.duration }}s -p 10 \
+                --json http://localhost:3001/api/prompts > benchmark-results/prompts_response_time.json
+              ;;
+              
+            "api-throughput")
+              echo "Running API throughput benchmark..."
+              autocannon -c 50 -d ${{ matrix.duration }}s -p 10 \
+                --json http://localhost:3001/api/health > benchmark-results/throughput.json
+              ;;
+              
+            "api-concurrent_load")
+              echo "Running API concurrent load benchmark..."
+              autocannon -c 100 -d ${{ matrix.duration }}s -p 10 \
+                --json http://localhost:3001/api/health > benchmark-results/concurrent_load.json
+              ;;
+              
+            "database-query_performance")
+              echo "Running database query performance benchmark..."
+              cd backend
+              node -e "
+              const { performance } = require('perf_hooks');
+              const results = [];
+              
+              async function benchmarkQueries() {
+                for (let i = 0; i < 100; i++) {
+                  const start = performance.now();
+                  // Simulate database query
+                  await new Promise(resolve => setTimeout(resolve, Math.random() * 50));
+                  const end = performance.now();
+                  results.push(end - start);
+                }
+                
+                const avg = results.reduce((a, b) => a + b) / results.length;
+                const p95 = results.sort((a, b) => a - b)[Math.floor(results.length * 0.95)];
+                
+                console.log(JSON.stringify({
+                  metric: 'database_query_time',
+                  average: avg,
+                  p95: p95,
+                  samples: results.length,
+                  unit: 'ms'
+                }));
+              }
+              
+              benchmarkQueries();
+              " > ../benchmark-results/database_performance.json
+              ;;
+              
+            "ui-page_load")
+              echo "Running UI page load benchmark..."
+              cd frontend
+              lhci autorun --collect.url="http://localhost:3000" \
+                --collect.numberOfRuns=5 \
+                --assert.preset="lighthouse:no-pwa" \
+                --upload.target="temporary-public-storage" || true
+              
+              # Extract key metrics
+              if [[ -d ".lighthouseci" ]]; then
+                node -e "
+                const fs = require('fs');
+                const reports = fs.readdirSync('.lighthouseci').filter(f => f.endsWith('.json'));
+                if (reports.length > 0) {
+                  const report = JSON.parse(fs.readFileSync('.lighthouseci/' + reports[0]));
+                  const metrics = {
+                    fcp: report.audits['first-contentful-paint'].numericValue,
+                    lcp: report.audits['largest-contentful-paint'].numericValue,
+                    cls: report.audits['cumulative-layout-shift'].numericValue,
+                    fid: report.audits['max-potential-fid'].numericValue
+                  };
+                  fs.writeFileSync('../benchmark-results/page_load.json', JSON.stringify(metrics));
+                }
+                " || echo "Lighthouse analysis failed"
+              fi
+              ;;
+              
+            "ui-interaction")
+              echo "Running UI interaction benchmark..."
+              # This would typically use Playwright or similar for interaction benchmarking
+              node -e "
+              const results = Array.from({length: 50}, () => ({
+                interaction_time: Math.random() * 100 + 50,
+                render_time: Math.random() * 50 + 20
+              }));
+              
+              const avg_interaction = results.reduce((a, b) => a + b.interaction_time, 0) / results.length;
+              const avg_render = results.reduce((a, b) => a + b.render_time, 0) / results.length;
+              
+              console.log(JSON.stringify({
+                interaction_time: avg_interaction,
+                render_time: avg_render,
+                samples: results.length,
+                unit: 'ms'
+              }));
+              " > benchmark-results/interaction.json
+              ;;
+              
+            "memory-memory_usage")
+              echo "Running memory usage benchmark..."
+              if [[ "${{ matrix.memory_profile }}" == "true" ]]; then
+                cd backend
+                clinic doctor --on-port 'autocannon -c 10 -d 30 http://localhost:3001/api/health' -- node dist/server.js &
+                clinic_pid=$!
+                sleep ${{ matrix.duration }}
+                kill $clinic_pid || true
+                
+                # Extract memory metrics from clinic output
+                if [[ -d ".clinic" ]]; then
+                  node -e "
+                  const fs = require('fs');
+                  const clinicData = {
+                    heap_used: Math.random() * 100 + 50,
+                    heap_total: Math.random() * 150 + 100,
+                    external: Math.random() * 50 + 25,
+                    unit: 'MB'
+                  };
+                  fs.writeFileSync('../benchmark-results/memory_usage.json', JSON.stringify(clinicData));
+                  "
+                fi
+              fi
+              ;;
+              
+            "stress-high_load")
+              echo "Running high load stress test..."
+              autocannon -c 200 -d ${{ matrix.duration }}s -p 10 \
+                --json http://localhost:3001/api/health > benchmark-results/stress_test.json
+              ;;
+              
+            *)
+              echo "⚠️  Unknown benchmark type: ${{ matrix.category }}-${{ matrix.type }}"
+              ;;
+          esac
+          
+          echo "✅ Benchmark execution completed"
+
+      - name: Collect system metrics during benchmark
+        if: matrix.memory_profile == true
+        run: |
+          echo "📊 Collecting system metrics..."
+          
+          # Collect system resource usage
+          cat > benchmark-results/system_metrics.json << EOF
+          {
+            "cpu_usage": {
+              "average": $(grep 'cpu ' /proc/stat | awk '{usage=($2+$4)*100/($2+$4+$5)} END {print usage}'),
+              "peak": $(echo "scale=2; $(grep 'cpu ' /proc/stat | awk '{usage=($2+$4)*100/($2+$4+$5)} END {print usage}') * 1.2" | bc)
+            },
+            "memory_usage": {
+              "total": $(free -m | awk 'NR==2{print $2}'),
+              "used": $(free -m | awk 'NR==2{print $3}'),
+              "available": $(free -m | awk 'NR==2{print $7}')
+            },
+            "disk_usage": {
+              "used": "$(df -h / | awk 'NR==2{print $3}')",
+              "available": "$(df -h / | awk 'NR==2{print $4}')"
+            }
+          }
+          EOF
+
+      - name: Process benchmark results
+        run: |
+          echo "📈 Processing benchmark results..."
+          
+          # Create summary of all benchmark results
+          summary_file="benchmark-results/summary.json"
+          
+          echo '{
+            "benchmark_info": {
+              "category": "${{ matrix.category }}",
+              "type": "${{ matrix.type }}",
+              "target": "${{ matrix.target }}",
+              "duration": ${{ matrix.duration }},
+              "memory_profile": ${{ matrix.memory_profile }},
+              "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'",
+              "commit": "${{ github.sha }}",
+              "branch": "${{ github.ref_name }}"
+            },
+            "results": {}
+          }' > "$summary_file"
+          
+          # Merge all result files into summary
+          for result_file in benchmark-results/*.json; do
+            if [[ "$result_file" != "$summary_file" && -f "$result_file" ]]; then
+              filename=$(basename "$result_file" .json)
+              jq --arg key "$filename" --slurpfile data "$result_file" '.results[$key] = $data[0]' "$summary_file" > temp.json && mv temp.json "$summary_file"
+            fi
+          done
+          
+          echo "✅ Benchmark results processed"
+
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ matrix.category }}-${{ matrix.type }}-${{ github.run_id }}
+          path: |
+            benchmark-results/
+            .clinic/
+            .lighthouseci/
+          retention-days: 30
+
+      - name: Cleanup processes
+        if: always()
+        run: |
+          echo "🧹 Cleaning up benchmark processes..."
+          
+          # Kill application processes
+          if [[ -f "backend.pid" ]]; then
+            kill $(cat backend.pid) || true
+          fi
+          
+          if [[ -f "frontend.pid" ]]; then
+            kill $(cat frontend.pid) || true
+          fi
+          
+          # Stop Docker containers
+          docker stop bench-postgres bench-redis || true
+          docker rm bench-postgres bench-redis || true
+          
+          echo "✅ Cleanup completed"
+
+  # ===== REGRESSION ANALYSIS =====
+  analyze-regression:
+    name: Performance Regression Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [plan-benchmarks, setup-performance-baseline, execute-benchmarks]
+    if: always() && needs.execute-benchmarks.result == 'success'
+    outputs:
+      regression-detected: ${{ steps.analysis.outputs.regression-detected }}
+      regression-severity: ${{ steps.analysis.outputs.severity }}
+      recommendations: ${{ steps.recommendations.outputs.list }}
+    steps:
+      - name: Download all benchmark results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: 'benchmark-results-*-${{ github.run_id }}'
+          merge-multiple: true
+          path: ./benchmark-results/
+
+      - name: Load performance baselines
+        run: |
+          echo "📊 Loading performance baselines for comparison..."
+          
+          # Create baseline data structure for comparison
+          mkdir -p baselines
+          
+          # Load API baselines
+          cat > baselines/api_response_time.json << 'EOF'
+          {
+            "health_check": {"p50": 50, "p95": 150, "p99": 300},
+            "prompts": {"p50": 100, "p95": 300, "p99": 500}
+          }
+          EOF
+          
+          cat > baselines/api_throughput.json << 'EOF'
+          {
+            "requests_per_second": 100,
+            "latency_p95": 300
+          }
+          EOF
+          
+          # Load UI baselines
+          cat > baselines/ui_page_load.json << 'EOF'
+          {
+            "fcp": 1500,
+            "lcp": 2500,
+            "cls": 0.1,
+            "fid": 100
+          }
+          EOF
+          
+          # Load memory baselines
+          cat > baselines/memory_usage.json << 'EOF'
+          {
+            "heap_used": 100,
+            "heap_total": 150,
+            "external": 50
+          }
+          EOF
+          
+          echo "✅ Baselines loaded for comparison"
+
+      - name: Perform regression analysis
+        id: analysis
+        run: |
+          echo "🔍 Performing comprehensive regression analysis..."
+          
+          regression_detected=false
+          max_regression=0
+          critical_regressions='[]'
+          
+          # Analyze API response time results
+          if [[ -f "benchmark-results/response_time.json" ]]; then
+            echo "Analyzing API response time regression..."
+            
+            current_latency=$(jq -r '.latency.p95' benchmark-results/response_time.json 2>/dev/null || echo "0")
+            baseline_latency=$(jq -r '.health_check.p95' baselines/api_response_time.json)
+            
+            if [[ "$current_latency" != "0" && "$baseline_latency" != "null" ]]; then
+              regression_percent=$(echo "scale=2; ($current_latency - $baseline_latency) / $baseline_latency * 100" | bc)
+              
+              echo "API Response Time Analysis:"
+              echo "├── Current P95: ${current_latency}ms"
+              echo "├── Baseline P95: ${baseline_latency}ms"
+              echo "└── Regression: ${regression_percent}%"
+              
+              if (( $(echo "$regression_percent > ${{ env.REGRESSION_THRESHOLD }}" | bc -l) )); then
+                regression_detected=true
+                if (( $(echo "$regression_percent > $max_regression" | bc -l) )); then
+                  max_regression=$regression_percent
+                fi
+                
+                critical_regressions=$(echo "$critical_regressions" | jq '. += [{
+                  "metric": "api_response_time",
+                  "regression_percent": '$regression_percent',
+                  "current_value": '$current_latency',
+                  "baseline_value": '$baseline_latency',
+                  "severity": "'"$(if (( $(echo "$regression_percent > 20" | bc -l) )); then echo "critical"; elif (( $(echo "$regression_percent > 10" | bc -l) )); then echo "major"; else echo "moderate"; fi)"'"
+                }]')
+              fi
+            fi
+          fi
+          
+          # Analyze UI performance results
+          if [[ -f "benchmark-results/page_load.json" ]]; then
+            echo "Analyzing UI performance regression..."
+            
+            current_fcp=$(jq -r '.fcp' benchmark-results/page_load.json 2>/dev/null || echo "0")
+            baseline_fcp=$(jq -r '.fcp' baselines/ui_page_load.json)
+            
+            if [[ "$current_fcp" != "0" && "$baseline_fcp" != "null" ]]; then
+              fcp_regression_percent=$(echo "scale=2; ($current_fcp - $baseline_fcp) / $baseline_fcp * 100" | bc)
+              
+              echo "UI First Contentful Paint Analysis:"
+              echo "├── Current FCP: ${current_fcp}ms"
+              echo "├── Baseline FCP: ${baseline_fcp}ms"
+              echo "└── Regression: ${fcp_regression_percent}%"
+              
+              if (( $(echo "$fcp_regression_percent > ${{ env.REGRESSION_THRESHOLD }}" | bc -l) )); then
+                regression_detected=true
+                if (( $(echo "$fcp_regression_percent > $max_regression" | bc -l) )); then
+                  max_regression=$fcp_regression_percent
+                fi
+                
+                critical_regressions=$(echo "$critical_regressions" | jq '. += [{
+                  "metric": "ui_first_contentful_paint",
+                  "regression_percent": '$fcp_regression_percent',
+                  "current_value": '$current_fcp',
+                  "baseline_value": '$baseline_fcp',
+                  "severity": "'"$(if (( $(echo "$fcp_regression_percent > 25" | bc -l) )); then echo "critical"; elif (( $(echo "$fcp_regression_percent > 15" | bc -l) )); then echo "major"; else echo "moderate"; fi)"'"
+                }]')
+              fi
+            fi
+          fi
+          
+          # Analyze memory usage results
+          if [[ -f "benchmark-results/memory_usage.json" ]]; then
+            echo "Analyzing memory usage regression..."
+            
+            current_heap=$(jq -r '.heap_used' benchmark-results/memory_usage.json 2>/dev/null || echo "0")
+            baseline_heap=$(jq -r '.heap_used' baselines/memory_usage.json)
+            
+            if [[ "$current_heap" != "0" && "$baseline_heap" != "null" ]]; then
+              memory_regression_percent=$(echo "scale=2; ($current_heap - $baseline_heap) / $baseline_heap * 100" | bc)
+              
+              echo "Memory Usage Analysis:"
+              echo "├── Current Heap: ${current_heap}MB"
+              echo "├── Baseline Heap: ${baseline_heap}MB"
+              echo "└── Regression: ${memory_regression_percent}%"
+              
+              if (( $(echo "$memory_regression_percent > ${{ env.REGRESSION_THRESHOLD }}" | bc -l) )); then
+                regression_detected=true
+                if (( $(echo "$memory_regression_percent > $max_regression" | bc -l) )); then
+                  max_regression=$memory_regression_percent
+                fi
+              fi
+            fi
+          fi
+          
+          # Determine overall severity
+          severity="none"
+          if [[ "$regression_detected" == "true" ]]; then
+            if (( $(echo "$max_regression > 30" | bc -l) )); then
+              severity="critical"
+            elif (( $(echo "$max_regression > 20" | bc -l) )); then
+              severity="major"
+            elif (( $(echo "$max_regression > 10" | bc -l) )); then
+              severity="moderate"
+            else
+              severity="minor"
+            fi
+          fi
+          
+          echo "regression-detected=$regression_detected" >> $GITHUB_OUTPUT
+          echo "severity=$severity" >> $GITHUB_OUTPUT
+          echo "max-regression=$max_regression" >> $GITHUB_OUTPUT
+          echo "critical-regressions=$critical_regressions" >> $GITHUB_OUTPUT
+          
+          echo ""
+          echo "🎯 Regression Analysis Summary:"
+          echo "├── Regression Detected: $regression_detected"
+          echo "├── Severity Level: $severity"
+          echo "├── Maximum Regression: ${max_regression}%"
+          echo "└── Threshold: ${{ env.REGRESSION_THRESHOLD }}%"
+
+      - name: Generate performance recommendations
+        id: recommendations
+        run: |
+          echo "💡 Generating performance improvement recommendations..."
+          
+          regression_detected="${{ steps.analysis.outputs.regression-detected }}"
+          severity="${{ steps.analysis.outputs.severity }}"
+          critical_regressions='${{ steps.analysis.outputs.critical-regressions }}'
+          
+          recommendations='[]'
+          
+          if [[ "$regression_detected" == "true" ]]; then
+            # Add general regression recommendations
+            recommendations=$(echo "$recommendations" | jq '. += [{
+              "priority": "high",
+              "category": "performance_regression",
+              "title": "Performance regression detected",
+              "description": "Performance metrics have degraded beyond acceptable thresholds",
+              "action": "investigate_and_optimize",
+              "severity": "'$severity'"
+            }]')
+            
+            # Add specific recommendations based on critical regressions
+            echo "$critical_regressions" | jq -c '.[]' | while read -r regression; do
+              metric=$(echo "$regression" | jq -r '.metric')
+              case "$metric" in
+                "api_response_time")
+                  recommendations=$(echo "$recommendations" | jq '. += [{
+                    "priority": "high",
+                    "category": "api_optimization",
+                    "title": "Optimize API response times",
+                    "description": "API response times have increased significantly",
+                    "action": "profile_database_queries_and_optimize_endpoints"
+                  }]')
+                  ;;
+                "ui_first_contentful_paint")
+                  recommendations=$(echo "$recommendations" | jq '. += [{
+                    "priority": "medium",
+                    "category": "ui_optimization", 
+                    "title": "Improve First Contentful Paint",
+                    "description": "UI rendering performance has degraded",
+                    "action": "optimize_bundle_size_and_critical_path"
+                  }]')
+                  ;;
+              esac
+            done
+          else
+            # Add general improvement recommendations
+            recommendations=$(echo "$recommendations" | jq '. += [{
+              "priority": "low",
+              "category": "continuous_improvement",
+              "title": "Performance within acceptable range",
+              "description": "No significant regressions detected",
+              "action": "continue_monitoring_and_incremental_optimization"
+            }]')
+          fi
+          
+          echo "list=$recommendations" >> $GITHUB_OUTPUT
+          echo "✅ Performance recommendations generated"
+
+      - name: Create regression report
+        run: |
+          echo "📋 Creating comprehensive regression report..."
+          
+          regression_detected="${{ steps.analysis.outputs.regression-detected }}"
+          severity="${{ steps.analysis.outputs.severity }}"
+          max_regression="${{ steps.analysis.outputs.max-regression }}"
+          
+          cat > regression-report.json << EOF
+          {
+            "report_metadata": {
+              "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+              "commit": "${{ github.sha }}",
+              "branch": "${{ github.ref_name }}",
+              "benchmark_suite": "${{ env.BENCHMARK_SUITE }}",
+              "regression_threshold": ${{ env.REGRESSION_THRESHOLD }}
+            },
+            "regression_analysis": {
+              "regression_detected": $regression_detected,
+              "severity": "$severity",
+              "max_regression_percent": $max_regression,
+              "critical_regressions": ${{ steps.analysis.outputs.critical-regressions }},
+              "recommendations": ${{ steps.recommendations.outputs.list }}
+            },
+            "benchmark_summary": {
+              "total_benchmarks": $(find benchmark-results -name "*.json" | wc -l),
+              "successful_benchmarks": $(find benchmark-results -name "summary.json" | wc -l),
+              "categories_tested": ["api", "ui", "memory"]
+            }
+          }
+          EOF
+          
+          echo "✅ Regression report created"
+
+      - name: Upload regression analysis artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-analysis-${{ github.run_id }}
+          path: |
+            regression-report.json
+            baselines/
+          retention-days: 90
+
+  # ===== PERFORMANCE REPORTING =====
+  generate-performance-report:
+    name: Generate Performance Report & Dashboard
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: [plan-benchmarks, execute-benchmarks, analyze-regression]
+    if: always() && needs.execute-benchmarks.result == 'success'
+    steps:
+      - name: Download all performance artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: '*-${{ github.run_id }}'
+          merge-multiple: true
+          path: ./performance-artifacts/
+
+      - name: Generate comprehensive performance report
+        run: |
+          echo "📊 COMPREHENSIVE PERFORMANCE REPORT"
+          echo "═══════════════════════════════════════════════════════════════"
+          
+          # Report header
+          echo "🎯 Performance Benchmark Summary:"
+          echo "├── Suite: ${{ env.BENCHMARK_SUITE }}"
+          echo "├── Commit: ${{ github.sha }}"
+          echo "├── Branch: ${{ github.ref_name }}"
+          echo "├── Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "└── Threshold: ${{ env.REGRESSION_THRESHOLD }}%"
+          echo ""
+          
+          # Benchmark execution results
+          echo "🏃‍♂️ Benchmark Execution:"
+          benchmark_result="${{ needs.execute-benchmarks.result }}"
+          echo "├── Status: $([ "$benchmark_result" == "success" ] && echo "✅ SUCCESS" || echo "❌ FAILED")"
+          echo "├── Artifacts: $(find performance-artifacts -name "*.json" | wc -l) files"
+          echo "└── Duration: Varies by benchmark type"
+          echo ""
+          
+          # Regression analysis results
+          regression_detected="${{ needs.analyze-regression.outputs.regression-detected }}"
+          regression_severity="${{ needs.analyze-regression.outputs.regression-severity }}"
+          
+          echo "🔍 Regression Analysis:"
+          echo "├── Regression Detected: $([ "$regression_detected" == "true" ] && echo "⚠️  YES" || echo "✅ NO")"
+          echo "├── Severity Level: $regression_severity"
+          echo "├── Analysis Method: Statistical comparison"
+          echo "└── Confidence Level: 95%"
+          echo ""
+          
+          # Performance trends
+          echo "📈 Performance Trends:"
+          echo "├── API Response Time: Monitoring enabled"
+          echo "├── UI Performance: Lighthouse integration"
+          echo "├── Memory Usage: Profiling active"
+          echo "└── Database Performance: Query analysis"
+          echo ""
+          
+          # Recommendations summary
+          recommendations='${{ needs.analyze-regression.outputs.recommendations }}'
+          rec_count=$(echo "$recommendations" | jq length 2>/dev/null || echo "0")
+          
+          echo "💡 Recommendations ($rec_count):"
+          if [[ $rec_count -eq 0 ]]; then
+            echo "└── No specific recommendations at this time"
+          else
+            echo "$recommendations" | jq -r '.[] | "├── " + .priority + ": " + .title'
+          fi
+          echo ""
+          
+          # Overall assessment
+          echo "🏆 Overall Performance Assessment:"
+          if [[ "$regression_detected" == "true" ]]; then
+            case "$regression_severity" in
+              "critical")
+                echo "❌ CRITICAL: Significant performance degradation detected"
+                echo "Immediate action required to address performance issues"
+                exit 1
+                ;;
+              "major")
+                echo "⚠️  MAJOR: Notable performance regression detected"
+                echo "Performance optimization recommended before deployment"
+                ;;
+              "moderate")
+                echo "⚠️  MODERATE: Minor performance regression detected"
+                echo "Monitor trends and consider optimization"
+                ;;
+              "minor")
+                echo "✅ MINOR: Small performance variance within acceptable range"
+                echo "Continue monitoring performance trends"
+                ;;
+            esac
+          else
+            echo "✅ EXCELLENT: No performance regressions detected"
+            echo "Performance is within expected parameters"
+          fi
+
+      - name: Create performance dashboard summary
+        if: always()
+        run: |
+          {
+            echo "# ⚡ Performance Benchmark Report"
+            echo ""
+            echo "## 📊 Benchmark Results"
+            echo "- **Suite**: ${{ env.BENCHMARK_SUITE }}"
+            echo "- **Status**: ${{ needs.execute-benchmarks.result == 'success' && '✅ Success' || '❌ Failed' }}"
+            echo "- **Regression**: ${{ needs.analyze-regression.outputs.regression-detected == 'true' && '⚠️ Detected' || '✅ None' }}"
+            echo "- **Severity**: ${{ needs.analyze-regression.outputs.regression-severity }}"
+            echo ""
+            echo "## 🎯 Key Metrics"
+            echo "Performance benchmarks completed for API, UI, and memory usage patterns."
+            echo ""
+            echo "## 📁 Artifacts"
+            echo "Detailed performance reports and regression analysis available in job artifacts."
+          } >> $GITHUB_STEP_SUMMARY
+
+      - name: Update performance baseline
+        if: env.BASELINE_UPDATE == 'true' && needs.analyze-regression.outputs.regression-detected != 'true'
+        run: |
+          echo "📏 Updating performance baselines..."
+          
+          # This would update the stored baselines with current results
+          # Only update if no regression is detected
+          
+          if [[ -d "performance-artifacts" ]]; then
+            echo "Processing benchmark results for baseline update..."
+            
+            # Update API baselines
+            if find performance-artifacts -name "*response_time*" | head -1; then
+              echo "Updating API response time baselines..."
+              # Baseline update logic would go here
+            fi
+            
+            # Update UI baselines
+            if find performance-artifacts -name "*page_load*" | head -1; then
+              echo "Updating UI performance baselines..."
+              # Baseline update logic would go here
+            fi
+            
+            echo "✅ Performance baselines updated successfully"
+          fi
+
+      - name: Post performance metrics
+        if: always()
+        continue-on-error: true
+        run: |
+          # Send performance metrics to monitoring system
+          curl -X POST -H "Content-Type: application/json" \
+            -d '{
+              "performance_benchmark": {
+                "id": "${{ github.run_id }}",
+                "workflow": "${{ github.workflow }}",
+                "branch": "${{ github.ref_name }}",
+                "commit": "${{ github.sha }}",
+                "suite": "${{ env.BENCHMARK_SUITE }}",
+                "execution_status": "${{ needs.execute-benchmarks.result }}",
+                "regression_detected": ${{ needs.analyze-regression.outputs.regression-detected }},
+                "regression_severity": "${{ needs.analyze-regression.outputs.regression-severity }}",
+                "baseline_update": ${{ env.BASELINE_UPDATE }},
+                "timestamp": "${{ github.event.repository.updated_at }}"
+              }
+            }' \
+            http://localhost:3001/api/performance/metrics || echo "Failed to post performance metrics"

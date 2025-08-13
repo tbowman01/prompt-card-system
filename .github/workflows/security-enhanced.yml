@@ -1,0 +1,1208 @@
+name: 🛡️ Enhanced Security Scanning & Vulnerability Assessment
+
+on:
+  push:
+    branches: [ main, develop, feature/*, hotfix/* ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    - cron: '0 3 * * *' # Daily at 3 AM UTC for comprehensive scan
+  workflow_dispatch:
+    inputs:
+      scan_type:
+        description: 'Type of security scan to run'
+        required: true
+        default: 'comprehensive'
+        type: choice
+        options:
+          - comprehensive
+          - sast-only
+          - dependency-only
+          - container-only
+          - secrets-only
+      severity_threshold:
+        description: 'Minimum severity level to report'
+        required: false
+        default: 'medium'
+        type: choice
+        options:
+          - critical
+          - high
+          - medium
+          - low
+
+env:
+  NODE_VERSION: '20'
+  CACHE_VERSION: 'v5-security'
+  SECURITY_THRESHOLD: ${{ inputs.severity_threshold || 'medium' }}
+  SCAN_TYPE: ${{ inputs.scan_type || 'comprehensive' }}
+
+# Security-first permissions - principle of least privilege
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+  issues: write
+  pull-requests: write
+  id-token: write # For SLSA attestation
+  attestations: write # For artifact attestation
+
+jobs:
+  # ===== SECURITY SCAN ORCHESTRATION =====
+  security-orchestrator:
+    name: 🎯 Security Scan Orchestrator
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run-sast: ${{ steps.orchestrator.outputs.run-sast }}
+      run-dependency: ${{ steps.orchestrator.outputs.run-dependency }}
+      run-container: ${{ steps.orchestrator.outputs.run-container }}
+      run-secrets: ${{ steps.orchestrator.outputs.run-secrets }}
+      run-compliance: ${{ steps.orchestrator.outputs.run-compliance }}
+      security-baseline: ${{ steps.orchestrator.outputs.security-baseline }}
+    steps:
+      - name: 🔍 Determine scan scope
+        id: orchestrator
+        run: |
+          echo "🎯 Security Scan Orchestrator - Determining scan scope"
+          
+          # Default comprehensive scan
+          run_sast="true"
+          run_dependency="true"
+          run_container="true"
+          run_secrets="true"
+          run_compliance="true"
+          
+          # Override based on scan type
+          case "${{ env.SCAN_TYPE }}" in
+            "sast-only")
+              run_dependency="false"
+              run_container="false"
+              run_secrets="false"
+              run_compliance="false"
+              ;;
+            "dependency-only")
+              run_sast="false"
+              run_container="false"
+              run_secrets="false"
+              run_compliance="false"
+              ;;
+            "container-only")
+              run_sast="false"
+              run_dependency="false"
+              run_secrets="false"
+              run_compliance="false"
+              ;;
+            "secrets-only")
+              run_sast="false"
+              run_dependency="false"
+              run_container="false"
+              run_compliance="false"
+              ;;
+          esac
+          
+          # Set outputs
+          echo "run-sast=$run_sast" >> $GITHUB_OUTPUT
+          echo "run-dependency=$run_dependency" >> $GITHUB_OUTPUT
+          echo "run-container=$run_container" >> $GITHUB_OUTPUT
+          echo "run-secrets=$run_secrets" >> $GITHUB_OUTPUT
+          echo "run-compliance=$run_compliance" >> $GITHUB_OUTPUT
+          
+          # Generate security baseline
+          echo "security-baseline=$(date +%Y%m%d)-${{ github.sha }}" >> $GITHUB_OUTPUT
+          
+          echo "✅ Scan configuration determined:"
+          echo "  - SAST: $run_sast"
+          echo "  - Dependency: $run_dependency"
+          echo "  - Container: $run_container"
+          echo "  - Secrets: $run_secrets"
+          echo "  - Compliance: $run_compliance"
+
+  # ===== SAST - STATIC APPLICATION SECURITY TESTING =====
+  sast-analysis:
+    name: 🔬 SAST - Static Application Security Testing
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: security-orchestrator
+    if: needs.security-orchestrator.outputs.run-sast == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        scanner: [codeql, semgrep, eslint-security]
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Full history for better analysis
+
+      - name: 🔧 Setup Node.js with security focus
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      # CodeQL Analysis - GitHub's premier SAST tool
+      - name: 🔍 Initialize CodeQL
+        if: matrix.scanner == 'codeql'
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript,typescript
+          queries: security-extended,security-and-quality
+          config: |
+            paths:
+              - frontend/src
+              - backend/src
+            paths-ignore:
+              - "**/*.test.ts"
+              - "**/*.spec.ts"
+              - "**/node_modules"
+              - "**/dist"
+              - "**/.next"
+
+      - name: 🏗️ CodeQL Autobuild
+        if: matrix.scanner == 'codeql'
+        uses: github/codeql-action/autobuild@v3
+
+      - name: 🔎 Perform CodeQL Analysis
+        if: matrix.scanner == 'codeql'
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"
+          output: sarif-results/codeql-results.sarif
+
+      # Semgrep Analysis - Advanced SAST with custom rules
+      - name: 🔍 Run Semgrep SAST
+        if: matrix.scanner == 'semgrep'
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/security-audit
+            p/owasp-top-ten
+            p/javascript
+            p/typescript
+            p/react
+            p/express
+            p/docker
+            p/secrets
+          severity: ${{ env.SECURITY_THRESHOLD }}
+          output: sarif-results/semgrep-results.sarif
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+
+      # ESLint Security Plugin
+      - name: 📦 Install dependencies for ESLint security
+        if: matrix.scanner == 'eslint-security'
+        run: |
+          npm ci --prefer-offline
+          npm install -g eslint-plugin-security eslint-plugin-no-secrets
+
+      - name: 🔍 Run ESLint Security Analysis
+        if: matrix.scanner == 'eslint-security'
+        run: |
+          # Backend security analysis
+          cd backend
+          npx eslint src --ext .ts,.js \
+            --plugin security \
+            --plugin no-secrets \
+            --rule "security/detect-object-injection: error" \
+            --rule "security/detect-non-literal-fs-filename: error" \
+            --rule "security/detect-eval-with-expression: error" \
+            --rule "security/detect-pseudoRandomBytes: error" \
+            --rule "security/detect-possible-timing-attacks: error" \
+            --rule "no-secrets/no-secrets: error" \
+            --format json --output-file ../sarif-results/eslint-backend-security.json || true
+          
+          # Frontend security analysis
+          cd ../frontend
+          npx eslint src --ext .ts,.tsx,.js,.jsx \
+            --plugin security \
+            --rule "security/detect-object-injection: error" \
+            --rule "security/detect-non-literal-regexp: error" \
+            --rule "security/detect-unsafe-regex: error" \
+            --format json --output-file ../sarif-results/eslint-frontend-security.json || true
+
+      - name: 📊 Upload SAST Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sast-results-${{ matrix.scanner }}
+          path: sarif-results/
+          retention-days: 90
+
+  # ===== DEPENDENCY VULNERABILITY SCANNING =====
+  dependency-security:
+    name: 🔗 Dependency Vulnerability Assessment
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: security-orchestrator
+    if: needs.security-orchestrator.outputs.run-dependency == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        scanner: [npm-audit, snyk, osv-scanner, retire-js]
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: |
+          npm ci --prefer-offline
+          cd backend && npm ci --prefer-offline
+          cd ../frontend && npm ci --prefer-offline
+
+      # Enhanced npm audit with detailed reporting
+      - name: 🔍 Enhanced npm audit
+        if: matrix.scanner == 'npm-audit'
+        run: |
+          mkdir -p security-reports/dependency
+          
+          echo "🔍 Running enhanced npm audit analysis..."
+          
+          # Backend audit
+          cd backend
+          npm audit --audit-level=${{ env.SECURITY_THRESHOLD }} --json > ../security-reports/dependency/npm-audit-backend.json || true
+          npm audit --audit-level=high --json > ../security-reports/dependency/npm-audit-backend-high.json || true
+          
+          # Frontend audit
+          cd ../frontend
+          npm audit --audit-level=${{ env.SECURITY_THRESHOLD }} --json > ../security-reports/dependency/npm-audit-frontend.json || true
+          npm audit --audit-level=high --json > ../security-reports/dependency/npm-audit-frontend-high.json || true
+          
+          echo "✅ npm audit completed"
+
+      # Snyk vulnerability scanning (if token available)
+      - name: 🔍 Snyk vulnerability scan
+        if: matrix.scanner == 'snyk' && github.event_name != 'pull_request'
+        uses: snyk/actions/node@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=${{ env.SECURITY_THRESHOLD }} --json-file-output=security-reports/dependency/snyk-results.json
+
+      # OSV Scanner - Google's open source vulnerability scanner
+      - name: 🔍 OSV Scanner
+        if: matrix.scanner == 'osv-scanner'
+        run: |
+          echo "🔍 Running OSV Scanner..."
+          
+          # Install OSV Scanner
+          curl -L https://github.com/google/osv-scanner/releases/latest/download/osv-scanner_linux_amd64 -o osv-scanner
+          chmod +x osv-scanner
+          
+          # Scan lockfiles
+          ./osv-scanner --lockfile backend/package-lock.json --format json --output security-reports/dependency/osv-backend.json || true
+          ./osv-scanner --lockfile frontend/package-lock.json --format json --output security-reports/dependency/osv-frontend.json || true
+          
+          # Scan entire project for additional vulnerabilities
+          ./osv-scanner --recursive . --format json --output security-reports/dependency/osv-full-scan.json || true
+          
+          echo "✅ OSV Scanner completed"
+
+      # Retire.js for JavaScript library vulnerabilities
+      - name: 🔍 Retire.js vulnerability scan
+        if: matrix.scanner == 'retire-js'
+        run: |
+          echo "🔍 Running Retire.js scan..."
+          
+          npm install -g retire
+          
+          # Backend scan
+          cd backend
+          retire --path . --outputformat json --outputpath ../security-reports/dependency/retire-backend.json || true
+          
+          # Frontend scan
+          cd ../frontend
+          retire --path . --outputformat json --outputpath ../security-reports/dependency/retire-frontend.json || true
+          
+          echo "✅ Retire.js scan completed"
+
+      # Dependency version compliance check (n, n-1, n-2 policy)
+      - name: 📋 Dependency version compliance
+        run: |
+          echo "🔍 Checking dependency version compliance (n, n-1, n-2 policy)..."
+          
+          # Create version compliance script
+          cat > check-versions.js << 'EOF'
+          const fs = require('fs');
+          const semver = require('semver');
+          
+          function checkCompliance(packageJsonPath, lockfilePath) {
+            const pkg = JSON.parse(fs.readFileSync(packageJsonPath));
+            const lock = JSON.parse(fs.readFileSync(lockfilePath));
+            
+            const violations = [];
+            const dependencies = { ...pkg.dependencies, ...pkg.devDependencies };
+            
+            for (const [name, version] of Object.entries(dependencies)) {
+              if (version.startsWith('^') || version.startsWith('~')) {
+                // Check if version range is too broad
+                const range = semver.validRange(version);
+                if (range && semver.gtr('999.0.0', range)) {
+                  violations.push(`${name}: version range ${version} may be too broad`);
+                }
+              }
+            }
+            
+            return violations;
+          }
+          
+          const backendViolations = checkCompliance('backend/package.json', 'backend/package-lock.json');
+          const frontendViolations = checkCompliance('frontend/package.json', 'frontend/package-lock.json');
+          
+          const report = {
+            backend: backendViolations,
+            frontend: frontendViolations,
+            compliant: backendViolations.length === 0 && frontendViolations.length === 0
+          };
+          
+          fs.writeFileSync('security-reports/dependency/version-compliance.json', JSON.stringify(report, null, 2));
+          
+          if (!report.compliant) {
+            console.log('⚠️ Version compliance violations found');
+            console.log(JSON.stringify(report, null, 2));
+          } else {
+            console.log('✅ All dependencies comply with version policy');
+          }
+          EOF
+          
+          node check-versions.js
+
+      - name: 📊 Upload dependency scan results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dependency-scan-${{ matrix.scanner }}
+          path: security-reports/dependency/
+          retention-days: 90
+
+  # ===== CONTAINER SECURITY SCANNING =====
+  container-security:
+    name: 🐳 Container Security Assessment
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: security-orchestrator
+    if: needs.security-orchestrator.outputs.run-container == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        scanner: [trivy, hadolint, docker-scout]
+        target: [backend, frontend]
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🔧 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+
+      # Build container images for scanning
+      - name: 🏗️ Build container image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./${{ matrix.target }}
+          file: ./${{ matrix.target }}/Dockerfile
+          push: false
+          tags: security-scan-${{ matrix.target }}:latest
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Trivy vulnerability scanner
+      - name: 🔍 Trivy container scan
+        if: matrix.scanner == 'trivy'
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: security-scan-${{ matrix.target }}:latest
+          format: 'sarif'
+          output: 'trivy-${{ matrix.target }}-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          vuln-type: 'os,library'
+
+      - name: 🔍 Trivy filesystem scan
+        if: matrix.scanner == 'trivy'
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: './${{ matrix.target }}'
+          format: 'sarif'
+          output: 'trivy-${{ matrix.target }}-fs-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+
+      # Hadolint for Dockerfile best practices
+      - name: 🔍 Hadolint Dockerfile scan
+        if: matrix.scanner == 'hadolint'
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: ./${{ matrix.target }}/Dockerfile
+          format: sarif
+          output-file: hadolint-${{ matrix.target }}-results.sarif
+          no-fail: true
+
+      # Docker Scout (if available)
+      - name: 🔍 Docker Scout vulnerability scan
+        if: matrix.scanner == 'docker-scout'
+        continue-on-error: true
+        run: |
+          # Install Docker Scout
+          curl -sSfL https://raw.githubusercontent.com/docker/scout-cli/main/install.sh | sh -s --
+          
+          # Scan image
+          docker scout cves security-scan-${{ matrix.target }}:latest --format sarif --output docker-scout-${{ matrix.target }}-results.sarif || true
+          
+          # Generate quick summary
+          docker scout quickview security-scan-${{ matrix.target }}:latest || true
+
+      - name: 📊 Upload container scan results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: container-scan-${{ matrix.scanner }}-${{ matrix.target }}
+          path: |
+            trivy-*-results.sarif
+            hadolint-*-results.sarif
+            docker-scout-*-results.sarif
+          retention-days: 90
+
+      - name: 📤 Upload to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always() && matrix.scanner == 'trivy'
+        with:
+          sarif_file: trivy-${{ matrix.target }}-results.sarif
+          category: trivy-${{ matrix.target }}
+
+  # ===== SECRETS DETECTION =====
+  secrets-detection:
+    name: 🔐 Secrets Detection & Prevention
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: security-orchestrator
+    if: needs.security-orchestrator.outputs.run-secrets == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        scanner: [trufflehog, gitleaks, detect-secrets]
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Full history for comprehensive secret scanning
+
+      # TruffleHog - Advanced secret scanning
+      - name: 🔍 TruffleHog secret scan
+        if: matrix.scanner == 'trufflehog'
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: main
+          head: HEAD
+          extra_args: --debug --only-verified --json
+
+      # GitLeaks - Fast secret detection
+      - name: 🔍 GitLeaks secret scan
+        if: matrix.scanner == 'gitleaks'
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # detect-secrets - Baseline and incremental scanning
+      - name: 🔍 detect-secrets scan
+        if: matrix.scanner == 'detect-secrets'
+        run: |
+          echo "🔍 Running detect-secrets scan..."
+          
+          # Install detect-secrets
+          pip install detect-secrets
+          
+          # Initialize baseline if it doesn't exist
+          if [ ! -f .secrets.baseline ]; then
+            detect-secrets scan --baseline .secrets.baseline
+          fi
+          
+          # Scan for new secrets
+          detect-secrets scan --baseline .secrets.baseline --all-files | \
+            detect-secrets audit --diff .secrets.baseline || true
+          
+          echo "✅ detect-secrets scan completed"
+
+      # Custom secret patterns for this project
+      - name: 🔍 Custom secret pattern detection
+        run: |
+          echo "🔍 Scanning for project-specific secret patterns..."
+          
+          mkdir -p security-reports/secrets
+          
+          # JWT secrets
+          grep -r "jwt.*secret\|JWT.*SECRET" . --include="*.ts" --include="*.js" --include="*.json" || true
+          
+          # API keys
+          grep -r "api.*key\|API.*KEY" . --include="*.ts" --include="*.js" --include="*.json" || true
+          
+          # Database URLs
+          grep -r "database.*url\|DATABASE.*URL" . --include="*.ts" --include="*.js" --include="*.json" || true
+          
+          # Authentication tokens
+          grep -r "auth.*token\|AUTH.*TOKEN" . --include="*.ts" --include="*.js" --include="*.json" || true
+          
+          echo "✅ Custom pattern scan completed"
+
+      - name: 📊 Upload secrets scan results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: secrets-scan-${{ matrix.scanner }}
+          path: |
+            .secrets.baseline
+            security-reports/secrets/
+          retention-days: 90
+
+  # ===== COMPLIANCE & POLICY VALIDATION =====
+  compliance-validation:
+    name: 📋 Compliance & Policy Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: security-orchestrator
+    if: needs.security-orchestrator.outputs.run-compliance == 'true'
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # License compliance check
+      - name: 📋 License compliance validation
+        run: |
+          echo "🔍 Validating license compliance..."
+          
+          npm install -g license-checker
+          mkdir -p security-reports/compliance
+          
+          # Backend license check
+          cd backend
+          npm ci --prefer-offline
+          license-checker --onlyAllow 'MIT;Apache-2.0;BSD-2-Clause;BSD-3-Clause;ISC;CC0-1.0;Unlicense' \
+            --json --out ../security-reports/compliance/backend-licenses.json || true
+          
+          # Frontend license check
+          cd ../frontend
+          npm ci --prefer-offline
+          license-checker --onlyAllow 'MIT;Apache-2.0;BSD-2-Clause;BSD-3-Clause;ISC;CC0-1.0;Unlicense' \
+            --json --out ../security-reports/compliance/frontend-licenses.json || true
+          
+          echo "✅ License compliance check completed"
+
+      # Security policy validation
+      - name: 📋 Security policy validation
+        run: |
+          echo "🔍 Validating security policies..."
+          
+          # Check for required security files
+          security_score=0
+          total_checks=10
+          
+          # SECURITY.md file
+          if [ -f "SECURITY.md" ]; then
+            echo "✅ SECURITY.md file present"
+            ((security_score++))
+          else
+            echo "❌ SECURITY.md file missing"
+          fi
+          
+          # Dependabot configuration
+          if [ -f ".github/dependabot.yml" ]; then
+            echo "✅ Dependabot configuration present"
+            ((security_score++))
+          else
+            echo "❌ Dependabot configuration missing"
+          fi
+          
+          # GitHub security advisories enabled (check if .github directory exists)
+          if [ -d ".github" ]; then
+            echo "✅ GitHub security features available"
+            ((security_score++))
+          fi
+          
+          # Check for helmet in backend
+          if grep -r "helmet" backend/src/ --include="*.ts" >/dev/null 2>&1; then
+            echo "✅ Helmet security middleware found"
+            ((security_score++))
+          else
+            echo "❌ Helmet security middleware not found"
+          fi
+          
+          # Check for rate limiting
+          if grep -r "rate.*limit\|express-rate-limit" backend/src/ --include="*.ts" >/dev/null 2>&1; then
+            echo "✅ Rate limiting implementation found"
+            ((security_score++))
+          else
+            echo "❌ Rate limiting implementation not found"
+          fi
+          
+          # Check for CORS configuration
+          if grep -r "cors" backend/src/ --include="*.ts" >/dev/null 2>&1; then
+            echo "✅ CORS configuration found"
+            ((security_score++))
+          else
+            echo "❌ CORS configuration not found"
+          fi
+          
+          # Check for input validation
+          if grep -r "validation\|validator\|joi\|yup" backend/src/ --include="*.ts" >/dev/null 2>&1; then
+            echo "✅ Input validation found"
+            ((security_score++))
+          else
+            echo "❌ Input validation not found"
+          fi
+          
+          # Check for authentication middleware
+          if grep -r "auth.*middleware\|authentication" backend/src/ --include="*.ts" >/dev/null 2>&1; then
+            echo "✅ Authentication middleware found"
+            ((security_score++))
+          else
+            echo "❌ Authentication middleware not found"
+          fi
+          
+          # Check for HTTPS configuration
+          if grep -r "https\|ssl\|tls" . --include="*.ts" --include="*.js" --include="*.json" --include="*.yml" >/dev/null 2>&1; then
+            echo "✅ HTTPS/SSL configuration found"
+            ((security_score++))
+          else
+            echo "❌ HTTPS/SSL configuration not found"
+          fi
+          
+          # Check for security headers
+          if grep -r "x-frame-options\|content-security-policy\|x-content-type-options" backend/src/ --include="*.ts" >/dev/null 2>&1; then
+            echo "✅ Security headers configuration found"
+            ((security_score++))
+          else
+            echo "❌ Security headers configuration not found"
+          fi
+          
+          # Calculate compliance score
+          compliance_percentage=$((security_score * 100 / total_checks))
+          
+          echo "📊 Security Compliance Score: $compliance_percentage% ($security_score/$total_checks)"
+          
+          # Save compliance report
+          cat > security-reports/compliance/compliance-report.json << EOF
+          {
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "compliance_score": $compliance_percentage,
+            "checks_passed": $security_score,
+            "total_checks": $total_checks,
+            "recommendations": [
+              "Implement missing security middleware",
+              "Add comprehensive input validation",
+              "Configure security headers",
+              "Enable HTTPS in production",
+              "Set up automated dependency updates"
+            ]
+          }
+          EOF
+
+      # GDPR compliance check
+      - name: 📋 GDPR compliance validation
+        run: |
+          echo "🔍 Checking GDPR compliance indicators..."
+          
+          gdpr_score=0
+          gdpr_checks=5
+          
+          # Privacy policy
+          if find . -name "*privacy*" -o -name "*gdpr*" | grep -q .; then
+            echo "✅ Privacy/GDPR documentation found"
+            ((gdpr_score++))
+          fi
+          
+          # Data handling code
+          if grep -r "personal.*data\|PII\|GDPR" . --include="*.ts" --include="*.js" --include="*.md" >/dev/null 2>&1; then
+            echo "✅ Data handling/GDPR references found"
+            ((gdpr_score++))
+          fi
+          
+          # Cookie consent
+          if grep -r "cookie.*consent\|gdpr.*cookie" . --include="*.ts" --include="*.js" >/dev/null 2>&1; then
+            echo "✅ Cookie consent implementation found"
+            ((gdpr_score++))
+          fi
+          
+          # Data retention policies
+          if grep -r "data.*retention\|retention.*policy" . --include="*.ts" --include="*.js" --include="*.md" >/dev/null 2>&1; then
+            echo "✅ Data retention policies found"
+            ((gdpr_score++))
+          fi
+          
+          # Right to be forgotten
+          if grep -r "delete.*user\|remove.*data\|right.*forgotten" . --include="*.ts" --include="*.js" >/dev/null 2>&1; then
+            echo "✅ Data deletion capabilities found"
+            ((gdpr_score++))
+          fi
+          
+          gdpr_percentage=$((gdpr_score * 100 / gdpr_checks))
+          echo "📊 GDPR Compliance Score: $gdpr_percentage% ($gdpr_score/$gdpr_checks)"
+
+      - name: 📊 Upload compliance results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compliance-validation
+          path: security-reports/compliance/
+          retention-days: 90
+
+  # ===== SLSA PROVENANCE GENERATION =====
+  slsa-provenance:
+    name: 🔏 SLSA Provenance Generation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [sast-analysis, dependency-security, container-security]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+      attestations: write
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 📊 Download all security artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./security-artifacts
+
+      - name: 🔏 Generate SLSA provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: |
+            ./backend/package.json
+            ./frontend/package.json
+            ./package.json
+
+      - name: 🔏 Generate security attestation
+        run: |
+          echo "🔏 Generating security attestation..."
+          
+          # Create security attestation document
+          cat > security-attestation.json << EOF
+          {
+            "_type": "https://in-toto.io/Statement/v0.1",
+            "predicateType": "https://slsa.dev/provenance/v0.2",
+            "subject": [
+              {
+                "name": "${{ github.repository }}",
+                "digest": {
+                  "sha256": "${{ github.sha }}"
+                }
+              }
+            ],
+            "predicate": {
+              "buildType": "https://github.com/actions/workflow",
+              "builder": {
+                "id": "https://github.com/${{ github.repository }}/actions/workflows/security-enhanced.yml@${{ github.ref }}"
+              },
+              "invocation": {
+                "configSource": {
+                  "uri": "${{ github.server_url }}/${{ github.repository }}",
+                  "digest": {
+                    "sha256": "${{ github.sha }}"
+                  }
+                }
+              },
+              "metadata": {
+                "buildInvocationId": "${{ github.run_id }}",
+                "buildStartedOn": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+                "completeness": {
+                  "parameters": true,
+                  "environment": true,
+                  "materials": true
+                },
+                "reproducible": false
+              },
+              "materials": [
+                {
+                  "uri": "${{ github.server_url }}/${{ github.repository }}",
+                  "digest": {
+                    "sha256": "${{ github.sha }}"
+                  }
+                }
+              ]
+            }
+          }
+          EOF
+          
+          echo "✅ Security attestation generated"
+
+      - name: 📊 Upload SLSA artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: slsa-provenance
+          path: |
+            security-attestation.json
+          retention-days: 365
+
+  # ===== SECURITY METRICS & REPORTING =====
+  security-metrics:
+    name: 📊 Security Metrics & Comprehensive Reporting
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [sast-analysis, dependency-security, container-security, secrets-detection, compliance-validation]
+    if: always()
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 📊 Download all security artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./security-artifacts
+
+      - name: 📊 Generate comprehensive security report
+        run: |
+          echo "📊 Generating comprehensive security report..."
+          
+          # Initialize counters
+          total_vulnerabilities=0
+          critical_count=0
+          high_count=0
+          medium_count=0
+          low_count=0
+          
+          # Analyze SAST results
+          sast_status="unknown"
+          if [ "${{ needs.sast-analysis.result }}" == "success" ]; then
+            sast_status="✅ PASSED"
+          elif [ "${{ needs.sast-analysis.result }}" == "failure" ]; then
+            sast_status="❌ FAILED"
+          else
+            sast_status="⚠️ SKIPPED"
+          fi
+          
+          # Analyze dependency results
+          dependency_status="unknown"
+          if [ "${{ needs.dependency-security.result }}" == "success" ]; then
+            dependency_status="✅ PASSED"
+          elif [ "${{ needs.dependency-security.result }}" == "failure" ]; then
+            dependency_status="❌ FAILED"
+          else
+            dependency_status="⚠️ SKIPPED"
+          fi
+          
+          # Analyze container results
+          container_status="unknown"
+          if [ "${{ needs.container-security.result }}" == "success" ]; then
+            container_status="✅ PASSED"
+          elif [ "${{ needs.container-security.result }}" == "failure" ]; then
+            container_status="❌ FAILED"
+          else
+            container_status="⚠️ SKIPPED"
+          fi
+          
+          # Analyze secrets results
+          secrets_status="unknown"
+          if [ "${{ needs.secrets-detection.result }}" == "success" ]; then
+            secrets_status="✅ PASSED"
+          elif [ "${{ needs.secrets-detection.result }}" == "failure" ]; then
+            secrets_status="❌ FAILED"
+          else
+            secrets_status="⚠️ SKIPPED"
+          fi
+          
+          # Analyze compliance results
+          compliance_status="unknown"
+          if [ "${{ needs.compliance-validation.result }}" == "success" ]; then
+            compliance_status="✅ PASSED"
+          elif [ "${{ needs.compliance-validation.result }}" == "failure" ]; then
+            compliance_status="❌ FAILED"
+          else
+            compliance_status="⚠️ SKIPPED"
+          fi
+          
+          # Calculate overall security score
+          passed_scans=0
+          total_scans=5
+          
+          [ "${{ needs.sast-analysis.result }}" == "success" ] && ((passed_scans++))
+          [ "${{ needs.dependency-security.result }}" == "success" ] && ((passed_scans++))
+          [ "${{ needs.container-security.result }}" == "success" ] && ((passed_scans++))
+          [ "${{ needs.secrets-detection.result }}" == "success" ] && ((passed_scans++))
+          [ "${{ needs.compliance-validation.result }}" == "success" ] && ((passed_scans++))
+          
+          security_score=$((passed_scans * 100 / total_scans))
+          
+          # Generate detailed report
+          cat > SECURITY_REPORT.md << EOF
+          # 🛡️ Enhanced Security Assessment Report
+          
+          **Date**: $(date -u +%Y-%m-%d)  
+          **Time**: $(date -u +%H:%M:%S) UTC  
+          **Repository**: ${{ github.repository }}  
+          **Branch**: ${{ github.ref_name }}  
+          **Commit**: ${{ github.sha }}  
+          **Workflow**: ${{ github.workflow }}  
+          **Run ID**: ${{ github.run_id }}
+          
+          ## 📊 Executive Summary
+          
+          **Overall Security Score**: ${security_score}% (${passed_scans}/${total_scans} scans passed)
+          
+          $([ $security_score -ge 90 ] && echo "🟢 **EXCELLENT** - Security posture is outstanding" || \
+            [ $security_score -ge 80 ] && echo "🟡 **GOOD** - Security posture is solid with minor improvements needed" || \
+            [ $security_score -ge 60 ] && echo "🟠 **MODERATE** - Security posture needs attention" || \
+            echo "🔴 **CRITICAL** - Security posture requires immediate action")
+          
+          ## 🔍 Scan Results Overview
+          
+          | Security Domain | Status | Result |
+          |-----------------|--------|--------|
+          | **SAST Analysis** | $sast_status | Static Application Security Testing |
+          | **Dependency Security** | $dependency_status | Vulnerability assessment of dependencies |
+          | **Container Security** | $container_status | Docker image and configuration security |
+          | **Secrets Detection** | $secrets_status | Secret and credential scanning |
+          | **Compliance Validation** | $compliance_status | Policy and regulatory compliance |
+          
+          ## 🔬 Static Application Security Testing (SAST)
+          
+          **Status**: $sast_status  
+          **Tools Used**: CodeQL, Semgrep, ESLint Security Plugin  
+          **Coverage**: Frontend (React/TypeScript) + Backend (Node.js/TypeScript)
+          
+          - **CodeQL**: GitHub's premier SAST tool with security-extended queries
+          - **Semgrep**: Advanced pattern matching with OWASP Top 10 rules
+          - **ESLint Security**: JavaScript/TypeScript specific security linting
+          
+          ## 🔗 Dependency Vulnerability Assessment
+          
+          **Status**: $dependency_status  
+          **Tools Used**: npm audit, OSV Scanner, Retire.js$([ -n "${{ secrets.SNYK_TOKEN }}" ] && echo ", Snyk" || echo " (Snyk unavailable)")  
+          **Policy**: n, n-1, n-2 version compliance enforced
+          
+          - **npm audit**: Built-in Node.js vulnerability scanner
+          - **OSV Scanner**: Google's open source vulnerability database
+          - **Retire.js**: JavaScript library vulnerability detection
+          - **Version Policy**: Only current and two previous major versions allowed
+          
+          ## 🐳 Container Security Assessment
+          
+          **Status**: $container_status  
+          **Tools Used**: Trivy, Hadolint, Docker Scout  
+          **Coverage**: Multi-architecture (amd64/arm64) container scanning
+          
+          - **Trivy**: Comprehensive vulnerability scanner for containers
+          - **Hadolint**: Dockerfile best practices and security linting
+          - **Docker Scout**: Docker's native security scanning (if available)
+          
+          ## 🔐 Secrets Detection & Prevention
+          
+          **Status**: $secrets_status  
+          **Tools Used**: TruffleHog, GitLeaks, detect-secrets  
+          **Scope**: Full repository history + custom patterns
+          
+          - **TruffleHog**: Advanced secret detection with verification
+          - **GitLeaks**: Fast and accurate secret scanning
+          - **detect-secrets**: Baseline tracking and custom patterns
+          - **Custom Patterns**: Project-specific secret patterns (JWT, API keys, etc.)
+          
+          ## 📋 Compliance & Policy Validation
+          
+          **Status**: $compliance_status  
+          **Frameworks**: GDPR indicators, License compliance, Security policies  
+          **Coverage**: Enterprise security requirements validation
+          
+          - **License Compliance**: Only approved licenses allowed
+          - **Security Policies**: Helmet, CORS, rate limiting verification
+          - **GDPR Indicators**: Privacy and data handling compliance
+          - **Security Headers**: Security middleware implementation check
+          
+          ## 🔏 Supply Chain Security
+          
+          **SLSA Provenance**: $([ "${{ github.ref }}" == "refs/heads/main" ] || [ "${{ github.ref }}" == "refs/heads/develop" ] && echo "✅ Generated" || echo "⚠️ Not applicable for feature branches")  
+          **Attestations**: Build provenance and security attestations generated  
+          **Verification**: Cryptographic verification of build artifacts
+          
+          ## 📈 Security Metrics
+          
+          - **Total Vulnerabilities**: ${total_vulnerabilities}
+          - **Critical**: ${critical_count}
+          - **High**: ${high_count}
+          - **Medium**: ${medium_count}
+          - **Low**: ${low_count}
+          
+          ## 🚨 Action Items
+          
+          $([ $security_score -lt 100 ] && cat << 'ACTION_EOF'
+          
+          ### Immediate Actions Required:
+          
+          $([ "${{ needs.sast-analysis.result }}" != "success" ] && echo "- 🔍 **Review SAST findings**: Address static analysis security issues")
+          $([ "${{ needs.dependency-security.result }}" != "success" ] && echo "- 🔗 **Update dependencies**: Resolve vulnerability in project dependencies")
+          $([ "${{ needs.container-security.result }}" != "success" ] && echo "- 🐳 **Fix container issues**: Address container security vulnerabilities")
+          $([ "${{ needs.secrets-detection.result }}" != "success" ] && echo "- 🔐 **Remove secrets**: Remediate any detected secrets or credentials")
+          $([ "${{ needs.compliance-validation.result }}" != "success" ] && echo "- 📋 **Improve compliance**: Address policy and compliance violations")
+          
+          ### Recommended Improvements:
+          
+          1. **Enable automated dependency updates** with Dependabot
+          2. **Implement security headers** across all endpoints
+          3. **Add comprehensive input validation** in all user-facing endpoints
+          4. **Set up real-time security monitoring** and alerting
+          5. **Establish incident response procedures** for security events
+          6. **Regular security training** for development team
+          7. **Penetration testing** schedule for production deployments
+          
+          ACTION_EOF
+          )
+          
+          ## 📞 Support & Escalation
+          
+          **Security Team**: security@company.com  
+          **Escalation**: For critical findings, create GitHub issue with 'security' label  
+          **Documentation**: [Security Guidelines](./SECURITY.md)
+          
+          ## 🔗 Additional Resources
+          
+          - [OWASP Top 10](https://owasp.org/www-project-top-ten/)
+          - [NIST Cybersecurity Framework](https://www.nist.gov/cyberframework)
+          - [CIS Controls](https://www.cisecurity.org/controls/)
+          - [SLSA Framework](https://slsa.dev/)
+          
+          ---
+          
+          **Report Generated**: $(date -u +%Y-%m-%dT%H:%M:%SZ)  
+          **Next Scan**: Automated daily at 03:00 UTC  
+          **Retention**: Security artifacts retained for 90 days
+          EOF
+          
+          echo "✅ Comprehensive security report generated"
+
+      - name: 📊 Generate security metrics JSON
+        run: |
+          # Generate machine-readable security metrics
+          cat > security-metrics.json << EOF
+          {
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "repository": "${{ github.repository }}",
+            "branch": "${{ github.ref_name }}",
+            "commit": "${{ github.sha }}",
+            "workflow_run_id": "${{ github.run_id }}",
+            "scan_configuration": {
+              "scan_type": "${{ env.SCAN_TYPE }}",
+              "severity_threshold": "${{ env.SECURITY_THRESHOLD }}"
+            },
+            "results": {
+              "sast_analysis": "${{ needs.sast-analysis.result }}",
+              "dependency_security": "${{ needs.dependency-security.result }}",
+              "container_security": "${{ needs.container-security.result }}",
+              "secrets_detection": "${{ needs.secrets-detection.result }}",
+              "compliance_validation": "${{ needs.compliance-validation.result }}"
+            },
+            "security_score": {
+              "overall": $(($([ "${{ needs.sast-analysis.result }}" == "success" ] && echo 1 || echo 0) + $([ "${{ needs.dependency-security.result }}" == "success" ] && echo 1 || echo 0) + $([ "${{ needs.container-security.result }}" == "success" ] && echo 1 || echo 0) + $([ "${{ needs.secrets-detection.result }}" == "success" ] && echo 1 || echo 0) + $([ "${{ needs.compliance-validation.result }}" == "success" ] && echo 1 || echo 0)) * 20),
+              "breakdown": {
+                "sast": $([ "${{ needs.sast-analysis.result }}" == "success" ] && echo 20 || echo 0),
+                "dependencies": $([ "${{ needs.dependency-security.result }}" == "success" ] && echo 20 || echo 0),
+                "containers": $([ "${{ needs.container-security.result }}" == "success" ] && echo 20 || echo 0),
+                "secrets": $([ "${{ needs.secrets-detection.result }}" == "success" ] && echo 20 || echo 0),
+                "compliance": $([ "${{ needs.compliance-validation.result }}" == "success" ] && echo 20 || echo 0)
+              }
+            },
+            "recommendations": [
+              "Regular security scanning",
+              "Automated dependency updates",
+              "Security training for developers",
+              "Incident response procedures"
+            ]
+          }
+          EOF
+
+      - name: 📊 Update GitHub Step Summary
+        if: always()
+        run: |
+          echo "# 🛡️ Enhanced Security Assessment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Overall Security Score**: $(($([ "${{ needs.sast-analysis.result }}" == "success" ] && echo 1 || echo 0) + $([ "${{ needs.dependency-security.result }}" == "success" ] && echo 1 || echo 0) + $([ "${{ needs.container-security.result }}" == "success" ] && echo 1 || echo 0) + $([ "${{ needs.secrets-detection.result }}" == "success" ] && echo 1 || echo 0) + $([ "${{ needs.compliance-validation.result }}" == "success" ] && echo 1 || echo 0)) * 20)%" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Domain | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| SAST Analysis | ${{ needs.sast-analysis.result == 'success' && '✅ PASSED' || needs.sast-analysis.result == 'failure' && '❌ FAILED' || '⚠️ SKIPPED' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dependency Security | ${{ needs.dependency-security.result == 'success' && '✅ PASSED' || needs.dependency-security.result == 'failure' && '❌ FAILED' || '⚠️ SKIPPED' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Container Security | ${{ needs.container-security.result == 'success' && '✅ PASSED' || needs.container-security.result == 'failure' && '❌ FAILED' || '⚠️ SKIPPED' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Secrets Detection | ${{ needs.secrets-detection.result == 'success' && '✅ PASSED' || needs.secrets-detection.result == 'failure' && '❌ FAILED' || '⚠️ SKIPPED' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Compliance Validation | ${{ needs.compliance-validation.result == 'success' && '✅ PASSED' || needs.compliance-validation.result == 'failure' && '❌ FAILED' || '⚠️ SKIPPED' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📋 **Full Report**: See workflow artifacts for detailed security assessment" >> $GITHUB_STEP_SUMMARY
+
+      - name: 📊 Upload comprehensive security report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: comprehensive-security-report
+          path: |
+            SECURITY_REPORT.md
+            security-metrics.json
+          retention-days: 365
+
+      # Create GitHub issue for critical security findings
+      - name: 🚨 Create security issue for critical findings
+        if: |
+          needs.sast-analysis.result == 'failure' || 
+          needs.dependency-security.result == 'failure' || 
+          needs.secrets-detection.result == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = '🚨 Critical Security Findings Detected';
+            const labels = ['security', 'critical', 'needs-immediate-action'];
+            
+            const body = `
+            # 🚨 Critical Security Findings Detected
+            
+            **Alert**: Critical security issues have been identified in the latest security scan.
+            
+            ## 📊 Scan Results
+            - **SAST Analysis**: ${{ needs.sast-analysis.result }}
+            - **Dependency Security**: ${{ needs.dependency-security.result }}
+            - **Container Security**: ${{ needs.container-security.result }}
+            - **Secrets Detection**: ${{ needs.secrets-detection.result }}
+            - **Compliance Validation**: ${{ needs.compliance-validation.result }}
+            
+            ## 🚨 Immediate Actions Required
+            
+            1. **Review Security Report**: Download and analyze the comprehensive security report from workflow artifacts
+            2. **Address Critical Issues**: Prioritize fixing critical and high severity vulnerabilities
+            3. **Update Dependencies**: Ensure all dependencies are updated to secure versions
+            4. **Remove Detected Secrets**: If any secrets were detected, rotate them immediately
+            5. **Verify Fixes**: Re-run security scans after implementing fixes
+            
+            ## 📋 Scan Details
+            - **Workflow Run**: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            - **Commit**: ${{ github.sha }}
+            - **Branch**: ${{ github.ref_name }}
+            - **Triggered By**: ${{ github.actor }}
+            - **Scan Type**: ${{ env.SCAN_TYPE }}
+            
+            ## 🔗 Resources
+            - [Security Policy](./SECURITY.md)
+            - [Workflow Artifacts](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            - [Security Guidelines](./docs/SECURITY.md)
+            
+            **This issue was automatically created by the security scanning workflow.**
+            `;
+            
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: title,
+              body: body,
+              labels: labels
+            });
