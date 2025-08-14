@@ -12,7 +12,13 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=true
 ENV CYPRESS_INSTALL_BINARY=0
 
 # Install only production dependencies
-RUN npm ci --only=production --ignore-scripts && npm cache clean --force
+# Use npm install if package-lock.json is missing, otherwise use npm ci
+RUN if [ -f package-lock.json ]; then \
+      npm ci --omit=dev --ignore-scripts; \
+    else \
+      npm install --omit=dev --ignore-scripts; \
+    fi && \
+    npm cache clean --force
 
 # Stage 2: Build stage (for Next.js compilation)
 FROM node:20-alpine AS builder
@@ -27,7 +33,12 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=true
 ENV CYPRESS_INSTALL_BINARY=0
 
 # Install all dependencies for building
-RUN npm ci --ignore-scripts
+# Use npm install if package-lock.json is missing, otherwise use npm ci
+RUN if [ -f package-lock.json ]; then \
+      npm ci --ignore-scripts; \
+    else \
+      npm install --ignore-scripts; \
+    fi
 
 # Copy source code
 COPY . .

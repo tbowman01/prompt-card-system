@@ -27,7 +27,13 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=true
 ENV CYPRESS_INSTALL_BINARY=0
 
 # Install only production dependencies, excluding dev packages that download browsers
-RUN npm ci --only=production --ignore-scripts && npm cache clean --force
+# Use npm install if package-lock.json is missing, otherwise use npm ci
+RUN if [ -f package-lock.json ]; then \
+      npm ci --omit=dev --ignore-scripts; \
+    else \
+      npm install --omit=dev --ignore-scripts; \
+    fi && \
+    npm cache clean --force
 
 # Stage 2: Build stage (for TypeScript compilation)
 FROM node:20-alpine AS builder
@@ -57,10 +63,18 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=true
 ENV CYPRESS_INSTALL_BINARY=0
 
 # Install all dependencies for building, skipping post-install scripts for some packages
-RUN npm ci --ignore-scripts
+# Use npm install if package-lock.json is missing, otherwise use npm ci
+RUN if [ -f package-lock.json ]; then \
+      npm ci --ignore-scripts; \
+    else \
+      npm install --ignore-scripts; \
+    fi
 
 # Copy source code
 COPY . .
+
+# Remove test files to avoid compilation issues
+RUN rm -rf src/tests && find src -name "*.test.ts" -delete && find src -name "*.spec.ts" -delete
 
 # Build the application
 RUN npm run build

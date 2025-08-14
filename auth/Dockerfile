@@ -23,7 +23,11 @@ USER authuser
 FROM base AS development
 WORKDIR /app
 COPY --chown=authuser:authuser package*.json ./
-RUN npm ci --only=development
+RUN if [ -f package-lock.json ]; then \
+      npm ci; \
+    else \
+      npm install; \
+    fi
 COPY --chown=authuser:authuser . .
 EXPOSE 8005
 CMD ["npm", "run", "dev"]
@@ -32,7 +36,11 @@ CMD ["npm", "run", "dev"]
 FROM base AS build
 WORKDIR /app
 COPY --chown=authuser:authuser package*.json ./
-RUN npm ci --only=development
+RUN if [ -f package-lock.json ]; then \
+      npm ci; \
+    else \
+      npm install; \
+    fi
 COPY --chown=authuser:authuser . .
 RUN npm run build && \
     npm prune --production && \
@@ -46,7 +54,12 @@ WORKDIR /app
 COPY --chown=authuser:authuser package*.json ./
 
 # Install only production dependencies
-RUN npm ci --only=production --no-audit --no-fund && \
+# Use npm install if package-lock.json is missing, otherwise use npm ci
+RUN if [ -f package-lock.json ]; then \
+      npm ci --omit=dev --no-audit --no-fund; \
+    else \
+      npm install --omit=dev --no-audit --no-fund; \
+    fi && \
     npm cache clean --force
 
 # Copy built application
