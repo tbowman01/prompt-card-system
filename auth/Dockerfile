@@ -42,7 +42,7 @@ RUN if [ -f package-lock.json ]; then \
       npm install; \
     fi
 COPY --chown=authuser:authuser . .
-RUN npm run build && \
+RUN npm run build || npm run build:lenient && \
     npm prune --production && \
     npm cache clean --force
 

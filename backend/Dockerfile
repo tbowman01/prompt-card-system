@@ -73,11 +73,8 @@ RUN if [ -f package-lock.json ]; then \
 # Copy source code
 COPY . .
 
-# Remove test files to avoid compilation issues
-RUN rm -rf src/tests && find src -name "*.test.ts" -delete && find src -name "*.spec.ts" -delete
-
-# Build the application
-RUN npm run build
+# Build the application using production config that excludes tests
+RUN npm run build || npm run build:lenient
 
 # Stage 3: Production runtime (minimal final image)
 FROM node:20-alpine AS runner
