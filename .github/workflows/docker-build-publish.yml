@@ -1,0 +1,426 @@
+name: 🐳 Docker Build & Publish Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'auth/**'
+      - 'docker/**'
+      - 'docker-compose*.yml'
+      - '.github/workflows/docker-build-publish.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'auth/**'
+      - 'docker/**'
+      - 'docker-compose*.yml'
+  workflow_dispatch:
+    inputs:
+      services:
+        description: 'Services to build (comma-separated: backend,frontend,auth,ollama,all)'
+        required: false
+        default: 'all'
+      push_images:
+        description: 'Push images to registry'
+        type: boolean
+        required: false
+        default: true
+      platforms:
+        description: 'Target platforms'
+        required: false
+        default: 'linux/amd64'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository }}
+
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+
+jobs:
+  # ===== DETERMINE BUILD MATRIX =====
+  setup:
+    name: 🔍 Setup Build Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.matrix.outputs.services }}
+      should_push: ${{ steps.matrix.outputs.should_push }}
+    
+    steps:
+    - name: 📋 Determine Services to Build
+      id: matrix
+      run: |
+        # Determine which services to build based on input or changes
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          SERVICES="${{ github.event.inputs.services }}"
+          if [ "$SERVICES" = "all" ]; then
+            SERVICES="backend,frontend,auth,ollama"
+          fi
+        else
+          # Auto-detect changed services
+          SERVICES=""
+          if [ "${{ contains(github.event.head_commit.modified, 'backend/') || contains(github.event.head_commit.added, 'backend/') }}" = "true" ]; then
+            SERVICES="backend"
+          fi
+          if [ "${{ contains(github.event.head_commit.modified, 'frontend/') || contains(github.event.head_commit.added, 'frontend/') }}" = "true" ]; then
+            SERVICES="${SERVICES:+$SERVICES,}frontend"
+          fi
+          if [ "${{ contains(github.event.head_commit.modified, 'auth/') || contains(github.event.head_commit.added, 'auth/') }}" = "true" ]; then
+            SERVICES="${SERVICES:+$SERVICES,}auth"
+          fi
+          if [ "${{ contains(github.event.head_commit.modified, 'docker/ollama/') || contains(github.event.head_commit.added, 'docker/ollama/') }}" = "true" ]; then
+            SERVICES="${SERVICES:+$SERVICES,}ollama"
+          fi
+          # If no specific services changed, build all on main branch
+          if [ -z "$SERVICES" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            SERVICES="backend,frontend,auth,ollama"
+          fi
+          # Default to core services for develop
+          if [ -z "$SERVICES" ]; then
+            SERVICES="backend,frontend"
+          fi
+        fi
+        
+        # Convert to JSON array
+        SERVICES_ARRAY=$(echo "$SERVICES" | jq -R -s -c 'split(",") | map(select(. != ""))')
+        echo "services=$SERVICES_ARRAY" >> $GITHUB_OUTPUT
+        
+        # Determine if we should push
+        SHOULD_PUSH="false"
+        if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
+          SHOULD_PUSH="true"
+        elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.push_images }}" = "true" ]; then
+          SHOULD_PUSH="true"
+        fi
+        echo "should_push=$SHOULD_PUSH" >> $GITHUB_OUTPUT
+        
+        echo "🔍 Services to build: $SERVICES"
+        echo "📤 Should push images: $SHOULD_PUSH"
+
+  # ===== BUILD AND PUBLISH SERVICES =====
+  build-and-publish:
+    name: 🐳 Build & Publish (${{ matrix.service }})
+    needs: setup
+    runs-on: ubuntu-latest
+    if: needs.setup.outputs.services != '[]'
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.setup.outputs.services) }}
+    
+    steps:
+    - name: 📥 Checkout Code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: 🐳 Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      with:
+        platforms: ${{ github.event.inputs.platforms || 'linux/amd64' }}
+    
+    - name: 🔐 Login to GitHub Container Registry
+      if: needs.setup.outputs.should_push == 'true'
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: 🏷️ Extract Metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=raw,value=latest,enable={{is_default_branch}}
+          type=sha,prefix={{branch}}-,format=short
+          type=raw,value={{branch}}-{{date 'YYYYMMDD'}}-{{sha}}
+        labels: |
+          org.opencontainers.image.title=Prompt Card System - ${{ matrix.service }}
+          org.opencontainers.image.description=${{ matrix.service }} service for enterprise vLLM platform
+          org.opencontainers.image.vendor=Prompt Card System
+          org.opencontainers.image.licenses=MIT
+          service.name=${{ matrix.service }}
+          service.version=${{ github.sha }}
+          build.date=${{ github.event.head_commit.timestamp }}
+    
+    - name: 🏗️ Build and Push Docker Image
+      uses: docker/build-push-action@v5
+      with:
+        context: ${{ matrix.service == 'ollama' && './docker/ollama' || format('./{0}', matrix.service) }}
+        platforms: ${{ github.event.inputs.platforms || 'linux/amd64' }}
+        push: ${{ needs.setup.outputs.should_push == 'true' }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha,scope=${{ matrix.service }}
+        cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+        build-args: |
+          BUILD_DATE=${{ github.event.head_commit.timestamp }}
+          BUILD_VERSION=${{ github.sha }}
+          SERVICE_NAME=${{ matrix.service }}
+        provenance: true
+        sbom: true
+    
+    - name: 🔒 Run Security Scan (Trivy)
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ github.sha }}
+        format: 'sarif'
+        output: '${{ matrix.service }}-security-results.sarif'
+        severity: 'CRITICAL,HIGH,MEDIUM'
+      continue-on-error: true
+    
+    - name: 📊 Upload Security Results
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: '${{ matrix.service }}-security-results.sarif'
+        category: 'docker-${{ matrix.service }}'
+      continue-on-error: true
+    
+    - name: 🧪 Test Docker Image
+      if: needs.setup.outputs.should_push == 'true'
+      run: |
+        echo "🧪 Testing ${{ matrix.service }} Docker image..."
+        
+        # Test image can be pulled
+        docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ github.sha }}
+        
+        # Test image runs and passes health check
+        case "${{ matrix.service }}" in
+          "backend")
+            docker run -d --name test-${{ matrix.service }} -p 3001:3001 \
+              ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ github.sha }}
+            sleep 30
+            curl -f http://localhost:3001/health || exit 1
+            ;;
+          "frontend")
+            docker run -d --name test-${{ matrix.service }} -p 3000:3000 \
+              ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ github.sha }}
+            sleep 30
+            curl -f http://localhost:3000 || exit 1
+            ;;
+          "auth")
+            docker run -d --name test-${{ matrix.service }} -p 8005:8005 \
+              ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ github.sha }}
+            sleep 30
+            curl -f http://localhost:8005/auth/health || exit 1
+            ;;
+          "ollama")
+            docker run -d --name test-${{ matrix.service }} -p 11434:11434 \
+              ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ github.sha }}
+            sleep 60
+            curl -f http://localhost:11434/api/version || exit 1
+            ;;
+        esac
+        
+        # Cleanup
+        docker stop test-${{ matrix.service }} || true
+        docker rm test-${{ matrix.service }} || true
+        
+        echo "✅ ${{ matrix.service }} image test passed"
+
+  # ===== PUBLISH DOCKER COMPOSE =====
+  publish-compose:
+    name: 📦 Publish Docker Compose Configuration
+    needs: [setup, build-and-publish]
+    runs-on: ubuntu-latest
+    if: needs.setup.outputs.should_push == 'true'
+    
+    steps:
+    - name: 📥 Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: 📦 Create Docker Compose Archive
+      run: |
+        mkdir -p docker-compose-release
+        
+        # Copy compose files
+        cp docker-compose.yml docker-compose-release/
+        cp docker-compose.prod.yml docker-compose-release/
+        cp docker-compose.dev.yml docker-compose-release/
+        
+        # Create environment template
+        cat > docker-compose-release/.env.example << 'EOF'
+        # Prompt Card System Environment Configuration
+        
+        # Service Images (automatically set by CI/CD)
+        BACKEND_IMAGE=ghcr.io/${{ github.repository }}-backend:latest
+        FRONTEND_IMAGE=ghcr.io/${{ github.repository }}-frontend:latest
+        AUTH_IMAGE=ghcr.io/${{ github.repository }}-auth:latest
+        OLLAMA_IMAGE=ghcr.io/${{ github.repository }}-ollama:latest
+        
+        # Database Configuration
+        DATABASE_URL=sqlite:./data/database.sqlite
+        REDIS_URL=redis://redis:6379
+        
+        # API Configuration
+        BACKEND_PORT=3001
+        FRONTEND_PORT=3000
+        AUTH_PORT=8005
+        OLLAMA_PORT=11434
+        
+        # Security Configuration
+        JWT_SECRET=your-jwt-secret-change-in-production
+        ENCRYPTION_KEY=your-32-character-encryption-key
+        
+        # LLM Configuration
+        OLLAMA_HOST=http://ollama:11434
+        DEFAULT_MODEL=phi4-mini-reasoning:3.8b
+        
+        # Environment
+        NODE_ENV=production
+        LOG_LEVEL=info
+        EOF
+        
+        # Create usage instructions
+        cat > docker-compose-release/README.md << 'EOF'
+        # Prompt Card System - Docker Compose Deployment
+        
+        ## Quick Start
+        
+        1. Copy `.env.example` to `.env` and configure:
+           ```bash
+           cp .env.example .env
+           # Edit .env with your configuration
+           ```
+        
+        2. Start the services:
+           ```bash
+           # Development
+           docker-compose -f docker-compose.dev.yml up -d
+           
+           # Production
+           docker-compose -f docker-compose.prod.yml up -d
+           ```
+        
+        3. Access the application:
+           - Frontend: http://localhost:3000
+           - Backend API: http://localhost:3001
+           - Auth Service: http://localhost:8005
+           - Ollama: http://localhost:11434
+        
+        ## Services
+        
+        - **Frontend**: Next.js web application
+        - **Backend**: Node.js API server
+        - **Auth**: Authentication service
+        - **Ollama**: Local LLM inference
+        - **Redis**: Caching and session storage
+        
+        ## Images
+        
+        All images are published to GitHub Container Registry:
+        - `ghcr.io/${{ github.repository }}-backend:latest`
+        - `ghcr.io/${{ github.repository }}-frontend:latest`
+        - `ghcr.io/${{ github.repository }}-auth:latest`
+        - `ghcr.io/${{ github.repository }}-ollama:latest`
+        EOF
+        
+        # Create archive
+        tar -czf docker-compose-${{ github.sha }}.tar.gz -C docker-compose-release .
+    
+    - name: 📤 Upload Docker Compose Archive
+      uses: actions/upload-artifact@v4
+      with:
+        name: docker-compose-${{ github.sha }}
+        path: docker-compose-${{ github.sha }}.tar.gz
+        retention-days: 90
+
+  # ===== DEPLOYMENT SUMMARY =====
+  deployment-summary:
+    name: 📊 Deployment Summary
+    needs: [setup, build-and-publish, publish-compose]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: 📊 Generate Deployment Summary
+      run: |
+        echo "# 🐳 Docker Build & Publish Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Repository:** ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Triggered by:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        echo "## 🏗️ Build Configuration" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
+        echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Services Built | ${{ needs.setup.outputs.services }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Images Pushed | ${{ needs.setup.outputs.should_push }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Registry | ${{ env.REGISTRY }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Platforms | ${{ github.event.inputs.platforms || 'linux/amd64' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        echo "## 📦 Published Images" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        if [ "${{ needs.setup.outputs.should_push }}" = "true" ]; then
+          echo "Images have been published to GitHub Container Registry:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Generate pull commands for each service
+          SERVICES='${{ needs.setup.outputs.services }}'
+          echo "$SERVICES" | jq -r '.[]' | while read service; do
+            echo "### $service" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+            echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-$service:latest" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          done
+        else
+          echo "🔒 Images were built but not pushed (PR or test build)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "## 🚀 Quick Deployment" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+        echo "# Download and extract Docker Compose configuration" >> $GITHUB_STEP_SUMMARY
+        echo "curl -L https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts/docker-compose-${{ github.sha }} -o docker-compose.tar.gz" >> $GITHUB_STEP_SUMMARY
+        echo "tar -xzf docker-compose.tar.gz" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "# Configure environment" >> $GITHUB_STEP_SUMMARY
+        echo "cp .env.example .env" >> $GITHUB_STEP_SUMMARY
+        echo "# Edit .env with your configuration" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "# Start services" >> $GITHUB_STEP_SUMMARY
+        echo "docker-compose -f docker-compose.prod.yml up -d" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        echo "## 🔗 Service URLs" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "After deployment, services will be available at:" >> $GITHUB_STEP_SUMMARY
+        echo "- **Frontend**: http://localhost:3000" >> $GITHUB_STEP_SUMMARY
+        echo "- **Backend API**: http://localhost:3001" >> $GITHUB_STEP_SUMMARY
+        echo "- **Auth Service**: http://localhost:8005" >> $GITHUB_STEP_SUMMARY  
+        echo "- **Ollama LLM**: http://localhost:11434" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        echo "## 🔒 Security Scanning" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "All images have been scanned for security vulnerabilities using Trivy." >> $GITHUB_STEP_SUMMARY
+        echo "Check the Security tab for detailed vulnerability reports." >> $GITHUB_STEP_SUMMARY
+
+    - name: 🎉 Success Notification
+      if: needs.build-and-publish.result == 'success'
+      run: |
+        echo "🎉 Docker build and publish completed successfully!"
+        echo "📦 All images are ready for deployment"
+        echo "🔒 Security scanning completed"
+        echo "📊 Check the summary above for deployment instructions"

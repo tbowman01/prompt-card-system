@@ -41,12 +41,32 @@ const customJestConfig = {
     '!src/app/layout.tsx',
     '!src/app/globals.css',
   ],
+  // LONDON TDD REQUIREMENT: 100% COVERAGE - ABSOLUTE (NO EXCEPTIONS)
   coverageThreshold: {
     global: {
-      branches: 70,
-      functions: 70,
-      lines: 70,
-      statements: 70,
+      branches: 100,
+      functions: 100,
+      lines: 100,
+      statements: 100,
+    },
+    // CRITICAL: All frontend modules MUST have 100% coverage
+    './src/components/**/*.{js,jsx,ts,tsx}': {
+      branches: 100,
+      functions: 100,
+      lines: 100,
+      statements: 100,
+    },
+    './src/hooks/**/*.{js,jsx,ts,tsx}': {
+      branches: 100,
+      functions: 100,
+      lines: 100,
+      statements: 100,
+    },
+    './src/lib/**/*.{js,jsx,ts,tsx}': {
+      branches: 100,
+      functions: 100,
+      lines: 100,
+      statements: 100,
     },
   },
   testMatch: [
