@@ -13,8 +13,8 @@ ENV PUPPETEER_SKIP_DOWNLOAD=true
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=true
 ENV CYPRESS_INSTALL_BINARY=0
 
-# Install production dependencies (workspace-aware)
-RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+# Install production dependencies (workspace-aware) - use npm install for version tolerance
+RUN npm install --omit=dev --ignore-scripts && npm cache clean --force
 
 # Stage 2: Build stage (for Next.js compilation)
 FROM node:20-alpine AS builder
@@ -30,8 +30,8 @@ ENV PUPPETEER_SKIP_DOWNLOAD=true
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=true
 ENV CYPRESS_INSTALL_BINARY=0
 
-# Install all dependencies for building (workspace-aware)
-RUN npm ci --ignore-scripts
+# Install all dependencies for building (workspace-aware) - use npm install for version tolerance
+RUN npm install --ignore-scripts
 
 # Copy frontend source code
 COPY frontend/ ./frontend/
