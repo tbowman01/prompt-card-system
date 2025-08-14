@@ -34,6 +34,10 @@ on:
         required: false
         default: 'linux/amd64'
 
+concurrency:
+  group: docker-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ${{ github.repository }}
@@ -63,32 +67,22 @@ jobs:
             SERVICES="backend,frontend,auth,ollama"
           fi
         else
-          # Auto-detect changed services
-          SERVICES=""
-          if [ "${{ contains(github.event.head_commit.modified, 'backend/') || contains(github.event.head_commit.added, 'backend/') }}" = "true" ]; then
-            SERVICES="backend"
-          fi
-          if [ "${{ contains(github.event.head_commit.modified, 'frontend/') || contains(github.event.head_commit.added, 'frontend/') }}" = "true" ]; then
-            SERVICES="${SERVICES:+$SERVICES,}frontend"
-          fi
-          if [ "${{ contains(github.event.head_commit.modified, 'auth/') || contains(github.event.head_commit.added, 'auth/') }}" = "true" ]; then
-            SERVICES="${SERVICES:+$SERVICES,}auth"
-          fi
-          if [ "${{ contains(github.event.head_commit.modified, 'docker/ollama/') || contains(github.event.head_commit.added, 'docker/ollama/') }}" = "true" ]; then
-            SERVICES="${SERVICES:+$SERVICES,}ollama"
-          fi
-          # If no specific services changed, build all on main branch
-          if [ -z "$SERVICES" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
+          # For push events, build all services to ensure consistency
+          if [ "${{ github.event_name }}" = "push" ]; then
             SERVICES="backend,frontend,auth,ollama"
-          fi
-          # Default to core services for develop
-          if [ -z "$SERVICES" ]; then
-            SERVICES="backend,frontend"
+          else
+            # For PRs, build all services for testing
+            SERVICES="backend,frontend,auth"
           fi
         fi
         
-        # Convert to JSON array
-        SERVICES_ARRAY=$(echo "$SERVICES" | jq -R -s -c 'split(",") | map(select(. != ""))')
+        # Convert to JSON array (using Python if jq not available)
+        if command -v jq >/dev/null 2>&1; then
+          SERVICES_ARRAY=$(echo "$SERVICES" | jq -R -s -c 'split(",") | map(select(. != ""))')
+        else
+          # Fallback to manual JSON creation
+          SERVICES_ARRAY="[\"$(echo "$SERVICES" | sed 's/,/", "/g')\"]"
+        fi
         echo "services=$SERVICES_ARRAY" >> $GITHUB_OUTPUT
         
         # Determine if we should push
@@ -145,8 +139,8 @@ jobs:
           type=semver,pattern={{version}}
           type=semver,pattern={{major}}.{{minor}}
           type=raw,value=latest,enable={{is_default_branch}}
-          type=sha,prefix={{branch}}-,format=short
-          type=raw,value={{branch}}-{{date 'YYYYMMDD'}}-{{sha}}
+          type=sha,prefix=sha-,format=short
+          type=raw,value={{date 'YYYYMMDD-HHmmss'}},enable={{is_default_branch}}
         labels: |
           org.opencontainers.image.title=Prompt Card System - ${{ matrix.service }}
           org.opencontainers.image.description=${{ matrix.service }} service for enterprise vLLM platform
@@ -154,7 +148,7 @@ jobs:
           org.opencontainers.image.licenses=MIT
           service.name=${{ matrix.service }}
           service.version=${{ github.sha }}
-          build.date=${{ github.event.head_commit.timestamp }}
+          build.date=${{ github.event.head_commit.timestamp || github.event.repository.updated_at }}
     
     - name: 🏗️ Build and Push Docker Image
       uses: docker/build-push-action@v5
@@ -167,16 +161,17 @@ jobs:
         cache-from: type=gha,scope=${{ matrix.service }}
         cache-to: type=gha,mode=max,scope=${{ matrix.service }}
         build-args: |
-          BUILD_DATE=${{ github.event.head_commit.timestamp }}
+          BUILD_DATE=${{ github.event.head_commit.timestamp || github.event.repository.updated_at }}
           BUILD_VERSION=${{ github.sha }}
           SERVICE_NAME=${{ matrix.service }}
         provenance: true
         sbom: true
     
     - name: 🔒 Run Security Scan (Trivy)
+      if: needs.setup.outputs.should_push == 'true'
       uses: aquasecurity/trivy-action@master
       with:
-        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ github.sha }}
+        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:sha-${{ github.sha }}
         format: 'sarif'
         output: '${{ matrix.service }}-security-results.sarif'
         severity: 'CRITICAL,HIGH,MEDIUM'
@@ -196,31 +191,31 @@ jobs:
         echo "🧪 Testing ${{ matrix.service }} Docker image..."
         
         # Test image can be pulled
-        docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ github.sha }}
+        docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:sha-${{ github.sha }}
         
         # Test image runs and passes health check
         case "${{ matrix.service }}" in
           "backend")
             docker run -d --name test-${{ matrix.service }} -p 3001:3001 \
-              ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ github.sha }}
+              ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:sha-${{ github.sha }}
             sleep 30
             curl -f http://localhost:3001/health || exit 1
             ;;
           "frontend")
             docker run -d --name test-${{ matrix.service }} -p 3000:3000 \
-              ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ github.sha }}
+              ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:sha-${{ github.sha }}
             sleep 30
             curl -f http://localhost:3000 || exit 1
             ;;
           "auth")
             docker run -d --name test-${{ matrix.service }} -p 8005:8005 \
-              ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ github.sha }}
+              ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:sha-${{ github.sha }}
             sleep 30
             curl -f http://localhost:8005/auth/health || exit 1
             ;;
           "ollama")
             docker run -d --name test-${{ matrix.service }} -p 11434:11434 \
-              ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ github.sha }}
+              ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:sha-${{ github.sha }}
             sleep 60
             curl -f http://localhost:11434/api/version || exit 1
             ;;
