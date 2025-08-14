@@ -1012,10 +1012,10 @@ export class AIPromptOptimizer {
     const technicalIndicators = ['implement', 'configure', 'optimize', 'debug', 'execute', 'deploy'];
     const creativeIndicators = ['imagine', 'create', 'story', 'artistic', 'creative', 'beautiful'];
     
-    let formalScore = formalIndicators.filter(indicator => lowerText.includes(indicator)).length;
-    let casualScore = casualIndicators.filter(indicator => lowerText.includes(indicator)).length;
-    let technicalScore = technicalIndicators.filter(indicator => lowerText.includes(indicator)).length;
-    let creativeScore = creativeIndicators.filter(indicator => lowerText.includes(indicator)).length;
+    const formalScore = formalIndicators.filter(indicator => lowerText.includes(indicator)).length;
+    const casualScore = casualIndicators.filter(indicator => lowerText.includes(indicator)).length;
+    const technicalScore = technicalIndicators.filter(indicator => lowerText.includes(indicator)).length;
+    const creativeScore = creativeIndicators.filter(indicator => lowerText.includes(indicator)).length;
     
     const maxScore = Math.max(formalScore, casualScore, technicalScore, creativeScore);
     

@@ -329,7 +329,7 @@ export class EnhancedOperationalTransform extends EventEmitter {
    * Transform one operation against another
    */
   private transformAgainstOperation(op1: Operation, op2: Operation): { transformed: Operation; conflict?: ConflictInfo } {
-    let transformed = { ...op1 };
+    const transformed = { ...op1 };
     let conflict: ConflictInfo | undefined;
 
     if (op1.type === 'insert' && op2.type === 'insert') {

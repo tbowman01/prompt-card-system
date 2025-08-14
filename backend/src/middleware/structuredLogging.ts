@@ -187,7 +187,7 @@ export const structuredLoggingMiddleware = (req: Request, res: Response, next: N
 
     // Determine log level based on status code
     let level: 'info' | 'warn' | 'error' = 'info';
-    let message = `Request completed: ${req.method} ${req.url} ${res.statusCode} (${duration}ms)`;
+    const message = `Request completed: ${req.method} ${req.url} ${res.statusCode} (${duration}ms)`;
 
     if (res.statusCode >= 500) {
       level = 'error';

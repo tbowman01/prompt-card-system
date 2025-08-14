@@ -213,7 +213,7 @@ export class LoadTestScheduler extends EventEmitter {
    * Get test execution history
    */
   async getExecutionHistory(scheduledTestId?: string, limit: number = 50, offset: number = 0): Promise<TestExecutionResult[]> {
-    let query = `
+    const query = `
       SELECT * FROM test_executions 
       ${scheduledTestId ? 'WHERE scheduled_test_id = ?' : ''}
       ORDER BY start_time DESC 

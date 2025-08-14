@@ -1,0 +1,648 @@
+name: 🎯 Issue Triage & Auto-Labeling
+
+on:
+  issues:
+    types: [opened, edited, reopened]
+  issue_comment:
+    types: [created]
+  schedule:
+    - cron: '0 */4 * * *'  # Every 4 hours for triage review
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Triage action to perform'
+        required: false
+        type: choice
+        default: 'full-triage'
+        options:
+          - 'full-triage'
+          - 'priority-review'
+          - 'auto-label-only'
+          - 'assignment-review'
+
+permissions:
+  issues: write
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: issue-triage-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  auto_triage:
+    name: 🔍 Auto-Triage Issues
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issues' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action != 'priority-review')
+    
+    steps:
+      - name: 🏗️ Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          
+      - name: 🏷️ Intelligent Auto-Labeling
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue = context.payload.issue;
+            if (!issue) {
+              console.log('No issue data available');
+              return;
+            }
+            
+            const title = issue.title.toLowerCase();
+            const body = (issue.body || '').toLowerCase();
+            const fullText = title + ' ' + body;
+            const labels = [];
+            
+            // Advanced priority detection with multiple indicators
+            const priorityIndicators = {
+              critical: [
+                'critical', 'urgent', 'emergency', 'blocking', 'production down',
+                'security breach', 'data loss', 'cannot deploy', 'system crash',
+                'critical bug', 'urgent fix', 'hotfix needed'
+              ],
+              high: [
+                'high priority', 'important', 'major bug', 'significant impact',
+                'breaking change', 'regression', 'performance issue', 'user impact',
+                'deadline', 'milestone blocker'
+              ],
+              low: [
+                'low priority', 'nice to have', 'enhancement', 'minor',
+                'cosmetic', 'cleanup', 'refactor', 'documentation',
+                'nice-to-have', 'future'
+              ]
+            };
+            
+            // Determine priority
+            let priority = 'medium'; // default
+            for (const [level, indicators] of Object.entries(priorityIndicators)) {
+              if (indicators.some(indicator => fullText.includes(indicator))) {
+                priority = level;
+                break;
+              }
+            }
+            labels.push(`priority:${priority}`);
+            
+            // Advanced type detection
+            const typeKeywords = {
+              bug: [
+                'bug', 'error', 'fail', 'broken', 'crash', 'issue', 'problem',
+                'not working', 'incorrect', 'wrong', 'unexpected', 'exception',
+                'stack trace', 'throws', 'null pointer', '500 error', '404'
+              ],
+              feature: [
+                'feature', 'enhancement', 'new', 'add', 'implement', 'support',
+                'would like', 'request', 'suggestion', 'improvement', 'ability to',
+                'feature request', 'enhancement request'
+              ],
+              security: [
+                'security', 'vulnerability', 'exploit', 'breach', 'attack',
+                'injection', 'xss', 'csrf', 'auth', 'permission', 'unauthorized',
+                'cve-', 'security issue'
+              ],
+              performance: [
+                'slow', 'performance', 'speed', 'optimize', 'lag', 'timeout',
+                'memory', 'cpu', 'load time', 'bottleneck', 'efficient'
+              ],
+              documentation: [
+                'doc', 'documentation', 'readme', 'guide', 'tutorial',
+                'example', 'help', 'explain', 'clarify', 'instructions'
+              ],
+              testing: [
+                'test', 'testing', 'unit test', 'integration test', 'e2e',
+                'coverage', 'mock', 'jest', 'playwright', 'cypress'
+              ]
+            };
+            
+            let typeFound = false;
+            for (const [type, keywords] of Object.entries(typeKeywords)) {
+              if (keywords.some(keyword => fullText.includes(keyword))) {
+                labels.push(`type:${type}`);
+                typeFound = true;
+                break;
+              }
+            }
+            if (!typeFound) {
+              labels.push('type:other');
+            }
+            
+            // Component detection with expanded keywords
+            const componentKeywords = {
+              frontend: [
+                'frontend', 'ui', 'ux', 'react', 'component', 'page', 'view',
+                'css', 'style', 'layout', 'responsive', 'browser', 'client',
+                'next.js', 'tailwind'
+              ],
+              backend: [
+                'backend', 'api', 'server', 'endpoint', 'route', 'controller',
+                'service', 'middleware', 'auth', 'validation', 'node.js',
+                'express', 'fastapi', 'rest'
+              ],
+              database: [
+                'database', 'db', 'sql', 'query', 'table', 'schema',
+                'migration', 'orm', 'postgres', 'mysql', 'mongodb',
+                'data', 'model'
+              ],
+              infrastructure: [
+                'docker', 'deployment', 'devops', 'ci/cd', 'pipeline',
+                'container', 'kubernetes', 'aws', 'cloud', 'server',
+                'nginx', 'apache', 'build'
+              ],
+              testing: [
+                'test', 'testing', 'spec', 'jest', 'playwright', 'cypress',
+                'unit test', 'integration', 'e2e', 'coverage', 'mock'
+              ],
+              monitoring: [
+                'monitoring', 'analytics', 'logging', 'metrics', 'tracking',
+                'telemetry', 'observability', 'alerts', 'dashboard'
+              ]
+            };
+            
+            for (const [component, keywords] of Object.entries(componentKeywords)) {
+              if (keywords.some(keyword => fullText.includes(keyword))) {
+                labels.push(`component:${component}`);
+              }
+            }
+            
+            // Intelligent effort estimation
+            const complexityIndicators = {
+              large: [
+                'major', 'complex', 'significant', 'architecture', 'redesign',
+                'migration', 'breaking change', 'multiple', 'system-wide',
+                'refactor', 'complete rewrite'
+              ],
+              medium: [
+                'moderate', 'several', 'some changes', 'update', 'modify',
+                'extend', 'enhance', 'improve'
+              ],
+              small: [
+                'minor', 'small', 'quick', 'simple', 'easy', 'tiny',
+                'fix typo', 'one line', 'trivial'
+              ]
+            };
+            
+            let effort = 'medium'; // default
+            for (const [size, indicators] of Object.entries(complexityIndicators)) {
+              if (indicators.some(indicator => fullText.includes(indicator))) {
+                effort = size;
+                break;
+              }
+            }
+            
+            // Additional heuristics for effort estimation
+            const wordCount = fullText.split(' ').length;
+            if (wordCount > 300) effort = 'large';
+            else if (wordCount < 50 && effort === 'medium') effort = 'small';
+            
+            labels.push(`effort:${effort}`);
+            
+            // Initial status
+            labels.push('status:triage');
+            
+            // Apply all labels
+            if (labels.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                labels: labels
+              });
+              
+              console.log(`Applied labels to issue #${issue.number}:`, labels);
+            }
+            
+      - name: 🎯 Smart Team Assignment
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue = context.payload.issue;
+            if (!issue) return;
+            
+            const labels = issue.labels.map(l => l.name);
+            
+            // Team assignment logic (customize for your team)
+            const teamAssignment = {
+              'component:frontend': [], // ['frontend-dev'],
+              'component:backend': [],  // ['backend-dev'],
+              'component:database': [], // ['database-admin'],
+              'component:infrastructure': [], // ['devops-engineer'],
+              'type:security': [], // ['security-team'],
+              'priority:critical': [] // ['tech-lead']
+            };
+            
+            let suggestedAssignees = [];
+            
+            for (const [labelPattern, assignees] of Object.entries(teamAssignment)) {
+              if (labels.includes(labelPattern)) {
+                suggestedAssignees.push(...assignees);
+              }
+            }
+            
+            // Remove duplicates and log suggestions
+            suggestedAssignees = [...new Set(suggestedAssignees)];
+            
+            if (suggestedAssignees.length > 0) {
+              console.log(`Suggested assignees for issue #${issue.number}:`, suggestedAssignees);
+              
+              // For now, just log. Enable actual assignment when team is configured:
+              // await github.rest.issues.addAssignees({
+              //   owner: context.repo.owner,
+              //   repo: context.repo.repo,
+              //   issue_number: issue.number,
+              //   assignees: suggestedAssignees.slice(0, 2) // Assign max 2 people
+              // });
+            }
+            
+      - name: 🔔 Priority Notifications
+        if: contains(github.event.issue.labels.*.name, 'priority:critical') || contains(github.event.issue.labels.*.name, 'type:security')
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue = context.payload.issue;
+            const labels = issue.labels.map(l => l.name);
+            
+            const isCritical = labels.includes('priority:critical');
+            const isSecurity = labels.includes('type:security');
+            
+            let notificationBody = '';
+            
+            if (isSecurity) {
+              notificationBody = `🛡️ **SECURITY ISSUE DETECTED** 🛡️
+
+This issue has been automatically flagged as a security concern and requires immediate security team review.
+
+**Security Triage Checklist:**
+- [ ] 🔍 **Impact Assessment** - Evaluate severity and scope
+- [ ] 🛡️ **Containment** - Implement immediate mitigations if needed
+- [ ] 👥 **Team Notification** - Alert security team within 1 hour
+- [ ] 📋 **Documentation** - Record all findings and actions
+- [ ] ⏰ **Timeline** - Establish resolution timeline
+
+**Auto-detected indicators:** ${labels.filter(l => l.startsWith('type:') || l.startsWith('priority:')).join(', ')}`;
+            } else if (isCritical) {
+              notificationBody = `🚨 **CRITICAL PRIORITY ISSUE** 🚨
+
+This issue has been automatically flagged as critical priority and requires immediate attention.
+
+**Critical Issue Response Plan:**
+- [ ] 👀 **Immediate Review** - Technical lead review within 2 hours
+- [ ] 📊 **Impact Assessment** - Determine user/business impact
+- [ ] 🎯 **Team Assignment** - Assign to available team member
+- [ ] ⏰ **Timeline Estimation** - Provide initial timeline
+- [ ] 📢 **Stakeholder Communication** - Notify relevant stakeholders
+
+**Priority Classification:** ${labels.filter(l => l.startsWith('priority:')).join(', ')}
+**Component Areas:** ${labels.filter(l => l.startsWith('component:')).join(', ') || 'To be determined'}
+**Estimated Effort:** ${labels.filter(l => l.startsWith('effort:')).join(', ')}`;
+            }
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              body: notificationBody + `
+
+---
+*Automated notification from Issue Triage System*`
+            });
+            
+  periodic_triage_review:
+    name: 📊 4-Hour Triage Review
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 */4 * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'priority-review')
+    
+    steps:
+      - name: 🏗️ Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          
+      - name: 🔍 Review Triage Status
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const now = new Date();
+            const fourHoursAgo = new Date(now.getTime() - 4 * 60 * 60 * 1000);
+            
+            // Get issues that need triage attention
+            const { data: triageIssues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'status:triage',
+              per_page: 50
+            });
+            
+            // Get recently updated issues
+            const { data: recentIssues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              since: fourHoursAgo.toISOString(),
+              per_page: 100
+            });
+            
+            const triageStats = {
+              totalTriage: triageIssues.length,
+              urgentTriage: 0,
+              oldTriage: 0,
+              recentActivity: recentIssues.length,
+              priorityDistribution: { critical: 0, high: 0, medium: 0, low: 0 },
+              unassignedCritical: 0,
+              needsAttention: []
+            };
+            
+            // Analyze triage queue
+            for (const issue of triageIssues) {
+              const labels = issue.labels.map(l => l.name);
+              const createdAt = new Date(issue.created_at);
+              const ageInHours = (now - createdAt) / (1000 * 60 * 60);
+              
+              // Priority analysis
+              if (labels.includes('priority:critical')) {
+                triageStats.priorityDistribution.critical++;
+                triageStats.urgentTriage++;
+                
+                if (issue.assignees.length === 0) {
+                  triageStats.unassignedCritical++;
+                  triageStats.needsAttention.push({
+                    number: issue.number,
+                    title: issue.title,
+                    issue: 'Critical priority issue without assignee',
+                    age: Math.floor(ageInHours)
+                  });
+                }
+              } else if (labels.includes('priority:high')) {
+                triageStats.priorityDistribution.high++;
+                if (ageInHours > 24) triageStats.urgentTriage++;
+              } else if (labels.includes('priority:medium')) {
+                triageStats.priorityDistribution.medium++;
+              } else if (labels.includes('priority:low')) {
+                triageStats.priorityDistribution.low++;
+              }
+              
+              // Old triage issues
+              if (ageInHours > 48) {
+                triageStats.oldTriage++;
+                triageStats.needsAttention.push({
+                  number: issue.number,
+                  title: issue.title,
+                  issue: 'In triage for over 48 hours',
+                  age: Math.floor(ageInHours)
+                });
+              }
+            }
+            
+            // Create triage review report if there are issues to address
+            if (triageStats.totalTriage > 0 || triageStats.needsAttention.length > 0) {
+              const report = `# 🔍 4-Hour Triage Review Summary
+
+**Review Period:** ${fourHoursAgo.toLocaleString()} → ${now.toLocaleString()}
+
+## 📊 Current Triage Queue Status
+- **Total Issues in Triage:** ${triageStats.totalTriage}
+- **Recent Activity:** ${triageStats.recentActivity} issues updated in last 4h
+- **Urgent Attention Needed:** ${triageStats.urgentTriage}
+- **Old Triage Issues (48h+):** ${triageStats.oldTriage}
+
+## 🎯 Priority Distribution in Triage
+- **Critical:** ${triageStats.priorityDistribution.critical} 🔴
+- **High:** ${triageStats.priorityDistribution.high} 🟡
+- **Medium:** ${triageStats.priorityDistribution.medium} 🟢
+- **Low:** ${triageStats.priorityDistribution.low} ⚪
+
+## ⚠️ Issues Requiring Attention
+
+${triageStats.needsAttention.length > 0 ? 
+  triageStats.needsAttention.map(item => 
+    `- **#${item.number}**: ${item.title}\\n  - Issue: ${item.issue}\\n  - Age: ${item.age} hours\\n`
+  ).join('\\n') : 
+  '✅ No critical triage issues identified'
+}
+
+## 🎯 Recommended Actions
+
+${triageStats.unassignedCritical > 0 ? 
+  `- 🚨 **Urgent**: ${triageStats.unassignedCritical} critical issues need immediate assignment\\n` : ''}
+${triageStats.oldTriage > 3 ? 
+  `- ⏰ **Review**: ${triageStats.oldTriage} issues have been in triage for 48+ hours\\n` : ''}
+${triageStats.urgentTriage > 5 ? 
+  `- 🎯 **Prioritization**: High number of urgent triage items - consider sprint planning\\n` : ''}
+${triageStats.totalTriage === 0 ? 
+  '✅ **Excellent**: Triage queue is clear!\\n' : ''}
+
+## 📈 Triage Health Score
+
+${triageStats.totalTriage === 0 ? '🟢 **Excellent** - No backlog' :
+  triageStats.urgentTriage === 0 ? '🟡 **Good** - Manageable queue' :
+  triageStats.urgentTriage < 3 ? '🟠 **Fair** - Some urgent items' :
+  '🔴 **Needs Attention** - High urgent queue'}
+
+---
+*Automated triage review completed at ${now.toISOString()}*`;
+              
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `🔍 4-Hour Triage Review - ${now.toLocaleTimeString()}`,
+                body: report,
+                labels: ['triage-review', 'automation', 'status:info']
+              });
+            }
+            
+  update_status:
+    name: 📊 Status Command Processor
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issue_comment'
+    
+    steps:
+      - name: 🏗️ Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: 🔄 Process Status Commands
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const comment = context.payload.comment;
+            const issue = context.payload.issue;
+            const commentBody = comment.body.toLowerCase().trim();
+            
+            // Only process commands (starting with /)
+            if (!commentBody.startsWith('/')) return;
+            
+            let labelsToAdd = [];
+            let labelsToRemove = [];
+            let responseMessage = '';
+            
+            // Status transition commands
+            const statusCommands = {
+              '/in-progress': {
+                add: ['status:in-progress'],
+                remove: ['status:triage', 'status:ready', 'status:blocked'],
+                message: '🔄 Status updated to **In Progress**'
+              },
+              '/working': {
+                add: ['status:in-progress'],
+                remove: ['status:triage', 'status:ready', 'status:blocked'],
+                message: '🔄 Status updated to **In Progress**'
+              },
+              '/ready': {
+                add: ['status:ready'],
+                remove: ['status:triage', 'status:blocked', 'status:needs-info'],
+                message: '✅ Status updated to **Ready for Development**'
+              },
+              '/approved': {
+                add: ['status:ready'],
+                remove: ['status:triage', 'status:blocked', 'status:needs-info'],
+                message: '✅ Issue **Approved** and ready for development'
+              },
+              '/blocked': {
+                add: ['status:blocked'],
+                remove: ['status:in-progress', 'status:ready'],
+                message: '⛔ Status updated to **Blocked**'
+              },
+              '/needs-info': {
+                add: ['status:needs-info'],
+                remove: ['status:ready', 'status:in-progress'],
+                message: '❓ Status updated to **Needs Information**'
+              },
+              '/more-info': {
+                add: ['status:needs-info'],
+                remove: ['status:ready', 'status:in-progress'],
+                message: '❓ **More Information Needed**'
+              }
+            };
+            
+            // Priority update commands
+            const priorityCommands = {
+              '/priority critical': {
+                add: ['priority:critical'],
+                remove: ['priority:high', 'priority:medium', 'priority:low'],
+                message: '🔴 Priority updated to **Critical**'
+              },
+              '/priority high': {
+                add: ['priority:high'],
+                remove: ['priority:critical', 'priority:medium', 'priority:low'],
+                message: '🟡 Priority updated to **High**'
+              },
+              '/priority medium': {
+                add: ['priority:medium'],
+                remove: ['priority:critical', 'priority:high', 'priority:low'],
+                message: '🟢 Priority updated to **Medium**'
+              },
+              '/priority low': {
+                add: ['priority:low'],
+                remove: ['priority:critical', 'priority:high', 'priority:medium'],
+                message: '⚪ Priority updated to **Low**'
+              }
+            };
+            
+            // Type update commands
+            const typeCommands = {
+              '/type bug': {
+                add: ['type:bug'],
+                remove: ['type:feature', 'type:documentation', 'type:security'],
+                message: '🐛 Type updated to **Bug**'
+              },
+              '/type feature': {
+                add: ['type:feature'],
+                remove: ['type:bug', 'type:documentation', 'type:security'],
+                message: '✨ Type updated to **Feature**'
+              },
+              '/type security': {
+                add: ['type:security'],
+                remove: ['type:bug', 'type:feature', 'type:documentation'],
+                message: '🛡️ Type updated to **Security**'
+              }
+            };
+            
+            // Check all command types
+            const allCommands = { ...statusCommands, ...priorityCommands, ...typeCommands };
+            
+            for (const [command, config] of Object.entries(allCommands)) {
+              if (commentBody === command || commentBody.startsWith(command + ' ')) {
+                labelsToAdd.push(...config.add);
+                labelsToRemove.push(...config.remove);
+                responseMessage = config.message;
+                break;
+              }
+            }
+            
+            // Special handling for assignment commands
+            if (commentBody.startsWith('/assign')) {
+              const parts = commentBody.split(' ');
+              if (parts.length > 1) {
+                const username = parts[1].replace('@', '');
+                
+                try {
+                  await github.rest.issues.addAssignees({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issue.number,
+                    assignees: [username]
+                  });
+                  
+                  responseMessage = `👥 Assigned to @${username}`;
+                  labelsToRemove.push('status:triage');
+                  labelsToAdd.push('status:ready');
+                } catch (error) {
+                  responseMessage = `❌ Could not assign to @${username}`;
+                }
+              }
+            }
+            
+            // Apply label changes
+            if (labelsToRemove.length > 0) {
+              for (const label of labelsToRemove) {
+                try {
+                  await github.rest.issues.removeLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issue.number,
+                    name: label
+                  });
+                } catch (error) {
+                  console.log(`Label ${label} not found or already removed`);
+                }
+              }
+            }
+            
+            if (labelsToAdd.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                labels: labelsToAdd
+              });
+            }
+            
+            // Post confirmation response
+            if (responseMessage) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `${responseMessage}
+
+**Command processed by:** @${comment.user.login}
+**Applied changes:** ${[...labelsToAdd, ...labelsToRemove.map(l => `~~${l}~~`)].join(', ')}
+
+---
+*Automated by Issue Triage System*`
+              });
+            }

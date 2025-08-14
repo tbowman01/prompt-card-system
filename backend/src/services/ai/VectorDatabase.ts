@@ -247,7 +247,7 @@ export class VectorDatabase {
       );
 
       // Apply filters
-      let filteredCandidates = await this.applyFilters(candidates, query.filters);
+      const filteredCandidates = await this.applyFilters(candidates, query.filters);
 
       // Sort by similarity (descending)
       filteredCandidates.sort((a, b) => b.similarity - a.similarity);

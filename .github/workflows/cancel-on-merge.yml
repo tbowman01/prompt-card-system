@@ -1,0 +1,57 @@
+name: 🚫 Cancel Jobs on PR Merge
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cancel-jobs:
+    name: 🚫 Cancel Running Jobs
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true
+    
+    steps:
+    - name: 🚫 Cancel Running Workflows for Merged PR
+      run: |
+        echo "🚫 PR #${{ github.event.number }} was merged, canceling all running workflows for this branch"
+        
+        # Get all running workflows for the PR branch
+        BRANCH="${{ github.event.pull_request.head.ref }}"
+        REPO="${{ github.repository }}"
+        
+        echo "📋 Checking for running workflows on branch: $BRANCH"
+        
+        # Get running workflows using GitHub CLI
+        RUNNING_WORKFLOWS=$(gh api repos/$REPO/actions/runs \
+          --jq '.workflow_runs[] | select(.status == "in_progress" or .status == "queued") | select(.head_branch == "'"$BRANCH"'") | .id' \
+          2>/dev/null || echo "")
+        
+        if [ -z "$RUNNING_WORKFLOWS" ]; then
+          echo "✅ No running workflows found for branch $BRANCH"
+        else
+          echo "🔍 Found running workflows, canceling..."
+          echo "$RUNNING_WORKFLOWS" | while read -r run_id; do
+            if [ -n "$run_id" ]; then
+              echo "🚫 Canceling workflow run: $run_id"
+              gh api repos/$REPO/actions/runs/$run_id/cancel -X POST || echo "⚠️ Failed to cancel run $run_id"
+            fi
+          done
+          echo "✅ Finished canceling workflows for merged PR"
+        fi
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: 📊 Cleanup Summary
+      run: |
+        echo "## 🚫 PR Merge Cleanup Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Pull Request**: #${{ github.event.number }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Branch**: ${{ github.event.pull_request.head.ref }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Merged by**: ${{ github.event.pull_request.merged_by.login }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Action**: Canceled all running workflows for merged branch" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "✅ This helps prevent resource waste and potential conflicts after PR merge." >> $GITHUB_STEP_SUMMARY

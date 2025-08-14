@@ -879,7 +879,7 @@ Team Size: {{team_size}}`,
       sortOrder = 'asc' 
     } = options;
 
-    let samples = category ? 
+    const samples = category ? 
       this.getSamplePromptsByCategory(category) : 
       this.getSamplePrompts();
 
@@ -983,7 +983,7 @@ Team Size: {{team_size}}`,
   } = {}) {
     const { category, includeStats = false } = options;
     
-    let samples = category ? 
+    const samples = category ? 
       this.getSamplePromptsByCategory(category) : 
       this.getSamplePrompts();
 

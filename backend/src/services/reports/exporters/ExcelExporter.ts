@@ -90,7 +90,7 @@ export class ExcelExporter {
     metricsHeaderCell.font.color = { argb: 'ffffff' };
 
     // Key metrics
-    let row = 7;
+    const row = 7;
     report.summary.keyMetrics.forEach((metric, index) => {
       const col = (index % 3) * 2 + 1; // A, C, E columns
       const metricRow = Math.floor(index / 3) + row;

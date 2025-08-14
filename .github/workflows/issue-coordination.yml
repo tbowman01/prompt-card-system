@@ -1,0 +1,637 @@
+name: 🚀 Issue Coordination & Project Management
+
+on:
+  issues:
+    types: [opened, edited, closed, reopened, labeled, unlabeled, assigned, unassigned]
+  issue_comment:
+    types: [created, edited]
+  pull_request:
+    types: [opened, closed, merged]
+  schedule:
+    - cron: '0 */4 * * *'  # Every 4 hours for coordination sync
+    - cron: '0 8 * * 1'    # Weekly planning session (Monday 8 AM)
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Coordination action to perform'
+        required: true
+        type: choice
+        options:
+          - 'full-sync'
+          - 'priority-review'
+          - 'team-assignment'
+          - 'milestone-planning'
+          - 'velocity-analysis'
+
+permissions:
+  issues: write
+  pull-requests: write
+  contents: read
+  projects: write
+
+concurrency:
+  group: issue-coordination-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  issue_coordination:
+    name: 🎯 Issue Coordination Engine
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule' || github.event.schedule == '0 */4 * * *'
+    
+    steps:
+      - name: 🏗️ Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          
+      - name: 🤖 Initialize Claude Flow Coordination
+        id: claude_flow
+        run: |
+          echo "🐝 Initializing Claude Flow coordination..."
+          npx claude-flow@alpha hooks pre-task --description "GitHub issue coordination" --auto-spawn-agents false
+          
+      - name: 📊 Analyze Issue Context
+        id: analysis
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs').promises;
+            
+            // Enhanced issue analysis with 4-hour scheduling optimization
+            class IssueCoordinator {
+              constructor(github, context) {
+                this.github = github;
+                this.context = context;
+                this.issueData = context.payload.issue || context.payload.pull_request;
+                this.actionType = context.eventName;
+                this.isScheduled = context.eventName === 'schedule';
+              }
+              
+              async analyze() {
+                console.log(`🔍 Analyzing ${this.actionType} event...`);
+                
+                if (this.isScheduled) {
+                  // Scheduled 4-hour coordination sync
+                  return await this.scheduleCoordination();
+                } else {
+                  // Real-time issue coordination
+                  return await this.realTimeCoordination();
+                }
+              }
+              
+              async scheduleCoordination() {
+                console.log('🕐 Running 4-hour coordination sync...');
+                
+                const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000);
+                
+                // Get issues updated in last 4 hours
+                const { data: recentIssues } = await this.github.rest.issues.listForRepo({
+                  owner: this.context.repo.owner,
+                  repo: this.context.repo.repo,
+                  state: 'all',
+                  since: fourHoursAgo.toISOString(),
+                  per_page: 100
+                });
+                
+                // Get all open critical/high priority issues
+                const { data: priorityIssues } = await this.github.rest.issues.listForRepo({
+                  owner: this.context.repo.owner,
+                  repo: this.context.repo.repo,
+                  state: 'open',
+                  labels: 'priority:critical,priority:high',
+                  per_page: 50
+                });
+                
+                const analysis = {
+                  coordinationType: 'scheduled',
+                  timestamp: new Date().toISOString(),
+                  recentActivity: {
+                    issues: recentIssues.length,
+                    opened: recentIssues.filter(i => new Date(i.created_at) >= fourHoursAgo).length,
+                    closed: recentIssues.filter(i => i.closed_at && new Date(i.closed_at) >= fourHoursAgo).length,
+                    updated: recentIssues.filter(i => new Date(i.updated_at) >= fourHoursAgo && new Date(i.created_at) < fourHoursAgo).length
+                  },
+                  priorityStatus: {
+                    totalCritical: priorityIssues.filter(i => i.labels.some(l => l.name === 'priority:critical')).length,
+                    totalHigh: priorityIssues.filter(i => i.labels.some(l => l.name === 'priority:high')).length,
+                    unassigned: priorityIssues.filter(i => i.assignees.length === 0).length,
+                    blocked: priorityIssues.filter(i => i.labels.some(l => l.name === 'status:blocked')).length,
+                    stale: priorityIssues.filter(i => new Date(i.updated_at) < new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)).length
+                  },
+                  teamWorkload: await this.analyzeTeamWorkload(),
+                  recommendations: []
+                };
+                
+                // Generate scheduled coordination recommendations
+                if (analysis.priorityStatus.unassigned > 0) {
+                  analysis.recommendations.push({
+                    type: 'assignment',
+                    severity: 'high',
+                    message: `${analysis.priorityStatus.unassigned} high/critical priority issues need assignment`,
+                    action: 'auto-assign-available'
+                  });
+                }
+                
+                if (analysis.priorityStatus.stale > 2) {
+                  analysis.recommendations.push({
+                    type: 'stale-review',
+                    severity: 'medium', 
+                    message: `${analysis.priorityStatus.stale} priority issues haven't been updated in 7+ days`,
+                    action: 'schedule-review'
+                  });
+                }
+                
+                if (analysis.priorityStatus.blocked > 1) {
+                  analysis.recommendations.push({
+                    type: 'blocker-resolution',
+                    severity: 'high',
+                    message: `${analysis.priorityStatus.blocked} issues are blocked and need attention`,
+                    action: 'escalate-blockers'
+                  });
+                }
+                
+                return analysis;
+              }
+              
+              async realTimeCoordination() {
+                if (!this.issueData) return { coordinationType: 'realtime', issue: null };
+                
+                const issueDetails = await this.getIssueDetails();
+                const teamWorkload = await this.analyzeTeamWorkload();
+                const dependencies = await this.analyzeDependencies();
+                
+                return {
+                  coordinationType: 'realtime',
+                  issue: issueDetails,
+                  team: teamWorkload,
+                  dependencies: dependencies,
+                  recommendations: await this.generateRecommendations(issueDetails, teamWorkload)
+                };
+              }
+              
+              async getIssueDetails() {
+                const labels = (this.issueData.labels || []).map(l => l.name);
+                const priority = this.extractPriority(labels);
+                const components = this.extractComponents(labels);
+                const effort = this.extractEffort(labels);
+                
+                const contentAnalysis = this.analyzeContent(
+                  this.issueData.title + ' ' + (this.issueData.body || '')
+                );
+                
+                return {
+                  number: this.issueData.number,
+                  title: this.issueData.title,
+                  state: this.issueData.state,
+                  priority: priority,
+                  components: components,
+                  effort: effort,
+                  assignees: (this.issueData.assignees || []).map(a => a.login),
+                  createdAt: this.issueData.created_at,
+                  updatedAt: this.issueData.updated_at,
+                  labels: labels,
+                  contentAnalysis: contentAnalysis,
+                  age: this.calculateAge(this.issueData.created_at)
+                };
+              }
+              
+              extractPriority(labels) {
+                const priorities = ['critical', 'high', 'medium', 'low'];
+                for (const priority of priorities) {
+                  if (labels.includes(`priority:${priority}`)) {
+                    return priority;
+                  }
+                }
+                return 'medium';
+              }
+              
+              extractComponents(labels) {
+                return labels
+                  .filter(l => l.startsWith('component:'))
+                  .map(l => l.replace('component:', ''));
+              }
+              
+              extractEffort(labels) {
+                const efforts = ['small', 'medium', 'large'];
+                for (const effort of efforts) {
+                  if (labels.includes(`effort:${effort}`)) {
+                    return effort;
+                  }
+                }
+                return null;
+              }
+              
+              analyzeContent(text) {
+                const keywords = {
+                  urgent: ['urgent', 'critical', 'asap', 'emergency', 'blocking'],
+                  security: ['security', 'vulnerability', 'exploit', 'breach'],
+                  performance: ['slow', 'performance', 'optimize', 'lag', 'timeout'],
+                  bug: ['bug', 'error', 'broken', 'crash', 'fail'],
+                  feature: ['feature', 'enhancement', 'add', 'implement', 'new']
+                };
+                
+                const analysis = {};
+                for (const [category, terms] of Object.entries(keywords)) {
+                  analysis[category] = terms.some(term => 
+                    text.toLowerCase().includes(term)
+                  );
+                }
+                
+                return analysis;
+              }
+              
+              calculateAge(createdAt) {
+                const created = new Date(createdAt);
+                const now = new Date();
+                return Math.floor((now - created) / (1000 * 60 * 60 * 24));
+              }
+              
+              async analyzeTeamWorkload() {
+                const { data: openIssues } = await this.github.rest.issues.listForRepo({
+                  owner: this.context.repo.owner,
+                  repo: this.context.repo.repo,
+                  state: 'open',
+                  per_page: 100
+                });
+                
+                const workload = {};
+                
+                for (const issue of openIssues) {
+                  const assignees = issue.assignees || [];
+                  const priority = this.extractPriority(
+                    issue.labels.map(l => l.name)
+                  );
+                  
+                  for (const assignee of assignees) {
+                    const login = assignee.login;
+                    if (!workload[login]) {
+                      workload[login] = { total: 0, critical: 0, high: 0, medium: 0, low: 0 };
+                    }
+                    
+                    workload[login].total++;
+                    workload[login][priority]++;
+                  }
+                }
+                
+                const teamCapacity = this.calculateTeamCapacity(workload);
+                
+                return {
+                  individual: workload,
+                  teamCapacity: teamCapacity
+                };
+              }
+              
+              calculateTeamCapacity(workload) {
+                const totalIssues = Object.values(workload)
+                  .reduce((sum, member) => sum + member.total, 0);
+                const avgPerMember = totalIssues / Math.max(Object.keys(workload).length, 1);
+                
+                const overloaded = Object.entries(workload)
+                  .filter(([_, data]) => data.total > avgPerMember * 1.5)
+                  .map(([member, _]) => member);
+                
+                const available = Object.entries(workload)
+                  .filter(([_, data]) => data.total < avgPerMember * 0.7)
+                  .map(([member, _]) => member);
+                
+                return {
+                  totalIssues,
+                  avgPerMember: Math.round(avgPerMember * 10) / 10,
+                  overloaded,
+                  available
+                };
+              }
+              
+              async analyzeDependencies() {
+                if (!this.issueData) return [];
+                
+                const body = this.issueData.body || '';
+                const dependencies = [];
+                
+                const issueRefs = body.match(/#\d+/g) || [];
+                for (const ref of issueRefs) {
+                  const issueNumber = parseInt(ref.substring(1));
+                  try {
+                    const { data: referencedIssue } = await this.github.rest.issues.get({
+                      owner: this.context.repo.owner,
+                      repo: this.context.repo.repo,
+                      issue_number: issueNumber
+                    });
+                    
+                    dependencies.push({
+                      number: issueNumber,
+                      title: referencedIssue.title,
+                      state: referencedIssue.state,
+                      labels: referencedIssue.labels.map(l => l.name)
+                    });
+                  } catch (error) {
+                    console.log(`Could not fetch issue ${issueNumber}`);
+                  }
+                }
+                
+                return dependencies;
+              }
+              
+              async generateRecommendations(issueDetails, teamWorkload) {
+                const recommendations = [];
+                
+                if (issueDetails && issueDetails.priority === 'critical') {
+                  if (issueDetails.assignees.length === 0) {
+                    recommendations.push({
+                      type: 'assignment',
+                      severity: 'critical',
+                      action: 'assign-immediately',
+                      message: 'Critical issue needs immediate assignment',
+                      suggestedAssignees: teamWorkload.teamCapacity.available
+                    });
+                  }
+                  
+                  if (issueDetails.age > 1) {
+                    recommendations.push({
+                      type: 'escalation',
+                      severity: 'high',
+                      action: 'escalate',
+                      message: `Critical issue open for ${issueDetails.age} days`
+                    });
+                  }
+                }
+                
+                return recommendations;
+              }
+            }
+            
+            // Execute coordination
+            const coordinator = new IssueCoordinator(github, context);
+            const analysis = await coordinator.analyze();
+            
+            // Ensure directory exists
+            try {
+              await fs.mkdir('.github/issue-tracker', { recursive: true });
+            } catch (error) {
+              // Directory already exists
+            }
+            
+            // Save analysis results
+            const resultsPath = '.github/issue-tracker/analysis-results.json';
+            await fs.writeFile(
+              resultsPath, 
+              JSON.stringify(analysis, null, 2)
+            );
+            
+            // Store in GitHub outputs
+            core.setOutput('analysis', JSON.stringify(analysis));
+            core.setOutput('hasRecommendations', (analysis.recommendations || []).length > 0);
+            
+            console.log('📊 Analysis Complete:', {
+              type: analysis.coordinationType,
+              recommendations: (analysis.recommendations || []).length
+            });
+            
+      - name: 🤖 Execute Coordination Actions
+        if: steps.analysis.outputs.hasRecommendations == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const analysis = JSON.parse('${{ steps.analysis.outputs.analysis }}');
+            
+            if (analysis.coordinationType === 'scheduled') {
+              // Handle scheduled coordination actions
+              console.log('🕐 Executing scheduled coordination actions...');
+              
+              // Auto-assign unassigned priority issues
+              if (analysis.priorityStatus && analysis.priorityStatus.unassigned > 0) {
+                const { data: unassignedIssues } = await github.rest.issues.listForRepo({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  state: 'open',
+                  labels: 'priority:critical,priority:high',
+                  per_page: 100
+                });
+                
+                const available = analysis.teamWorkload?.teamCapacity?.available || [];
+                
+                for (const issue of unassignedIssues.filter(i => i.assignees.length === 0)) {
+                  if (available.length > 0) {
+                    const assignee = available[0]; // Round-robin would be better
+                    
+                    await github.rest.issues.addAssignees({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: issue.number,
+                      assignees: [assignee]
+                    });
+                    
+                    await github.rest.issues.createComment({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: issue.number,
+                      body: `🤖 **Auto-Assignment (4-hour sync)**
+                      
+This ${issue.labels.some(l => l.name === 'priority:critical') ? 'critical' : 'high'} priority issue has been automatically assigned to @${assignee} during routine coordination sync.
+
+**Coordination Summary:**
+- Recent activity: ${analysis.recentActivity.issues} issues updated in last 4 hours
+- Priority queue: ${analysis.priorityStatus.totalCritical} critical, ${analysis.priorityStatus.totalHigh} high priority
+- Team availability: ${available.join(', ')}
+
+---
+*Automated by Issue Coordination System (4-hour sync)*`
+                    });
+                  }
+                }
+              }
+              
+              // Create coordination summary for scheduled runs
+              if (analysis.recentActivity.issues > 0 || analysis.priorityStatus.totalCritical > 0) {
+                const summaryReport = `# 🚀 4-Hour Coordination Summary
+
+## 📊 Recent Activity (Last 4 Hours)
+- **Issues Updated:** ${analysis.recentActivity.issues}
+- **New Issues:** ${analysis.recentActivity.opened}
+- **Closed Issues:** ${analysis.recentActivity.closed}
+- **Issue Updates:** ${analysis.recentActivity.updated}
+
+## 🎯 Priority Status
+- **Critical Issues:** ${analysis.priorityStatus.totalCritical} 🔴
+- **High Priority Issues:** ${analysis.priorityStatus.totalHigh} 🟡
+- **Unassigned Priority Issues:** ${analysis.priorityStatus.unassigned}
+- **Blocked Issues:** ${analysis.priorityStatus.blocked}
+- **Stale Priority Issues:** ${analysis.priorityStatus.stale}
+
+## 👥 Team Capacity
+- **Total Open Issues:** ${analysis.teamWorkload.teamCapacity.totalIssues}
+- **Average per Member:** ${analysis.teamWorkload.teamCapacity.avgPerMember}
+- **Available Members:** ${analysis.teamWorkload.teamCapacity.available.join(', ') || 'None identified'}
+- **Overloaded Members:** ${analysis.teamWorkload.teamCapacity.overloaded.join(', ') || 'None'}
+
+## 🔄 Actions Taken
+${analysis.recommendations.map(r => `- **${r.type}**: ${r.message}`).join('\\n')}
+
+---
+*Automated 4-hour coordination sync completed at ${new Date().toISOString()}*`;
+                
+                // Only create summary if there's meaningful activity
+                if (analysis.recentActivity.issues > 0 || analysis.priorityStatus.totalCritical > 0 || analysis.recommendations.length > 0) {
+                  await github.rest.issues.create({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    title: `🚀 4-Hour Coordination Summary - ${new Date().toDateString()}`,
+                    body: summaryReport,
+                    labels: ['coordination', 'automation', 'status:info']
+                  });
+                }
+              }
+              
+            } else if (analysis.coordinationType === 'realtime' && analysis.issue) {
+              // Handle real-time issue coordination
+              for (const recommendation of analysis.recommendations) {
+                if (recommendation.severity === 'critical') {
+                  console.log(`🚨 Critical Recommendation: ${recommendation.message}`);
+                  
+                  if (recommendation.type === 'assignment' && recommendation.suggestedAssignees?.length > 0) {
+                    await github.rest.issues.addAssignees({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: analysis.issue.number,
+                      assignees: [recommendation.suggestedAssignees[0]]
+                    });
+                    
+                    await github.rest.issues.createComment({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: analysis.issue.number,
+                      body: `🚨 **Auto-Assignment Alert**
+                      
+This critical issue has been automatically assigned to @${recommendation.suggestedAssignees[0]} based on current team capacity.
+
+**Team Workload Analysis:**
+- Available team members: ${recommendation.suggestedAssignees.join(', ')}
+- Average issues per member: ${analysis.team.teamCapacity.avgPerMember}
+
+---
+*Automated by Issue Coordination System*`
+                    });
+                  }
+                }
+              }
+            }
+            
+      - name: 💾 Store Coordination Memory
+        run: |
+          npx claude-flow@alpha hooks post-task --task-id "issue-coordination" --analyze-performance true
+          npx claude-flow@alpha hooks notification --message "Issue coordination completed" --telemetry true
+          
+  milestone_planning:
+    name: 🎯 Weekly Milestone Planning
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 8 * * 1' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'milestone-planning')
+    
+    steps:
+      - name: 🏗️ Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: 📅 Analyze Milestones
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { data: milestones } = await github.rest.issues.listMilestones({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 30
+            });
+            
+            if (milestones.length === 0) {
+              console.log('No active milestones found');
+              return;
+            }
+            
+            const milestoneAnalysis = [];
+            
+            for (const milestone of milestones) {
+              const analysis = {
+                title: milestone.title,
+                number: milestone.number,
+                dueOn: milestone.due_on,
+                openIssues: milestone.open_issues,
+                closedIssues: milestone.closed_issues,
+                progress: Math.round((milestone.closed_issues / 
+                  Math.max(milestone.open_issues + milestone.closed_issues, 1)) * 100),
+                health: 'unknown',
+                risks: [],
+                recommendations: []
+              };
+              
+              if (milestone.due_on) {
+                const dueDate = new Date(milestone.due_on);
+                const now = new Date();
+                const daysUntilDue = Math.floor((dueDate - now) / (1000 * 60 * 60 * 24));
+                
+                analysis.daysUntilDue = daysUntilDue;
+                
+                if (daysUntilDue < 7 && milestone.open_issues > 5) {
+                  analysis.risks.push('High number of open issues near deadline');
+                  analysis.recommendations.push('Consider scope reduction or deadline extension');
+                  analysis.health = 'at-risk';
+                } else if (daysUntilDue < 3 && milestone.open_issues > 0) {
+                  analysis.health = 'critical';
+                  analysis.risks.push('Deadline approaching with open issues');
+                } else {
+                  analysis.health = 'good';
+                }
+              }
+              
+              milestoneAnalysis.push(analysis);
+            }
+            
+            // Generate milestone report
+            let report = `# 🎯 Weekly Milestone Planning Report
+
+## 📊 Active Milestones Overview
+
+| Milestone | Progress | Health | Days Left | Open Issues | Status |
+|-----------|----------|--------|-----------|-------------|---------|
+`;
+            
+            for (const milestone of milestoneAnalysis) {
+              const healthEmoji = {
+                good: '🟢',
+                'at-risk': '🟡',
+                critical: '🔴',
+                unknown: '⚪'
+              }[milestone.health];
+              
+              report += `| ${milestone.title} | ${milestone.progress}% | ${healthEmoji} | ${milestone.daysUntilDue || 'N/A'} | ${milestone.openIssues} | ${milestone.health} |\n`;
+            }
+            
+            report += `\n## 🚨 Risk Assessment\n\n`;
+            
+            for (const milestone of milestoneAnalysis) {
+              if (milestone.risks.length > 0) {
+                report += `### ${milestone.title}\n`;
+                report += milestone.risks.map(r => `- ${r}`).join('\n') + '\n\n';
+                
+                if (milestone.recommendations.length > 0) {
+                  report += `**Recommendations:**\n`;
+                  report += milestone.recommendations.map(r => `- ${r}`).join('\n') + '\n\n';
+                }
+              }
+            }
+            
+            report += `\n---\n*Generated by Weekly Milestone Planning System*`;
+            
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🎯 Weekly Milestone Planning - ${new Date().toDateString()}`,
+              body: report,
+              labels: ['milestone-planning', 'automation', 'status:info']
+            });

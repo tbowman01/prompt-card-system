@@ -82,7 +82,7 @@ export class CustomAssertionValidator {
       
       return {
         passed: Boolean(result),
-        score: typeof result === 'number' ? result : (Boolean(result) ? 1 : 0),
+        score: typeof result === 'number' ? result : (result ? 1 : 0),
         executionTime,
         variables,
         logs
