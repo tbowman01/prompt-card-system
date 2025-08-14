@@ -1,4 +1,5 @@
-# 🔐 Security-First Authentication Service Dockerfile
+# 🔐 Security-First Authentication Service Dockerfile  
+# Build from root context to access auth/ directory
 FROM node:20-alpine AS base
 
 # Security: Create non-root user
@@ -22,26 +23,26 @@ USER authuser
 # Development stage
 FROM base AS development
 WORKDIR /app
-COPY --chown=authuser:authuser package*.json ./
+COPY --chown=authuser:authuser auth/package*.json ./
 RUN if [ -f package-lock.json ]; then \
       npm ci; \
     else \
       npm install; \
     fi
-COPY --chown=authuser:authuser . .
+COPY --chown=authuser:authuser auth/ .
 EXPOSE 8005
 CMD ["npm", "run", "dev"]
 
 # Build stage
 FROM base AS build
 WORKDIR /app
-COPY --chown=authuser:authuser package*.json ./
+COPY --chown=authuser:authuser auth/package*.json ./
 RUN if [ -f package-lock.json ]; then \
       npm ci; \
     else \
       npm install; \
     fi
-COPY --chown=authuser:authuser . .
+COPY --chown=authuser:authuser auth/ .
 RUN npm run build || npm run build:lenient && \
     npm prune --production && \
     npm cache clean --force
@@ -51,7 +52,7 @@ FROM base AS production
 WORKDIR /app
 
 # Copy package files
-COPY --chown=authuser:authuser package*.json ./
+COPY --chown=authuser:authuser auth/package*.json ./
 
 # Install only production dependencies
 # Use npm install if package-lock.json is missing, otherwise use npm ci

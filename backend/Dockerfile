@@ -18,22 +18,18 @@ RUN apk add --no-cache \
     libjpeg-turbo-dev \
     freetype-dev
 
-# Copy package files for dependency installation
+# Copy workspace package files for dependency installation
 COPY package*.json ./
+COPY backend/package*.json ./backend/
+COPY frontend/package*.json ./frontend/
 
 # Set environment variables to skip unnecessary downloads
 ENV PUPPETEER_SKIP_DOWNLOAD=true
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=true
 ENV CYPRESS_INSTALL_BINARY=0
 
-# Install only production dependencies, excluding dev packages that download browsers
-# Use npm install if package-lock.json is missing, otherwise use npm ci
-RUN if [ -f package-lock.json ]; then \
-      npm ci --omit=dev --ignore-scripts; \
-    else \
-      npm install --omit=dev --ignore-scripts; \
-    fi && \
-    npm cache clean --force
+# Install production dependencies (workspace-aware)
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
 # Stage 2: Build stage (for TypeScript compilation)
 FROM node:20-alpine AS builder
@@ -54,27 +50,24 @@ RUN apk add --no-cache \
     libjpeg-turbo-dev \
     freetype-dev
 
-# Copy package files and install all dependencies (including dev)
+# Copy workspace package files and install all dependencies (including dev)
 COPY package*.json ./
+COPY backend/package*.json ./backend/
+COPY frontend/package*.json ./frontend/
 
 # Set environment variables to skip unnecessary downloads
 ENV PUPPETEER_SKIP_DOWNLOAD=true
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=true
 ENV CYPRESS_INSTALL_BINARY=0
 
-# Install all dependencies for building, skipping post-install scripts for some packages
-# Use npm install if package-lock.json is missing, otherwise use npm ci
-RUN if [ -f package-lock.json ]; then \
-      npm ci --ignore-scripts; \
-    else \
-      npm install --ignore-scripts; \
-    fi
+# Install all dependencies for building (workspace-aware)
+RUN npm ci --ignore-scripts
 
-# Copy source code
-COPY . .
+# Copy backend source code
+COPY backend/ ./backend/
 
-# Build the application using production config that excludes tests
-RUN npm run build || npm run build:lenient
+# Build the backend application
+RUN cd backend && (npm run build || npm run build:lenient)
 
 # Stage 3: Production runtime (minimal final image)
 FROM node:20-alpine AS runner
@@ -99,8 +92,8 @@ RUN adduser --system --uid 1001 nodeuser
 COPY --from=deps --chown=nodeuser:nodejs /app/node_modules ./node_modules
 
 # Copy built application from builder stage
-COPY --from=builder --chown=nodeuser:nodejs /app/dist ./dist
-COPY --from=builder --chown=nodeuser:nodejs /app/package*.json ./
+COPY --from=builder --chown=nodeuser:nodejs /app/backend/dist ./dist
+COPY --from=builder --chown=nodeuser:nodejs /app/backend/package*.json ./
 
 # Create data directory with proper permissions
 RUN mkdir -p /app/data && chown nodeuser:nodejs /app/data

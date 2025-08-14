@@ -3,52 +3,45 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
 
-# Copy package files for dependency installation
+# Copy workspace package files for dependency installation
 COPY package*.json ./
+COPY backend/package*.json ./backend/
+COPY frontend/package*.json ./frontend/
 
 # Set environment variables to skip unnecessary downloads
 ENV PUPPETEER_SKIP_DOWNLOAD=true
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=true
 ENV CYPRESS_INSTALL_BINARY=0
 
-# Install only production dependencies
-# Use npm install if package-lock.json is missing, otherwise use npm ci
-RUN if [ -f package-lock.json ]; then \
-      npm ci --omit=dev --ignore-scripts; \
-    else \
-      npm install --omit=dev --ignore-scripts; \
-    fi && \
-    npm cache clean --force
+# Install production dependencies (workspace-aware)
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
 # Stage 2: Build stage (for Next.js compilation)
 FROM node:20-alpine AS builder
 WORKDIR /app
 
-# Copy package files and install all dependencies (including dev)
+# Copy workspace package files and install all dependencies (including dev)
 COPY package*.json ./
+COPY backend/package*.json ./backend/
+COPY frontend/package*.json ./frontend/
 
 # Set environment variables to skip unnecessary downloads
 ENV PUPPETEER_SKIP_DOWNLOAD=true
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=true
 ENV CYPRESS_INSTALL_BINARY=0
 
-# Install all dependencies for building
-# Use npm install if package-lock.json is missing, otherwise use npm ci
-RUN if [ -f package-lock.json ]; then \
-      npm ci --ignore-scripts; \
-    else \
-      npm install --ignore-scripts; \
-    fi
+# Install all dependencies for building (workspace-aware)
+RUN npm ci --ignore-scripts
 
-# Copy source code
-COPY . .
+# Copy frontend source code
+COPY frontend/ ./frontend/
 
 # Set build environment variables
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
 # Build the Next.js application
-RUN npm run build
+RUN cd frontend && npm run build
 
 # Stage 3: Production runtime (minimal final image)
 FROM node:20-alpine AS runner
@@ -66,10 +59,10 @@ ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules ./node_modules
 
 # Copy built application from builder stage
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-COPY --from=builder --chown=nextjs:nodejs /app/public ./public
-COPY --from=builder --chown=nextjs:nodejs /app/package*.json ./
+COPY --from=builder --chown=nextjs:nodejs /app/frontend/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/frontend/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/frontend/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/frontend/package*.json ./
 
 # Switch to non-root user
 USER nextjs
