@@ -38,6 +38,44 @@ A comprehensive enterprise-grade AI prompt testing and evaluation platform featu
 - **Compliance**: Following security best practices
 - **Documentation**: Comprehensive project documentation
 
+## 🎮 Quick Demo & Tutorial
+
+### 🚀 Try the Demo (3 minutes)
+Experience the full power of the Prompt Card System instantly with our comprehensive demo mode:
+
+```bash
+# Quick demo (3-minute experience)
+make demo-quick
+
+# Full feature demo
+make demo
+
+# Presentation mode (for live demos)
+make demo-presentation
+```
+
+**Demo Features:**
+- ✅ 5 Prepopulated prompt cards across different use cases
+- ✅ 15+ Ready-to-run test cases with realistic scenarios
+- ✅ 30 days of analytics data and performance metrics
+- ✅ Team collaboration workspace with 5 active members
+- ✅ Interactive guided tours and tutorials
+- ✅ Success/failure examples for learning
+
+**Demo URLs after starting:**
+- Main Demo: http://localhost:3000?demo=true
+- Quick Tour: http://localhost:3000?demo=quick-win
+- Technical Deep-dive: http://localhost:3000?demo=technical
+
+📖 **[Complete Demo Guide](./demo/DEMO_QUICK_START.md)** | 📚 **[Tutorial Documentation](./docs/user-guide/quick-start-tutorials.md)**
+
+### 🎯 Fixed Tutorial Issues
+Recent improvements to ensure smooth onboarding:
+- ✅ **Network troubleshooting** - Complete guide for connection issues
+- ✅ **Realistic test constraints** - Adjusted length limits based on real usage
+- ✅ **Demo mode fallback** - Always-available demonstration environment
+- ✅ **Alternative access methods** - Multiple ways to access when system is down
+
 ## 🚀 Phase 4+ Revolutionary Features
 
 ### ✅ Advanced Core Features

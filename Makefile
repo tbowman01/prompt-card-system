@@ -616,10 +616,100 @@ format: ## Format code with prettier
 	@docker-compose -f docker-compose.dev.yml exec backend npm run format
 	@docker-compose -f docker-compose.dev.yml exec frontend npm run format
 
+# Demo Mode Commands
+demo: ## Start demo mode with all features
+	@echo "$(PURPLE)🎮 Starting DEMO MODE - Full Feature Showcase$(RESET)"
+	@echo "$(YELLOW)✨ Prepopulated with sample data and test cases$(RESET)"
+	@DEMO_MODE=true $(MAKE) dev
+	@sleep 5
+	@$(MAKE) demo-status
+
+demo-quick: ## Quick demo setup (3-minute experience)
+	@echo "$(CYAN)⚡ Quick Demo Mode (3-minute experience)$(RESET)"
+	@echo "$(YELLOW)🎯 Perfect for presentations and rapid demonstrations$(RESET)"
+	@DEMO_MODE=true DEMO_TYPE=quick $(MAKE) dev-minimal
+	@sleep 3
+	@$(MAKE) demo-load-data
+	@$(MAKE) demo-status
+
+demo-load-data: ## Load demo data into running system
+	@echo "$(BLUE)📊 Loading demo data...$(RESET)"
+	@if docker-compose -f docker-compose.dev.yml ps | grep -q "backend.*Up"; then \
+		echo "$(YELLOW)Loading 5 prompt cards with test cases...$(RESET)"; \
+		docker cp demo/demo-prompt-cards.json $$(docker-compose -f docker-compose.dev.yml ps -q backend | head -1):/app/demo/; \
+		docker cp demo/demo-test-cases.json $$(docker-compose -f docker-compose.dev.yml ps -q backend | head -1):/app/demo/; \
+		docker cp demo/demo-analytics.json $$(docker-compose -f docker-compose.dev.yml ps -q backend | head -1):/app/demo/; \
+		docker-compose -f docker-compose.dev.yml exec backend node -e "require('./demo/load-demo-data.js')"; \
+		echo "$(GREEN)✅ Demo data loaded successfully$(RESET)"; \
+	else \
+		echo "$(RED)❌ Backend not running. Start with 'make demo' first.$(RESET)"; \
+	fi
+
+demo-status: ## Show demo mode status and URLs
+	@echo "$(GREEN)🎮 DEMO MODE ACTIVE$(RESET)"
+	@echo "======================"
+	@echo "$(CYAN)🌐 Demo URLs:$(RESET)"
+	@echo "   • Main Demo: http://localhost:3000?demo=true"
+	@echo "   • Quick Tour: http://localhost:3000?demo=quick-win"
+	@echo "   • Full Tour: http://localhost:3000?demo=full-tour"
+	@echo "   • Technical Demo: http://localhost:3000?demo=technical"
+	@echo ""
+	@echo "$(YELLOW)📋 Demo Features:$(RESET)"
+	@echo "   ✅ 5 Prepopulated prompt cards"
+	@echo "   ✅ 15+ Test cases with results"
+	@echo "   ✅ 30 days of analytics data"
+	@echo "   ✅ Team workspace with 5 members"
+	@echo "   ✅ Interactive guided tours"
+	@echo "   ✅ Success/failure examples"
+	@echo ""
+	@echo "$(PURPLE)🎯 Demo Scripts Available:$(RESET)"
+	@echo "   • 3-minute quick demo"
+	@echo "   • 5-minute full tour"
+	@echo "   • 8-minute technical deep-dive"
+	@echo ""
+	@echo "$(BLUE)📖 Demo Guide: ./demo/DEMO_QUICK_START.md$(RESET)"
+
+demo-reset: ## Reset demo data to initial state
+	@echo "$(YELLOW)🔄 Resetting demo data...$(RESET)"
+	@if docker-compose -f docker-compose.dev.yml ps | grep -q "backend.*Up"; then \
+		docker-compose -f docker-compose.dev.yml exec backend rm -rf /app/demo/current-state.json; \
+		$(MAKE) demo-load-data; \
+		echo "$(GREEN)✅ Demo data reset to initial state$(RESET)"; \
+	else \
+		echo "$(RED)❌ Backend not running$(RESET)"; \
+	fi
+
+demo-stop: ## Stop demo mode and return to development
+	@echo "$(YELLOW)🛑 Stopping demo mode...$(RESET)"
+	@$(MAKE) stop
+	@echo "$(GREEN)✅ Demo mode stopped. Use 'make dev' for normal development.$(RESET)"
+
+demo-export: ## Export demo session results
+	@echo "$(BLUE)📁 Exporting demo session...$(RESET)"
+	@TIMESTAMP=$$(date +%Y%m%d-%H%M%S); \
+	mkdir -p exports/demo-$$TIMESTAMP; \
+	cp -r demo/ exports/demo-$$TIMESTAMP/; \
+	if docker-compose -f docker-compose.dev.yml ps | grep -q "backend.*Up"; then \
+		docker cp $$(docker-compose -f docker-compose.dev.yml ps -q backend | head -1):/app/demo/session-data.json exports/demo-$$TIMESTAMP/ 2>/dev/null || true; \
+	fi; \
+	echo "$(GREEN)✅ Demo session exported to exports/demo-$$TIMESTAMP/$(RESET)"
+
+demo-presentation: ## Start demo in presentation mode (full screen, auto-advance)
+	@echo "$(PURPLE)🎥 Starting PRESENTATION MODE$(RESET)"
+	@echo "$(YELLOW)📺 Optimized for live demonstrations and sales presentations$(RESET)"
+	@DEMO_MODE=true PRESENTATION_MODE=true $(MAKE) dev
+	@sleep 5
+	@echo "$(GREEN)🎬 Presentation mode ready!$(RESET)"
+	@echo "   • Auto-advancing slides"
+	@echo "   • Larger text and UI elements"
+	@echo "   • Simplified navigation"
+	@echo "   • Focus on key metrics"
+
 # Documentation
 docs: ## Generate/serve documentation
 	@echo "$(BLUE)📚 Documentation commands:$(RESET)"
 	@echo "   • Main docs are in ./docs/"
+	@echo "   • Demo guide: ./demo/DEMO_QUICK_START.md"
 	@echo "   • API docs: http://localhost:3001/api/docs (when backend running)"
 	@echo "   • README: ./README.md"
 
@@ -630,6 +720,15 @@ docs-api: ## Open API documentation
 		open http://localhost:3001/api/docs; \
 	else \
 		echo "$(BLUE)📖 API docs available at: http://localhost:3001/api/docs$(RESET)"; \
+	fi
+
+docs-demo: ## Open demo documentation
+	@if command -v xdg-open >/dev/null 2>&1; then \
+		xdg-open demo/DEMO_QUICK_START.md; \
+	elif command -v open >/dev/null 2>&1; then \
+		open demo/DEMO_QUICK_START.md; \
+	else \
+		echo "$(BLUE)📖 Demo guide available at: ./demo/DEMO_QUICK_START.md$(RESET)"; \
 	fi
 
 # Production Preparation

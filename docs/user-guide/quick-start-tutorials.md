@@ -19,9 +19,44 @@ These tutorials will help you:
 - Adding meaningful descriptions and tags
 - Basic testing concepts
 
+### ⚠️ Before You Start: System Check
+1. **Check System Status**: Visit [status.promptcard.io](https://status.promptcard.io) to ensure the system is operational
+2. **Test Connection**: Try loading the main dashboard first
+3. **Clear Browser Cache**: If you experience issues, clear your browser cache and cookies
+4. **Use Supported Browser**: Chrome, Firefox, Safari, or Edge (latest versions)
+
+### 🔧 Network Troubleshooting
+If you encounter "network error failed to..." or similar connection issues:
+
+**Quick Fixes:**
+1. **Refresh the page** (F5 or Ctrl+R)
+2. **Check your internet connection** - try accessing other websites
+3. **Disable browser extensions** - especially ad blockers or VPNs
+4. **Try incognito/private mode** - eliminates extension conflicts
+5. **Switch networks** - try mobile hotspot if on WiFi
+
+**Advanced Troubleshooting:**
+```bash
+# Check if the API is reachable (in browser console)
+fetch('https://api.promptcard.io/health')
+  .then(r => r.json())
+  .then(d => console.log('API Status:', d))
+  .catch(e => console.error('Connection failed:', e))
+```
+
+**Alternative Access Methods:**
+- **Demo Mode**: Use [demo.promptcard.io](https://demo.promptcard.io) for a read-only experience
+- **Offline Mode**: Download the [desktop app](https://promptcard.io/download) for offline practice
+- **API Direct**: Use the REST API directly with tools like Postman or curl
+
+**If Issues Persist:**
+- Contact support: support@promptcard.io
+- Check known issues: [github.com/promptcard/issues](https://github.com/promptcard/issues)
+- Join community chat: [discord.gg/promptcard](https://discord.gg/promptcard)
+
 ### Step 1: Access the System
 1. **Open your browser** and navigate to the system URL
-2. **Log in** with your credentials
+2. **Log in** with your credentials (or use demo account: demo@promptcard.io / demo123)
 3. **Click "Prompt Cards"** in the main navigation
 4. **Select "Create New Card"**
 
@@ -109,6 +144,8 @@ You've successfully created and tested your first prompt card!
 ### Step 1: Add Multiple Test Cases
 Let's add more test cases to thoroughly validate our customer service prompt:
 
+> **💡 Pro Tip**: Length constraints have been optimized based on real-world testing. Technical responses typically need 150-750 characters for proper detail, while positive feedback works well within 50-300 characters. Adjust these based on your specific use case.
+
 #### Test Case 1: Technical Support Issue
 ```
 Name: Technical Support Response
@@ -125,7 +162,7 @@ Assertions:
   - Contains: "crash" or "export" or "report" (issue understanding)
   - Contains: "troubleshooting" or "steps" or "solution" (helpful response)
   - Regex: ".*\b(step|follow|try)\b.*" (actionable guidance)
-  - Length: Min 150, Max 500 characters (appropriate detail level)
+  - Length: Min 150, Max 750 characters (appropriate detail level)
 ```
 
 #### Test Case 2: Positive Feedback
@@ -143,7 +180,7 @@ Assertions:
   - Contains: "thank" or "appreciate" (acknowledgment)
   - Contains: "team" or "pleasure" or "glad" (positive response)
   - Sentiment: "positive" with confidence > 0.8
-  - Length: Min 50, Max 200 characters (appropriate for positive feedback)
+  - Length: Min 50, Max 300 characters (appropriate for positive feedback)
 ```
 
 #### Test Case 3: Edge Case - Angry Customer
