@@ -636,8 +636,7 @@ demo: ## Start demo mode with all features
 	@echo "$(YELLOW)✨ Prepopulated with sample data and test cases$(RESET)"
 	@$(MAKE) demo-clean
 	@DEMO_MODE=true $(MAKE) dev
-	@sleep 5
-	@$(MAKE) demo-status
+	@./scripts/wait-for-demo.sh
 
 demo-quick: ## Quick demo setup (3-minute experience)
 	@echo "$(CYAN)⚡ Quick Demo Mode (3-minute experience)$(RESET)"
