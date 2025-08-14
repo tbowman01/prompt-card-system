@@ -619,8 +619,12 @@ format: ## Format code with prettier
 # Demo Mode Commands
 demo-clean: ## Clean Docker networks and containers before demo
 	@echo "$(BLUE)🧹 Cleaning Docker environment for demo...$(RESET)"
+	@echo "$(YELLOW)Stopping any running prompt-card-system containers...$(RESET)"
+	@docker ps --filter "name=prompt-card-system" -q | xargs -r docker stop 2>/dev/null || true
+	@docker ps -a --filter "name=prompt-card-system" -q | xargs -r docker rm 2>/dev/null || true
 	@docker-compose -f docker-compose.dev.yml down --remove-orphans 2>/dev/null || true
 	@if [ -f docker-compose.monitoring.yml ]; then docker-compose -f docker-compose.monitoring.yml down --remove-orphans 2>/dev/null || true; fi
+	@echo "$(YELLOW)Removing conflicting Docker networks...$(RESET)"
 	@docker network ls --filter name=prompt-card-system --format "{{.ID}}" | xargs -r docker network rm 2>/dev/null || true
 	@docker network rm prompt-card-system-v2_prompt-card-network 2>/dev/null || true
 	@docker network prune -f 2>/dev/null || true
