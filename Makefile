@@ -1,7 +1,7 @@
 # Prompt Card System - Enhanced Development Makefile
 # ==================================================
 
-.PHONY: help dev dev-gpu dev-cpu build test clean logs restart
+.PHONY: help dev dev-gpu dev-cpu build test clean logs restart demo demo-clean demo-quick demo-presentation demo-load-data demo-status demo-reset demo-stop demo-export docs-demo
 .DEFAULT_GOAL := help
 
 # Colors for output
@@ -617,9 +617,17 @@ format: ## Format code with prettier
 	@docker-compose -f docker-compose.dev.yml exec frontend npm run format
 
 # Demo Mode Commands
+demo-clean: ## Clean Docker networks and containers before demo
+	@echo "$(BLUE)🧹 Cleaning Docker environment for demo...$(RESET)"
+	@docker-compose -f docker-compose.dev.yml down --remove-orphans 2>/dev/null || true
+	@docker network prune -f 2>/dev/null || true
+	@docker container prune -f 2>/dev/null || true
+	@echo "$(GREEN)✅ Docker environment cleaned$(RESET)"
+
 demo: ## Start demo mode with all features
 	@echo "$(PURPLE)🎮 Starting DEMO MODE - Full Feature Showcase$(RESET)"
 	@echo "$(YELLOW)✨ Prepopulated with sample data and test cases$(RESET)"
+	@$(MAKE) demo-clean
 	@DEMO_MODE=true $(MAKE) dev
 	@sleep 5
 	@$(MAKE) demo-status
@@ -627,6 +635,7 @@ demo: ## Start demo mode with all features
 demo-quick: ## Quick demo setup (3-minute experience)
 	@echo "$(CYAN)⚡ Quick Demo Mode (3-minute experience)$(RESET)"
 	@echo "$(YELLOW)🎯 Perfect for presentations and rapid demonstrations$(RESET)"
+	@$(MAKE) demo-clean
 	@DEMO_MODE=true DEMO_TYPE=quick $(MAKE) dev-minimal
 	@sleep 3
 	@$(MAKE) demo-load-data
@@ -636,10 +645,17 @@ demo-load-data: ## Load demo data into running system
 	@echo "$(BLUE)📊 Loading demo data...$(RESET)"
 	@if docker-compose -f docker-compose.dev.yml ps | grep -q "backend.*Up"; then \
 		echo "$(YELLOW)Loading 5 prompt cards with test cases...$(RESET)"; \
-		docker cp demo/demo-prompt-cards.json $$(docker-compose -f docker-compose.dev.yml ps -q backend | head -1):/app/demo/; \
-		docker cp demo/demo-test-cases.json $$(docker-compose -f docker-compose.dev.yml ps -q backend | head -1):/app/demo/; \
-		docker cp demo/demo-analytics.json $$(docker-compose -f docker-compose.dev.yml ps -q backend | head -1):/app/demo/; \
-		docker-compose -f docker-compose.dev.yml exec backend node -e "require('./demo/load-demo-data.js')"; \
+		docker cp demo/ $$(docker-compose -f docker-compose.dev.yml ps -q backend | head -1):/app/ 2>/dev/null || \
+		( \
+			docker-compose -f docker-compose.dev.yml exec backend mkdir -p /app/demo && \
+			docker cp demo/demo-prompt-cards.json $$(docker-compose -f docker-compose.dev.yml ps -q backend | head -1):/app/demo/ && \
+			docker cp demo/demo-test-cases.json $$(docker-compose -f docker-compose.dev.yml ps -q backend | head -1):/app/demo/ && \
+			docker cp demo/demo-analytics.json $$(docker-compose -f docker-compose.dev.yml ps -q backend | head -1):/app/demo/ && \
+			docker cp demo/demo-config.json $$(docker-compose -f docker-compose.dev.yml ps -q backend | head -1):/app/demo/ && \
+			docker cp demo/load-demo-data.js $$(docker-compose -f docker-compose.dev.yml ps -q backend | head -1):/app/demo/ \
+		); \
+		docker-compose -f docker-compose.dev.yml exec backend node demo/load-demo-data.js || \
+		echo "$(YELLOW)⚠️  Demo data loader not available, continuing with static files$(RESET)"; \
 		echo "$(GREEN)✅ Demo data loaded successfully$(RESET)"; \
 	else \
 		echo "$(RED)❌ Backend not running. Start with 'make demo' first.$(RESET)"; \
@@ -697,6 +713,7 @@ demo-export: ## Export demo session results
 demo-presentation: ## Start demo in presentation mode (full screen, auto-advance)
 	@echo "$(PURPLE)🎥 Starting PRESENTATION MODE$(RESET)"
 	@echo "$(YELLOW)📺 Optimized for live demonstrations and sales presentations$(RESET)"
+	@$(MAKE) demo-clean
 	@DEMO_MODE=true PRESENTATION_MODE=true $(MAKE) dev
 	@sleep 5
 	@echo "$(GREEN)🎬 Presentation mode ready!$(RESET)"
