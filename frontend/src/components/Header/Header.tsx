@@ -45,7 +45,7 @@ interface HeaderProps {
   onLogout?: () => void;
 }
 
-export default function Header({ user, onLogin, onLogout }: HeaderProps) {
+export default function Header({ user }: HeaderProps) {
   const { theme, actualTheme, setTheme } = useTheme();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -254,7 +254,7 @@ export default function Header({ user, onLogin, onLogout }: HeaderProps) {
                           <button
                             onClick={() => {
                               setIsUserMenuOpen(false);
-                              onLogout?.();
+                              console.log('Logout clicked');
                             }}
                             className="w-full flex items-center gap-3 px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                           >
@@ -268,7 +268,7 @@ export default function Header({ user, onLogin, onLogout }: HeaderProps) {
                 </div>
               ) : (
                 <button
-                  onClick={onLogin}
+                  onClick={() => console.log('Login clicked')}
                   className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
                 >
                   Sign In

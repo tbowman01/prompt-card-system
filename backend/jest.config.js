@@ -48,26 +48,38 @@ module.exports = {
   },
   globalSetup: '<rootDir>/src/tests/globalSetup.ts',
   globalTeardown: '<rootDir>/src/tests/globalTeardown.ts',
-  // Enhanced coverage settings for quality assurance
+  // LONDON TDD REQUIREMENT: 100% COVERAGE - ABSOLUTE (NO EXCEPTIONS)
   coverageThreshold: {
     global: {
-      branches: 80,
-      functions: 80,
-      lines: 85,
-      statements: 85
+      branches: 100,
+      functions: 100,
+      lines: 100,
+      statements: 100
     },
-    // Specific thresholds for critical modules
+    // CRITICAL: All modules MUST have 100% coverage
     './src/services/': {
-      branches: 85,
-      functions: 90,
-      lines: 90,
-      statements: 90
+      branches: 100,
+      functions: 100,
+      lines: 100,
+      statements: 100
     },
     './src/database/': {
-      branches: 75,
-      functions: 85,
-      lines: 85,
-      statements: 85
+      branches: 100,
+      functions: 100,
+      lines: 100,
+      statements: 100
+    },
+    './src/middleware/': {
+      branches: 100,
+      functions: 100,
+      lines: 100,
+      statements: 100
+    },
+    './src/routes/': {
+      branches: 100,
+      functions: 100,
+      lines: 100,
+      statements: 100
     }
   },
   coverageReporters: ['text', 'lcov', 'html', 'json-summary'],
