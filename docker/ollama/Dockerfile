@@ -27,12 +27,9 @@ RUN chmod +x /usr/local/bin/download-models.sh
 COPY startup.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/startup.sh
 
-# Preload the primary model (smaller, faster model for quick startup)
-# Using phi4-mini-reasoning:3.8b for fast initial availability
-RUN /bin/ollama serve & \
-    sleep 5 && \
-    ollama pull phi4-mini-reasoning:3.8b && \
-    pkill ollama
+# Note: Model preloading removed from build time to prevent hang
+# Models will be downloaded on first startup by startup.sh
+# This ensures build completes successfully and models are pulled at runtime
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
