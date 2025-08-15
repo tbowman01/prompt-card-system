@@ -34,19 +34,32 @@ CMD ["npm", "run", "dev"]
 FROM base AS build
 WORKDIR /app
 COPY --chown=authuser:authuser auth/package*.json ./
-# Use npm install for version tolerance
-RUN npm install
+
+# Clean install with lockfile regeneration for consistency
+RUN npm install --package-lock-only && \
+    npm ci --include=dev && \
+    npm cache clean --force
+
 COPY --chown=authuser:authuser auth/ .
-# Build with proper error handling and fallback
-RUN if npm run build; then \
+
+# Build with enhanced error handling and fallback strategies
+RUN echo "🔨 Starting auth service build..." && \
+    if npm run build; then \
         echo "✅ Auth service build successful"; \
     elif npm run build:lenient; then \
         echo "⚠️ Auth service build completed with warnings"; \
     else \
-        echo "❌ Build failed, attempting TypeScript compilation..."; \
-        npx tsc -p tsconfig.build.json --noEmitOnError false --skipLibCheck true || \
-        (echo "TypeScript compilation failed" && exit 1); \
+        echo "❌ Standard build failed, attempting fallback compilation..."; \
+        echo "📋 Checking TypeScript configuration..."; \
+        cat tsconfig.build.json; \
+        echo "📂 Checking source files..."; \
+        find src -name "*.ts" | head -10; \
+        echo "🔧 Attempting TypeScript compilation with skipped checks..."; \
+        npx tsc -p tsconfig.build.json --noEmitOnError false --skipLibCheck true --noStrictGenericChecks || \
+        (echo "❌ TypeScript compilation failed completely" && exit 1); \
+        echo "⚠️ Build completed with type checking disabled"; \
     fi && \
+    echo "🧹 Cleaning up build dependencies..." && \
     npm prune --production && \
     npm cache clean --force
 

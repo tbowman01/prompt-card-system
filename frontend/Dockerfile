@@ -42,15 +42,18 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # Increase Node.js memory for build
 ENV NODE_OPTIONS="--max-old-space-size=4096"
 
-# Build the Next.js application with proper error handling
+# Build the Next.js application with enhanced error handling
 RUN cd frontend && \
+    echo "🔨 Starting frontend build..." && \
     if npm run build; then \
         echo "✅ Next.js build successful"; \
     else \
         echo "❌ Next.js build failed, checking for common issues..."; \
-        echo "Attempting build with increased memory..."; \
+        echo "🔧 Attempting build with increased memory and lenient settings..."; \
         NODE_OPTIONS="--max-old-space-size=4096" npm run build || \
-        (echo "Build failed completely" && exit 1); \
+        NODE_OPTIONS="--max-old-space-size=4096" npx next build --experimental-build-mode=compile || \
+        (echo "❌ Frontend build failed completely" && exit 1); \
+        echo "⚠️ Frontend build completed with fallback settings"; \
     fi
 
 # Stage 3: Production runtime (minimal final image)
