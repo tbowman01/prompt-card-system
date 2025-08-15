@@ -196,6 +196,10 @@ models-remove: ## Remove model (specify MODEL=model_name)
 	@docker-compose -f docker/docker-compose.dev.yml exec ollama ollama rm $(MODEL) || \
 	docker-compose -f docker/docker-compose.dev.yml exec ollama-cpu ollama rm $(MODEL)
 
+ollama-progress: ## Monitor Ollama model download progress with visual progress bar
+	@echo "$(BLUE)📊 Starting Ollama download progress monitor...$(RESET)"
+	@./scripts/ollama-monitor.sh
+
 # Development Tools
 tools: ## Start development tools (Adminer, Redis Commander)
 	@echo "$(CYAN)🔧 Starting development tools...$(RESET)"
