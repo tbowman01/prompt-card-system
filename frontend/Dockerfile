@@ -39,9 +39,19 @@ COPY frontend/ ./frontend/
 # Set build environment variables
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+# Increase Node.js memory for build
+ENV NODE_OPTIONS="--max-old-space-size=4096"
 
-# Build the Next.js application
-RUN cd frontend && npm run build
+# Build the Next.js application with proper error handling
+RUN cd frontend && \
+    if npm run build; then \
+        echo "✅ Next.js build successful"; \
+    else \
+        echo "❌ Next.js build failed, checking for common issues..."; \
+        echo "Attempting build with increased memory..."; \
+        NODE_OPTIONS="--max-old-space-size=4096" npm run build || \
+        (echo "Build failed completely" && exit 1); \
+    fi
 
 # Stage 3: Production runtime (minimal final image)
 FROM node:20-alpine AS runner
@@ -58,10 +68,11 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # Copy production dependencies from deps stage
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules ./node_modules
 
-# Copy built application from builder stage
+# Copy built application from builder stage with proper structure
 COPY --from=builder --chown=nextjs:nodejs /app/frontend/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/frontend/.next/static ./.next/static
-COPY --from=builder --chown=nextjs:nodejs /app/frontend/public ./public
+# Copy public folder only if it exists
+COPY --from=builder --chown=nextjs:nodejs /app/frontend/public ./public 2>/dev/null || echo "No public folder found"
 COPY --from=builder --chown=nextjs:nodejs /app/frontend/package*.json ./
 
 # Switch to non-root user

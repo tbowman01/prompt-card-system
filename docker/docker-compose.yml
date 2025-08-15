@@ -8,8 +8,8 @@ x-buildkit-config: &buildkit-config
 services:
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: frontend/Dockerfile
       # Modern BuildKit configuration
       target: production
       # Multi-stage build arguments for optimization
@@ -22,16 +22,15 @@ services:
         - type=gha
       cache_to:
         - type=gha,mode=max
-    environment:
-      <<: *buildkit-config
     ports:
       - "3000:3000"
     depends_on:
       - backend
     environment:
-      - NEXT_PUBLIC_API_URL=http://backend:3001
-      - NODE_ENV=production
-      - NEXT_TELEMETRY_DISABLED=1
+      <<: *buildkit-config
+      NEXT_PUBLIC_API_URL: http://backend:3001
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: 1
     # Remove volumes for production builds - use built images
     # volumes:
     #   - ./frontend:/app
@@ -48,8 +47,8 @@ services:
 
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
       # Modern BuildKit configuration
       target: production
       # Multi-stage build arguments for optimization
@@ -90,7 +89,9 @@ services:
       start_period: 40s
 
   ollama:
-    image: ollama/ollama:latest
+    build:
+      context: ./ollama
+      dockerfile: Dockerfile
     ports:
       - "11434:11434"
     volumes:
@@ -98,6 +99,7 @@ services:
     environment:
       - OLLAMA_KEEP_ALIVE=24h
       - OLLAMA_HOST=0.0.0.0
+      - DOWNLOAD_MODELS=true
     networks:
       - app-network
     healthcheck:
@@ -105,7 +107,29 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 60s
+
+  auth:
+    build:
+      context: .
+      dockerfile: auth/Dockerfile
+      target: production
+    ports:
+      - "8005:8005"
+    environment:
+      NODE_ENV: production
+      AUTH_SECRET: ${AUTH_SECRET:-default-secret-change-in-production}
+      DATABASE_URL: ${AUTH_DATABASE_URL:-postgres://auth:auth@db:5432/auth}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:8005/auth/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
 
   # Model initialization service - runs once to download model
   model-loader:

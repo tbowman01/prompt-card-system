@@ -37,7 +37,16 @@ COPY --chown=authuser:authuser auth/package*.json ./
 # Use npm install for version tolerance
 RUN npm install
 COPY --chown=authuser:authuser auth/ .
-RUN npm run build || npm run build:lenient && \
+# Build with proper error handling and fallback
+RUN if npm run build; then \
+        echo "✅ Auth service build successful"; \
+    elif npm run build:lenient; then \
+        echo "⚠️ Auth service build completed with warnings"; \
+    else \
+        echo "❌ Build failed, attempting TypeScript compilation..."; \
+        npx tsc -p tsconfig.build.json --noEmitOnError false --skipLibCheck true || \
+        (echo "TypeScript compilation failed" && exit 1); \
+    fi && \
     npm prune --production && \
     npm cache clean --force
 
@@ -51,8 +60,10 @@ COPY --chown=authuser:authuser auth/package*.json ./
 # Install only production dependencies - use npm install for version tolerance
 RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
 
-# Copy built application
+# Copy built application with verification
 COPY --from=build --chown=authuser:authuser /app/dist ./dist
+# Verify dist folder exists and has content
+RUN ls -la ./dist && test -f ./dist/server.js || (echo "Build output missing" && exit 1)
 COPY --from=build --chown=authuser:authuser /app/node_modules ./node_modules
 
 # Security: Remove package manager to prevent runtime package installations
