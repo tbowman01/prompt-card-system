@@ -21,8 +21,8 @@ RUN apk add --no-cache \
 # Copy workspace package files for dependency installation
 COPY package*.json ./
 COPY backend/package*.json ./backend/
-# Only copy frontend package.json if it exists to avoid context issues
-COPY frontend/package*.json ./frontend/ || echo "Frontend package.json not found, skipping"
+# Copy frontend package.json using a proper Docker approach
+COPY frontend/package*.json ./frontend/
 
 # Set environment variables to skip unnecessary downloads
 ENV PUPPETEER_SKIP_DOWNLOAD=true

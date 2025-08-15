@@ -71,8 +71,8 @@ COPY --from=deps --chown=nextjs:nodejs /app/node_modules ./node_modules
 # Copy built application from builder stage with proper structure
 COPY --from=builder --chown=nextjs:nodejs /app/frontend/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/frontend/.next/static ./.next/static
-# Copy public folder only if it exists
-COPY --from=builder --chown=nextjs:nodejs /app/frontend/public ./public 2>/dev/null || echo "No public folder found"
+# Copy public folder 
+COPY --from=builder --chown=nextjs:nodejs /app/frontend/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/frontend/package*.json ./
 
 # Switch to non-root user
