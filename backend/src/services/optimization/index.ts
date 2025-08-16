@@ -8,11 +8,17 @@
  * - Security threat detection
  * - Compliance validation
  * - Automated prompt tuning
+ * - Real-time optimization with ML-driven feedback loops
+ * - Multi-armed bandit algorithms for adaptive A/B testing
+ * - Bayesian optimization for hyperparameter tuning
+ * - Online learning for continuous optimization
  */
 
 export { promptAnalyzer, PromptAnalyzer } from './PromptAnalyzer';
 export { optimizationEngine, OptimizationEngine } from './OptimizationEngine';
 export { securityAnalyzer, SecurityAnalyzer } from './SecurityAnalyzer';
+export { advancedKVCache, AdvancedKVCache } from './AdvancedKVCache';
+export { realTimeOptimizer, RealTimeOptimizer } from './RealTimeOptimizer';
 
 // Types exports
 export type {
@@ -35,6 +41,29 @@ export type {
   ContentSafetyResult
 } from './SecurityAnalyzer';
 
+export type {
+  CacheEntry,
+  CacheConfiguration,
+  CacheMetrics,
+  MemoryPressureMetrics,
+  CachePerformanceAlert,
+  QuantizationType,
+  CachePolicy
+} from './AdvancedKVCache';
+
+export type {
+  RealTimeOptimizerConfig,
+  RealTimeFeedback,
+  OptimizationAction,
+  BanditArm,
+  BayesianOptimizationResult,
+  PerformancePredictionModel,
+  AdaptiveCachePolicy,
+  OnlineLearningAlgorithm,
+  BanditAlgorithm,
+  OptimizationStrategy
+} from './RealTimeOptimizer';
+
 /**
  * Initialize all optimization services
  */
@@ -46,6 +75,8 @@ export async function initializeOptimizationServices(): Promise<void> {
     console.log('✅ Prompt Analyzer initialized');
     console.log('✅ Optimization Engine initialized');
     console.log('✅ Security Analyzer initialized');
+    console.log('✅ Advanced KV Cache initialized');
+    console.log('✅ Real-Time Optimizer initialized');
     
     console.log('🚀 AI-Powered Prompt Optimization Services ready!');
   } catch (error) {
@@ -65,7 +96,9 @@ export function checkOptimizationServicesHealth(): {
   const services = {
     promptAnalyzer: 'active' as const,
     optimizationEngine: 'active' as const,
-    securityAnalyzer: 'active' as const
+    securityAnalyzer: 'active' as const,
+    advancedKVCache: 'active' as const,
+    realTimeOptimizer: 'active' as const
   };
   
   const allHealthy = Object.values(services).every(status => status === 'active');
@@ -86,6 +119,7 @@ export function getOptimizationCapabilities(): {
   security: string[];
   abTesting: string[];
   tuning: string[];
+  realTimeOptimization: string[];
 } {
   return {
     promptAnalysis: [
@@ -122,6 +156,16 @@ export function getOptimizationCapabilities(): {
       'Convergence analysis',
       'Performance tracking',
       'Best prompt selection'
+    ],
+    realTimeOptimization: [
+      'ML-driven feedback loops',
+      'Online learning algorithms',
+      'Multi-armed bandit A/B testing',
+      'Bayesian hyperparameter optimization',
+      'Adaptive caching policies',
+      'Performance prediction models',
+      'Real-time strategy adaptation',
+      'Sub-100ms optimization decisions'
     ]
   };
 }

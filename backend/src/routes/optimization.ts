@@ -3,6 +3,7 @@ import { Request, Response } from 'express';
 import { promptAnalyzer } from '../services/optimization/PromptAnalyzer';
 import { optimizationEngine } from '../services/optimization/OptimizationEngine';
 import { securityAnalyzer } from '../services/optimization/SecurityAnalyzer';
+import { advancedKVCache } from '../services/optimization/AdvancedKVCache';
 
 const router = express.Router();
 
@@ -523,20 +524,329 @@ router.get('/evolution/:promptId', async (req: Request, res: Response) => {
 });
 
 /**
+ * GET /api/optimization/cache/stats
+ * Get comprehensive cache statistics and performance metrics
+ */
+router.get('/cache/stats', async (req: Request, res: Response) => {
+  try {
+    const engineStats = optimizationEngine.getCacheStats();
+    const advancedStats = optimizationEngine.getAdvancedCacheStats();
+    const standaloneCacheStats = advancedKVCache.getMetrics();
+
+    res.json({
+      success: true,
+      data: {
+        optimizationEngine: engineStats,
+        advancedMetrics: advancedStats,
+        standaloneCacheMetrics: standaloneCacheStats,
+        timestamp: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    console.error('Cache stats error:', error);
+    res.status(500).json({
+      error: 'Failed to retrieve cache statistics',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * GET /api/optimization/cache/memory-pressure
+ * Get current memory pressure status and recommendations
+ */
+router.get('/cache/memory-pressure', async (req: Request, res: Response) => {
+  try {
+    const enginePressure = optimizationEngine.getAdvancedCacheStats();
+    const standalonePressure = advancedKVCache.getMemoryPressure();
+
+    res.json({
+      success: true,
+      data: {
+        optimizationEngine: {
+          analysis: enginePressure.analysis.memoryPressure,
+          suggestions: enginePressure.suggestions.memoryPressure
+        },
+        standalone: standalonePressure,
+        timestamp: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    console.error('Memory pressure check error:', error);
+    res.status(500).json({
+      error: 'Failed to check memory pressure',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * POST /api/optimization/cache/optimize
+ * Force cache memory optimization
+ */
+router.post('/cache/optimize', async (req: Request, res: Response) => {
+  try {
+    const engineOptimization = await optimizationEngine.optimizeCacheMemory();
+    const standaloneOptimization = await advancedKVCache.optimizeMemory();
+
+    res.json({
+      success: true,
+      data: {
+        optimizationEngine: engineOptimization,
+        standalone: standaloneOptimization,
+        message: 'Cache memory optimization completed successfully',
+        timestamp: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    console.error('Cache optimization error:', error);
+    res.status(500).json({
+      error: 'Cache optimization failed',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * GET /api/optimization/cache/alerts
+ * Get active cache performance alerts
+ */
+router.get('/cache/alerts', async (req: Request, res: Response) => {
+  try {
+    const engineAlerts = optimizationEngine.getAdvancedCacheStats();
+    const standaloneAlerts = advancedKVCache.getAlerts();
+
+    res.json({
+      success: true,
+      data: {
+        optimizationEngine: {
+          analysis: engineAlerts.analysis.alerts,
+          suggestions: engineAlerts.suggestions.alerts
+        },
+        standalone: standaloneAlerts,
+        totalActiveAlerts: 
+          engineAlerts.analysis.alerts.length + 
+          engineAlerts.suggestions.alerts.length + 
+          standaloneAlerts.length,
+        timestamp: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    console.error('Cache alerts error:', error);
+    res.status(500).json({
+      error: 'Failed to retrieve cache alerts',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * GET /api/optimization/cache/export
+ * Export comprehensive cache statistics for monitoring and analysis
+ */
+router.get('/cache/export', async (req: Request, res: Response) => {
+  try {
+    const engineExport = optimizationEngine.exportCacheStatistics();
+    const standaloneExport = advancedKVCache.exportStatistics();
+
+    const comprehensiveReport = {
+      exportTimestamp: new Date().toISOString(),
+      optimizationEngine: JSON.parse(engineExport),
+      standaloneCache: JSON.parse(standaloneExport),
+      summary: {
+        totalCaches: 3, // analysis, suggestions, standalone
+        totalMemoryUsage: 0, // Will be calculated
+        totalHitRate: 0, // Will be calculated
+        totalCompressionRatio: 0, // Will be calculated
+        recommendedActions: []
+      }
+    };
+
+    // Calculate summary metrics
+    const engineStats = optimizationEngine.getCacheStats();
+    const standaloneStats = advancedKVCache.getMetrics();
+
+    comprehensiveReport.summary.totalMemoryUsage = 
+      engineStats.analysis.memoryUsage + 
+      engineStats.suggestions.memoryUsage + 
+      standaloneStats.memoryUsage;
+
+    comprehensiveReport.summary.totalHitRate = 
+      (engineStats.analysis.hitRate + 
+       engineStats.suggestions.hitRate + 
+       standaloneStats.hitRate) / 3;
+
+    comprehensiveReport.summary.totalCompressionRatio = 
+      (engineStats.analysis.compressionRatio + 
+       engineStats.suggestions.compressionRatio + 
+       standaloneStats.compressionRatio) / 3;
+
+    // Add recommendations based on metrics
+    if (comprehensiveReport.summary.totalHitRate < 0.8) {
+      comprehensiveReport.summary.recommendedActions.push('Consider increasing cache size or TTL');
+    }
+    if (comprehensiveReport.summary.totalMemoryUsage > 500 * 1024 * 1024) { // 500MB
+      comprehensiveReport.summary.recommendedActions.push('Consider enabling more aggressive quantization');
+    }
+    if (comprehensiveReport.summary.totalCompressionRatio < 1.5) {
+      comprehensiveReport.summary.recommendedActions.push('Enable quantization for better memory efficiency');
+    }
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="cache-report-${Date.now()}.json"`);
+    res.json({
+      success: true,
+      data: comprehensiveReport
+    });
+  } catch (error) {
+    console.error('Cache export error:', error);
+    res.status(500).json({
+      error: 'Failed to export cache statistics',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * POST /api/optimization/cache/config
+ * Update cache configuration
+ */
+router.post('/cache/config', async (req: Request, res: Response) => {
+  try {
+    const { cacheType, configuration } = req.body;
+
+    if (!cacheType || !configuration) {
+      return res.status(400).json({
+        error: 'Missing required fields: cacheType, configuration'
+      });
+    }
+
+    if (cacheType === 'standalone') {
+      advancedKVCache.updateConfiguration(configuration);
+    } else {
+      return res.status(400).json({
+        error: 'Invalid cache type. Supported types: standalone'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: `${cacheType} cache configuration updated successfully`,
+      newConfiguration: advancedKVCache.getConfiguration(),
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Cache configuration error:', error);
+    res.status(500).json({
+      error: 'Failed to update cache configuration',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * DELETE /api/optimization/cache/clear
+ * Clear all cache entries
+ */
+router.delete('/cache/clear', async (req: Request, res: Response) => {
+  try {
+    const { cacheType } = req.query;
+
+    if (cacheType === 'all' || !cacheType) {
+      optimizationEngine.clearCaches();
+      advancedKVCache.clear();
+    } else if (cacheType === 'optimization') {
+      optimizationEngine.clearCaches();
+    } else if (cacheType === 'standalone') {
+      advancedKVCache.clear();
+    } else {
+      return res.status(400).json({
+        error: 'Invalid cache type. Supported types: all, optimization, standalone'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: `${cacheType || 'all'} cache(s) cleared successfully`,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Cache clear error:', error);
+    res.status(500).json({
+      error: 'Failed to clear cache',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * GET /api/optimization/cache/predictions/:key
+ * Get ML-based cache hit prediction for a specific key
+ */
+router.get('/cache/predictions/:key', async (req: Request, res: Response) => {
+  try {
+    const { key } = req.params;
+    
+    if (!key) {
+      return res.status(400).json({
+        error: 'Missing required parameter: key'
+      });
+    }
+
+    const prediction = advancedKVCache.predictHit(key);
+    
+    res.json({
+      success: true,
+      data: {
+        key,
+        hitProbability: prediction,
+        confidence: prediction > 0.7 ? 'high' : prediction > 0.4 ? 'medium' : 'low',
+        recommendation: prediction > 0.7 ? 'likely hit' : prediction > 0.4 ? 'uncertain' : 'likely miss',
+        timestamp: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    console.error('Cache prediction error:', error);
+    res.status(500).json({
+      error: 'Failed to get cache prediction',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
  * GET /api/optimization/health
- * Health check for optimization services
+ * Health check for optimization services including advanced cache
  */
 router.get('/health', (req: Request, res: Response) => {
-  res.json({
-    success: true,
-    message: 'AI-powered prompt optimization services are running',
-    services: {
-      promptAnalyzer: 'active',
-      optimizationEngine: 'active',
-      securityAnalyzer: 'active'
-    },
-    timestamp: new Date().toISOString()
-  });
+  try {
+    const cacheMetrics = advancedKVCache.getMetrics();
+    const cacheMemoryPressure = advancedKVCache.getMemoryPressure();
+    
+    res.json({
+      success: true,
+      message: 'AI-powered prompt optimization services are running',
+      services: {
+        promptAnalyzer: 'active',
+        optimizationEngine: 'active',
+        securityAnalyzer: 'active',
+        advancedKVCache: 'active'
+      },
+      cacheHealth: {
+        hitRate: cacheMetrics.hitRate,
+        memoryPressure: cacheMemoryPressure.level,
+        compressionRatio: cacheMetrics.compressionRatio,
+        alertsActive: advancedKVCache.getAlerts().length
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Health check error:', error);
+    res.status(500).json({
+      error: 'Health check failed',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
 });
 
 export default router;

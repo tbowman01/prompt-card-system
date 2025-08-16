@@ -7,6 +7,7 @@ import { performance } from 'perf_hooks';
 import { Worker } from 'worker_threads';
 import { promisify } from 'util';
 import { createHash } from 'crypto';
+import { AdvancedKVCache, CacheConfiguration } from './AdvancedKVCache';
 
 export interface OptimizationSuggestion {
   id: string;
@@ -128,8 +129,8 @@ export class OptimizationEngine {
   private eventStore: EventStore;
   private runningTests: Map<string, ABTestConfiguration>;
   private runningTuning: Map<string, PromptTuningConfiguration>;
-  private analysisCache: LRUCache<string, PromptAnalysisResult>;
-  private suggestionCache: LRUCache<string, OptimizationSuggestion[]>;
+  private analysisCache: AdvancedKVCache<PromptAnalysisResult>;
+  private suggestionCache: AdvancedKVCache<OptimizationSuggestion[]>;
   private performanceMetrics: Map<string, number[]>;
   private workerPool: Worker[];
   private maxWorkers: number;
@@ -139,16 +140,61 @@ export class OptimizationEngine {
     this.runningTests = new Map();
     this.runningTuning = new Map();
     
-    // Initialize caching for better performance
-    this.analysisCache = new LRUCache({
-      max: 500,
-      ttl: 1000 * 60 * 30 // 30 minutes
-    });
+    // Initialize advanced caching for better performance and memory optimization
+    const analysisCacheConfig: Partial<CacheConfiguration> = {
+      maxSize: 1000,
+      maxMemoryMB: 256,
+      defaultTTL: 1000 * 60 * 30, // 30 minutes
+      quantization: {
+        enabled: true,
+        type: 'int8',
+        threshold: 2048, // 2KB threshold
+        aggressive: false
+      },
+      adaptiveResize: {
+        enabled: true,
+        minSize: 200,
+        maxSize: 2000,
+        resizeThreshold: 0.8,
+        shrinkFactor: 0.7,
+        growthFactor: 1.3
+      },
+      policy: 'adaptive',
+      mlPrediction: {
+        enabled: true,
+        predictionWindow: 3600000,
+        confidenceThreshold: 0.7
+      }
+    };
     
-    this.suggestionCache = new LRUCache({
-      max: 200,
-      ttl: 1000 * 60 * 15 // 15 minutes
-    });
+    const suggestionCacheConfig: Partial<CacheConfiguration> = {
+      maxSize: 500,
+      maxMemoryMB: 128,
+      defaultTTL: 1000 * 60 * 15, // 15 minutes
+      quantization: {
+        enabled: true,
+        type: 'int8',
+        threshold: 1024, // 1KB threshold
+        aggressive: true
+      },
+      adaptiveResize: {
+        enabled: true,
+        minSize: 100,
+        maxSize: 1000,
+        resizeThreshold: 0.75,
+        shrinkFactor: 0.6,
+        growthFactor: 1.4
+      },
+      policy: 'adaptive',
+      mlPrediction: {
+        enabled: true,
+        predictionWindow: 1800000, // 30 minutes
+        confidenceThreshold: 0.6
+      }
+    };
+    
+    this.analysisCache = new AdvancedKVCache<PromptAnalysisResult>(analysisCacheConfig);
+    this.suggestionCache = new AdvancedKVCache<OptimizationSuggestion[]>(suggestionCacheConfig);
     
     this.performanceMetrics = new Map();
     this.maxWorkers = Math.min(4, require('os').cpus().length);
@@ -178,7 +224,7 @@ export class OptimizationEngine {
     const cacheKey = this.generateCacheKey(originalPrompt, targetMetrics, constraints);
     
     // Check cache first
-    const cached = this.suggestionCache.get(cacheKey);
+    const cached = await this.suggestionCache.get(cacheKey);
     if (cached) {
       this.trackPerformance('generateOptimizationSuggestions', performance.now() - startTime);
       return cached;
@@ -210,7 +256,7 @@ export class OptimizationEngine {
       this.storeOptimizationSuggestions(suggestionId, originalPrompt, suggestions, targetMetrics, constraints);
       
       // Cache results
-      this.suggestionCache.set(cacheKey, suggestions);
+      await this.suggestionCache.set(cacheKey, suggestions);
       
       // Track performance
       this.trackPerformance('generateOptimizationSuggestions', performance.now() - startTime);
@@ -954,14 +1000,14 @@ export class OptimizationEngine {
    */
   private async getCachedAnalysis(prompt: string): Promise<PromptAnalysisResult> {
     const cacheKey = createHash('md5').update(prompt).digest('hex');
-    const cached = this.analysisCache.get(cacheKey);
+    const cached = await this.analysisCache.get(cacheKey);
     
     if (cached) {
       return cached;
     }
     
     const analysis = await promptAnalyzer.analyzePrompt('temp_prompt', prompt);
-    this.analysisCache.set(cacheKey, analysis);
+    await this.analysisCache.set(cacheKey, analysis);
     
     return analysis;
   }
@@ -1227,23 +1273,104 @@ export class OptimizationEngine {
   }
   
   /**
-   * Get cache statistics
+   * Get cache statistics with advanced KV cache metrics
    */
   public getCacheStats(): { analysis: any; suggestions: any } {
+    const analysisMetrics = this.analysisCache.getMetrics();
+    const suggestionMetrics = this.suggestionCache.getMetrics();
+    
     return {
       analysis: {
-        size: this.analysisCache.size,
-        max: this.analysisCache.max,
-        hitRate: this.analysisCache.calculatedSize > 0 ? 
-          (this.analysisCache.calculatedSize - this.analysisCache.size) / this.analysisCache.calculatedSize : 0
+        size: this.analysisCache.size(),
+        entryCount: analysisMetrics.entryCount,
+        hitRate: analysisMetrics.hitRate,
+        memoryUsage: analysisMetrics.memoryUsage,
+        compressionRatio: analysisMetrics.compressionRatio,
+        averageAccessTime: analysisMetrics.averageAccessTime,
+        evictions: analysisMetrics.evictions,
+        quantizations: analysisMetrics.quantizations,
+        memoryEfficiency: analysisMetrics.memoryEfficiency,
+        mlAccuracy: analysisMetrics.mlAccuracy
       },
       suggestions: {
-        size: this.suggestionCache.size,
-        max: this.suggestionCache.max,
-        hitRate: this.suggestionCache.calculatedSize > 0 ? 
-          (this.suggestionCache.calculatedSize - this.suggestionCache.size) / this.suggestionCache.calculatedSize : 0
+        size: this.suggestionCache.size(),
+        entryCount: suggestionMetrics.entryCount,
+        hitRate: suggestionMetrics.hitRate,
+        memoryUsage: suggestionMetrics.memoryUsage,
+        compressionRatio: suggestionMetrics.compressionRatio,
+        averageAccessTime: suggestionMetrics.averageAccessTime,
+        evictions: suggestionMetrics.evictions,
+        quantizations: suggestionMetrics.quantizations,
+        memoryEfficiency: suggestionMetrics.memoryEfficiency,
+        mlAccuracy: suggestionMetrics.mlAccuracy
       }
     };
+  }
+  
+  /**
+   * Get advanced cache performance statistics
+   */
+  public getAdvancedCacheStats(): {
+    analysis: { metrics: any; memoryPressure: any; alerts: any[] };
+    suggestions: { metrics: any; memoryPressure: any; alerts: any[] };
+  } {
+    return {
+      analysis: {
+        metrics: this.analysisCache.getMetrics(),
+        memoryPressure: this.analysisCache.getMemoryPressure(),
+        alerts: this.analysisCache.getAlerts()
+      },
+      suggestions: {
+        metrics: this.suggestionCache.getMetrics(),
+        memoryPressure: this.suggestionCache.getMemoryPressure(),
+        alerts: this.suggestionCache.getAlerts()
+      }
+    };
+  }
+  
+  /**
+   * Optimize cache memory usage
+   */
+  public async optimizeCacheMemory(): Promise<{
+    analysis: { entriesEvicted: number; memoryFreed: number; quantizationsApplied: number };
+    suggestions: { entriesEvicted: number; memoryFreed: number; quantizationsApplied: number };
+  }> {
+    const analysisOptimization = await this.analysisCache.optimizeMemory();
+    const suggestionOptimization = await this.suggestionCache.optimizeMemory();
+    
+    console.log('Cache memory optimization completed:', {
+      analysis: analysisOptimization,
+      suggestions: suggestionOptimization
+    });
+    
+    return {
+      analysis: analysisOptimization,
+      suggestions: suggestionOptimization
+    };
+  }
+  
+  /**
+   * Export cache statistics for monitoring
+   */
+  public exportCacheStatistics(): string {
+    const stats = {
+      timestamp: new Date().toISOString(),
+      analysis: {
+        config: this.analysisCache.getConfiguration(),
+        metrics: this.analysisCache.getMetrics(),
+        memoryPressure: this.analysisCache.getMemoryPressure(),
+        alerts: this.analysisCache.getAlerts()
+      },
+      suggestions: {
+        config: this.suggestionCache.getConfiguration(),
+        metrics: this.suggestionCache.getMetrics(),
+        memoryPressure: this.suggestionCache.getMemoryPressure(),
+        alerts: this.suggestionCache.getAlerts()
+      },
+      performance: this.getPerformanceStats()
+    };
+    
+    return JSON.stringify(stats, null, 2);
   }
 }
 

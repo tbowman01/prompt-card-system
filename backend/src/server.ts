@@ -51,6 +51,7 @@ import cicdMonitoringRoutes from './routes/cicd-monitoring';
 import dependenciesRoutes from './routes/dependencies';
 import enterpriseCostsRoutes from './routes/enterpriseCosts';
 import { demoRoutes } from './routes/demo';
+import edgeOptimizationRoutes from './routes/edge-optimization';
 import { initializeOptimizationServices } from './services/optimization';
 import { performanceMonitor } from './services/performance/PerformanceMonitor';
 import { loadTestScheduler } from './services/performance/LoadTestScheduler';
@@ -256,6 +257,7 @@ app.use('/api/ci-cd', apiRateLimit, cicdMonitoringRoutes);
 app.use('/api/dependencies', apiRateLimit, dependenciesRoutes);
 app.use('/api/enterprise-costs', apiRateLimit, enterpriseCostsRoutes);
 app.use('/api/demo', apiRateLimit, demoRoutes);
+app.use('/api/edge-optimization', heavyOperationRateLimit, edgeOptimizationRoutes); // Edge computing operations
 
 // Error handling middleware
 app.use(errorHandler);
@@ -295,6 +297,10 @@ server.listen(PORT, () => {
   console.log(`🔄 CI/CD Metrics Collector active`);
   console.log(`📈 CI/CD monitoring API available at /api/ci-cd`);
   console.log(`🚀 Pipeline metrics and performance tracking enabled`);
+  console.log(`⚡ Edge Computing System active`);
+  console.log(`🌐 Edge optimization API available at /api/edge-optimization`);
+  console.log(`🏗️ Distributed edge node management enabled`);
+  console.log(`🗄️ Intelligent edge caching system active`);
   
   // Security status
   console.log(`\n🔒 Security Features Active:`);

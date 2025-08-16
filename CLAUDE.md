@@ -1,0 +1,1 @@
+- squash all commits when submitting PR
