@@ -1,0 +1,157 @@
+name: 📚 Documentation & GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'README.md'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'README.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Build documentation
+  build-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🔍 Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: 📋 Install dependencies
+        run: |
+          npm ci
+          # Install documentation tools
+          npm install -g vitepress markdownlint-cli2 markdown-link-check
+
+      - name: 🔍 Validate documentation
+        run: |
+          # Check markdown syntax
+          markdownlint-cli2 "docs/**/*.md" "README.md"
+          
+          # Check for broken links
+          find docs -name "*.md" -exec markdown-link-check {} \;
+
+      - name: 🏗️ Build documentation site
+        run: |
+          # Generate API documentation from OpenAPI spec
+          if [ -f "docs/openapi.yaml" ]; then
+            npx @redocly/cli build-docs docs/openapi.yaml --output docs/.vitepress/dist/api/
+          fi
+          
+          # Build VitePress documentation
+          cd docs
+          npm init -y
+          npm install vitepress @vitepress/theme-default
+          npx vitepress build
+
+      - name: 📤 Upload pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/.vitepress/dist
+
+  # Lint and validate documentation
+  lint-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🔍 Checkout
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 📝 Install linting tools
+        run: |
+          npm install -g markdownlint-cli2 alex write-good
+
+      - name: 🔍 Lint documentation
+        run: |
+          # Markdown linting
+          markdownlint-cli2 "docs/**/*.md" "README.md"
+          
+          # Check for insensitive language
+          alex docs/ README.md || true
+          
+          # Check writing quality
+          write-good docs/**/*.md README.md || true
+
+      - name: 📊 Generate documentation metrics
+        run: |
+          echo "## Documentation Metrics" > docs-metrics.md
+          echo "Generated on: $(date)" >> docs-metrics.md
+          echo "" >> docs-metrics.md
+          echo "### File Count" >> docs-metrics.md
+          echo "- Total MD files: $(find docs -name '*.md' | wc -l)" >> docs-metrics.md
+          echo "- Total words: $(cat docs/**/*.md README.md | wc -w)" >> docs-metrics.md
+          echo "- Total lines: $(cat docs/**/*.md README.md | wc -l)" >> docs-metrics.md
+
+      - name: 📤 Upload metrics
+        uses: actions/upload-artifact@v4
+        with:
+          name: documentation-metrics
+          path: docs-metrics.md
+
+  # Deploy to GitHub Pages
+  deploy-pages:
+    if: github.ref == 'refs/heads/main'
+    needs: [build-docs, lint-docs]
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: 🚀 Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: 📝 Add deployment summary
+        run: |
+          echo "## 📚 Documentation Deployed Successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🔗 **Documentation URL:** ${{ steps.deployment.outputs.page_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Deployment Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp:** $(date)" >> $GITHUB_STEP_SUMMARY
+
+  # Notify about documentation updates
+  notify:
+    if: always() && github.ref == 'refs/heads/main'
+    needs: [deploy-pages]
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📢 Slack notification
+        if: success()
+        run: |
+          echo "Documentation successfully deployed!"
+          # Add Slack webhook notification here if needed
+
+      - name: ⚠️ Failure notification
+        if: failure()
+        run: |
+          echo "Documentation deployment failed!"
+          # Add failure notification logic here
