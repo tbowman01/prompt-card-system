@@ -72,12 +72,14 @@ ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps --chown=nextjs:nodejs /app/node_modules ./node_modules
 
 # Copy built application from builder stage with proper structure
-COPY --from=builder --chown=nextjs:nodejs /app/frontend/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/frontend/.next/static ./.next/static
+# Check if standalone exists, otherwise copy dist
+COPY --from=builder --chown=nextjs:nodejs /app/frontend/.next ./next
+COPY --from=builder --chown=nextjs:nodejs /app/frontend/package*.json ./
 # Copy public folder if it exists
 RUN mkdir -p ./public
-COPY --from=builder --chown=nextjs:nodejs /app/frontend/public* ./public/ 2>/dev/null || true
-COPY --from=builder --chown=nextjs:nodejs /app/frontend/package*.json ./
+COPY --from=builder --chown=nextjs:nodejs /app/frontend/public ./public/ 2>/dev/null || true
+# Copy node_modules for runtime
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
 
 # Switch to non-root user
 USER nextjs
