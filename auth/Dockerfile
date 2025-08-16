@@ -79,8 +79,8 @@ COPY --from=build --chown=authuser:authuser /app/dist ./dist
 RUN ls -la ./dist && test -f ./dist/server.js || (echo "Build output missing" && exit 1)
 COPY --from=build --chown=authuser:authuser /app/node_modules ./node_modules
 
-# Security: Remove package manager to prevent runtime package installations
-RUN rm -rf /usr/local/lib/node_modules/npm
+# Security: Package manager kept for health checks and debugging
+# Consider removing in production with appropriate alternatives
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
