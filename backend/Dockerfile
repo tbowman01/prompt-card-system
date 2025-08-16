@@ -78,28 +78,26 @@ RUN cd backend && \
         echo "⚠️ Fallback build successful"; \
     else \
         echo "🔧 Creating emergency build configuration..." && \
-        cat > tsconfig.emergency.json << 'EOF'
-{
-  "compilerOptions": {
-    "target": "ES2020",
-    "module": "CommonJS",
-    "lib": ["ES2020"],
-    "outDir": "./dist",
-    "rootDir": "./src",
-    "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": false,
-    "resolveJsonModule": true,
-    "moduleResolution": "node",
-    "strict": false,
-    "noEmitOnError": false,
-    "incremental": true
-  },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"]
-}
-EOF
+        echo '{ \
+          "compilerOptions": { \
+            "target": "ES2020", \
+            "module": "CommonJS", \
+            "lib": ["ES2020"], \
+            "outDir": "./dist", \
+            "rootDir": "./src", \
+            "esModuleInterop": true, \
+            "allowSyntheticDefaultImports": true, \
+            "skipLibCheck": true, \
+            "forceConsistentCasingInFileNames": false, \
+            "resolveJsonModule": true, \
+            "moduleResolution": "node", \
+            "strict": false, \
+            "noEmitOnError": false, \
+            "incremental": true \
+          }, \
+          "include": ["src/**/*"], \
+          "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"] \
+        }' > tsconfig.emergency.json && \
         npx tsc -p tsconfig.emergency.json --preserveWatchOutput; \
     fi && \
     # Verify build output
