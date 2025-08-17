@@ -68,9 +68,8 @@ RUN --mount=type=cache,target=/root/.npm,sharing=locked \
 COPY frontend/next.config.* frontend/tailwind.config.* frontend/postcss.config.* ./frontend/
 COPY frontend/public ./frontend/public
 COPY frontend/src ./frontend/src
-COPY frontend/app ./frontend/app 2>/dev/null || true
-COPY frontend/pages ./frontend/pages 2>/dev/null || true
-COPY frontend/components ./frontend/components 2>/dev/null || true
+# Copy additional Next.js directories if they exist
+# Note: These may not exist depending on Next.js app structure (app router vs pages router)
 # Styles directory will be copied with source
 
 # Set advanced build optimization variables
@@ -120,7 +119,7 @@ EXPOSE 3000
 
 # Advanced health check optimized for Next.js
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
-  CMD curl -f http://localhost:3000/api/health 2>/dev/null || curl -f http://localhost:3000/ || exit 1
+  CMD curl -f http://localhost:3000/ || exit 1
 
 # Use tini for proper signal handling
 ENTRYPOINT ["tini", "--"]

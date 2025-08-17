@@ -79,19 +79,19 @@ RUN cd backend && \
     echo "🔨 Starting optimized backend build..." && \
     if npm run build; then \
         echo "✅ Standard build successful"; \
-    elif npm run build:lenient 2>/dev/null; then \
+    elif npm run build:lenient; then \
         echo "⚠️ Fallback build successful"; \
     else \
         echo "🔧 Creating emergency build configuration..." && \
         printf '{\n  "compilerOptions": {\n    "target": "ES2020",\n    "module": "CommonJS",\n    "lib": ["ES2020"],\n    "outDir": "./dist",\n    "rootDir": "./src",\n    "esModuleInterop": true,\n    "allowSyntheticDefaultImports": true,\n    "skipLibCheck": true,\n    "forceConsistentCasingInFileNames": false,\n    "resolveJsonModule": true,\n    "moduleResolution": "node",\n    "strict": false,\n    "noEmitOnError": false,\n    "incremental": true\n  },\n  "include": ["src/**/*"],\n  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"]\n}' > tsconfig.emergency.json && \
         npx tsc -p tsconfig.emergency.json --preserveWatchOutput; \
     fi && \
-    if [ ! -d "dist" ] || [ -z "$(ls -A dist 2>/dev/null)" ]; then \
+    if [ ! -d "dist" ] || [ -z "$(ls -A dist)" ]; then \
         echo "❌ Build verification failed" && exit 1; \
     fi && \
     echo "✅ Build verification successful" && \
-    find dist -name "*.js.map" -delete 2>/dev/null || true && \
-    find dist -name "*.d.ts" -delete 2>/dev/null || true
+    find dist -name "*.js.map" -delete || echo "No source maps to delete" && \
+    find dist -name "*.d.ts" -delete || echo "No type definitions to delete"
 
 # Stage 4: Production runtime (ultra-minimal final image)
 FROM node:20-alpine AS runner
@@ -115,7 +115,7 @@ ENV NODE_ENV=production \
 
 # Copy production dependencies with optimized ownership
 COPY --from=deps --chown=nodeuser:nodejs /app/node_modules ./node_modules
-COPY --from=deps --chown=nodeuser:nodejs /app/backend/node_modules ./backend/node_modules 2>/dev/null || true
+COPY --from=deps --chown=nodeuser:nodejs /app/backend/node_modules ./backend/node_modules
 
 # Copy built application and package files
 COPY --from=builder --chown=nodeuser:nodejs /app/backend/dist ./dist

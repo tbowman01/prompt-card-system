@@ -72,7 +72,7 @@ COPY --chown=authuser:authuser auth/tsconfig*.json ./
 RUN echo "🔨 Starting optimized auth service build..." && \
     if npm run build; then \
         echo "✅ Standard build successful"; \
-    elif npm run build:lenient 2>/dev/null; then \
+    elif npm run build:lenient; then \
         echo "⚠️ Lenient build successful"; \
     else \
         echo "🔧 Creating emergency TypeScript configuration..." && \
@@ -80,12 +80,12 @@ RUN echo "🔨 Starting optimized auth service build..." && \
         node --version && npm --version && \
         npm run build:emergency || echo "⚠️ Emergency build completed"; \
     fi && \
-    if [ ! -d "dist" ] || [ -z "$(ls -A dist 2>/dev/null)" ]; then \
+    if [ ! -d "dist" ] || [ -z "$(ls -A dist)" ]; then \
         echo "❌ Build verification failed" && exit 1; \
     fi && \
     echo "✅ Build verification successful" && \
-    find dist -name "*.js.map" -delete 2>/dev/null || true && \
-    find dist -name "*.d.ts" -delete 2>/dev/null || true && \
+    find dist -name "*.js.map" -delete || echo "No source maps to delete" && \
+    find dist -name "*.d.ts" -delete || echo "No type definitions to delete" && \
     npm prune --production && \
     npm cache clean --force
 
