@@ -200,6 +200,14 @@ export class CircuitBreaker extends EventEmitter {
     });
   }
 
+  public get isOpen(): boolean {
+    return this.state === CircuitBreakerState.OPEN;
+  }
+
+  public recordFailure(): void {
+    this.onFailure(new Error('Recorded failure'));
+  }
+
   public updateConfig(newConfig: Partial<CircuitBreakerConfig>): void {
     this.config = { ...this.config, ...newConfig };
     

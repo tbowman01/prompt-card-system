@@ -118,7 +118,7 @@ COPY --from=builder --chown=nodeuser:nodejs /app/backend/dist ./dist
 COPY --from=builder --chown=nodeuser:nodejs /app/backend/package*.json ./
 
 # Install production dependencies only
-RUN npm install --omit=dev --ignore-scripts --prefer-offline --no-audit --no-fund
+RUN npm install --omit=dev --ignore-scripts --prefer-offline --no-audit --no-fund --legacy-peer-deps
 
 # Create required directories with proper permissions
 RUN mkdir -p /app/data /app/logs /app/tmp && \

@@ -332,11 +332,11 @@ export class EdgeOptimizer {
       this.nodes.set(node.id, enhancedNode);
 
       // Initialize circuit breaker for this node
-      this.circuitBreakers.set(node.id, new CircuitBreaker({
-        name: `edge-node-${node.id}`,
+      this.circuitBreakers.set(node.id, new CircuitBreaker(`edge-node-${node.id}`, {
         failureThreshold: 5,
-        timeout: 30000,
-        resetTimeout: 60000
+        resetTimeout: 60000,
+        monitoringPeriod: 30000,
+        successThreshold: 3
       }));
 
       // Update geographic load balancer
@@ -1268,7 +1268,7 @@ export class EdgeOptimizer {
 
     switch (request.type) {
       case 'optimize':
-        return await this.processOptimizationRequest(node, request);
+        return await this.executeOptimizationOnNode(node, request);
       case 'analyze':
         return await this.processAnalysisRequest(node, request);
       case 'search':
@@ -1282,15 +1282,22 @@ export class EdgeOptimizer {
     }
   }
 
-  private async processOptimizationRequest(node: EdgeNode, request: EdgeRequest): Promise<any> {
+  private async executeOptimizationOnNode(node: EdgeNode, request: EdgeRequest): Promise<any> {
     if (!request.payload.prompt) {
       throw new Error('Prompt required for optimization');
     }
 
     // Use optimization engine for actual processing
+    const targetMetrics = request.payload.target_metrics || {};
+    const optimizationMetrics = {
+      successRate: targetMetrics.min_quality_score || 0.8,
+      responseTime: targetMetrics.max_latency_ms || 1000,
+      qualityScore: targetMetrics.min_quality_score || 0.8
+    };
+    
     const suggestions = await optimizationEngine.generateOptimizationSuggestions(
       request.payload.prompt,
-      request.payload.target_metrics || {},
+      optimizationMetrics,
       request.payload.parameters || {}
     );
 
@@ -1353,7 +1360,7 @@ export class EdgeOptimizer {
     return {
       data: {
         query: request.payload.query,
-        results: Array.from({ length: Math.min(request.payload.limit || 10, 20) }, (_, i) => ({
+        results: Array.from({ length: Math.min((request.payload as any).limit || 10, 20) }, (_, i) => ({
           id: `result_${i}`,
           score: Math.random() * 0.4 + 0.6,
           content: `Search result ${i + 1} for query: ${request.payload.query.substring(0, 50)}...`,
@@ -1531,9 +1538,16 @@ export class EdgeOptimizer {
       let result: any;
       
       if (request.type === 'optimize' && request.payload.prompt) {
+        const targetMetrics = request.payload.target_metrics || {};
+        const optimizationMetrics = {
+          successRate: targetMetrics.min_quality_score || 0.8,
+          responseTime: targetMetrics.max_latency_ms || 1000,
+          qualityScore: targetMetrics.min_quality_score || 0.8
+        };
+        
         const suggestions = await optimizationEngine.generateOptimizationSuggestions(
           request.payload.prompt,
-          request.payload.target_metrics || {},
+          optimizationMetrics,
           { securityLevel: 'basic' }
         );
         
