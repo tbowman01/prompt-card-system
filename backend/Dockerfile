@@ -45,7 +45,7 @@ COPY backend/package*.json ./backend/
 # Install production dependencies with aggressive caching
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
     --mount=type=cache,target=/app/node_modules/.cache,sharing=locked \
-    npm ci --omit=dev --ignore-scripts --prefer-offline --no-audit --no-fund \
+    npm install --omit=dev --ignore-scripts --prefer-offline --no-audit --no-fund \
     && npm cache clean --force
 
 # Stage 3: Build stage (TypeScript compilation with advanced caching)
@@ -113,13 +113,12 @@ ENV NODE_ENV=production \
     NPM_CONFIG_AUDIT=false \
     NPM_CONFIG_FUND=false
 
-# Copy production dependencies with optimized ownership
-COPY --from=deps --chown=nodeuser:nodejs /app/node_modules ./node_modules
-COPY --from=deps --chown=nodeuser:nodejs /app/backend/node_modules ./backend/node_modules
-
 # Copy built application and package files
 COPY --from=builder --chown=nodeuser:nodejs /app/backend/dist ./dist
 COPY --from=builder --chown=nodeuser:nodejs /app/backend/package*.json ./
+
+# Install production dependencies only
+RUN npm install --omit=dev --ignore-scripts --prefer-offline --no-audit --no-fund
 
 # Create required directories with proper permissions
 RUN mkdir -p /app/data /app/logs /app/tmp && \

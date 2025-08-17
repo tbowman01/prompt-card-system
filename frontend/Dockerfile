@@ -103,10 +103,17 @@ ENV NODE_ENV=production \
     HOSTNAME="0.0.0.0" \
     PORT=3000
 
-# Copy standalone application from builder
-COPY --from=builder --chown=nextjs:nodejs /app/frontend/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/frontend/.next/static ./.next/static
+# Copy built application from builder
+# Note: Copying standalone server and static files separately
+COPY --from=builder --chown=nextjs:nodejs /app/frontend/package.json ./package.json
+
+# Create server.js for standalone mode
+RUN echo 'const { createServer } = require("http"); const { parse } = require("url"); const next = require("next"); const dev = process.env.NODE_ENV !== "production"; const hostname = "0.0.0.0"; const port = process.env.PORT || 3000; const app = next({ dev, hostname, port }); const handle = app.getRequestHandler(); app.prepare().then(() => { createServer(async (req, res) => { try { const parsedUrl = parse(req.url, true); const { pathname, query } = parsedUrl; await handle(req, res, parsedUrl); } catch (err) { console.error("Error occurred handling", req.url, err); res.statusCode = 500; res.end("internal server error"); } }).listen(port, (err) => { if (err) throw err; console.log(`> Ready on http://${hostname}:${port}`); }); });' > server.js
+
+# Copy source files for Next.js runtime
+COPY --from=builder --chown=nextjs:nodejs /app/frontend/src ./src
 COPY --from=builder --chown=nextjs:nodejs /app/frontend/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/frontend/next.config.js ./next.config.js
 
 # Ensure proper permissions
 RUN chown -R nextjs:nodejs /app
