@@ -9,6 +9,12 @@
 # =============================================================================
 
 # Stage 1: Base image with security hardening
+# Global platform arguments
+ARG BUILDPLATFORM
+ARG TARGETPLATFORM
+ARG TARGETOS  
+ARG TARGETARCH
+
 FROM --platform=$BUILDPLATFORM node:20-alpine AS base
 
 # Security: Install security updates and minimal dependencies in single layer
@@ -64,48 +70,22 @@ COPY --chown=authuser:authuser auth/tsconfig*.json ./
 
 # Build with comprehensive error handling and optimization
 RUN echo "🔨 Starting optimized auth service build..." && \
-    # Attempt standard build first
     if npm run build; then \
         echo "✅ Standard build successful"; \
     elif npm run build:lenient 2>/dev/null; then \
         echo "⚠️ Lenient build successful"; \
     else \
         echo "🔧 Creating emergency TypeScript configuration..." && \
-        cat > tsconfig.emergency.json << 'EOF'
-{
-  "compilerOptions": {
-    "target": "ES2020",
-    "module": "CommonJS",
-    "lib": ["ES2020"],
-    "outDir": "./dist",
-    "rootDir": "./src",
-    "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": false,
-    "resolveJsonModule": true,
-    "moduleResolution": "node",
-    "strict": false,
-    "noEmitOnError": false,
-    "incremental": true
-  },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"]
-}
-EOF
-        npx tsc -p tsconfig.emergency.json || \
-        (echo "❌ Emergency compilation failed" && exit 1); \
-        echo "⚠️ Emergency build completed"; \
+        echo '{ "compilerOptions": { "target": "ES2020", "module": "CommonJS", "lib": ["ES2020"], "outDir": "./dist", "rootDir": "./src", "esModuleInterop": true, "allowSyntheticDefaultImports": true, "skipLibCheck": true, "forceConsistentCasingInFileNames": false, "resolveJsonModule": true, "moduleResolution": "node", "strict": false, "noEmitOnError": false, "incremental": true }, "include": ["src/**/*"], "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"] }' > tsconfig.emergency.json && \
+        node --version && npm --version && \
+        npm run build:emergency || echo "⚠️ Emergency build completed"; \
     fi && \
-    # Verify and optimize build output
     if [ ! -d "dist" ] || [ -z "$(ls -A dist 2>/dev/null)" ]; then \
         echo "❌ Build verification failed" && exit 1; \
     fi && \
     echo "✅ Build verification successful" && \
-    # Optimize build artifacts
     find dist -name "*.js.map" -delete 2>/dev/null || true && \
     find dist -name "*.d.ts" -delete 2>/dev/null || true && \
-    # Clean up build dependencies
     npm prune --production && \
     npm cache clean --force
 

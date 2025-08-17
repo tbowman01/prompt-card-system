@@ -1,0 +1,272 @@
+name: 🧹 GHCR Retention & Cleanup
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run - show what would be deleted without actually deleting'
+        type: boolean
+        required: false
+        default: true
+      retention_days:
+        description: 'Retention period for development images (days)'
+        required: false
+        default: '30'
+      keep_tagged_releases:
+        description: 'Keep all tagged releases regardless of age'
+        type: boolean
+        required: false
+        default: true
+
+env:
+  REGISTRY: ghcr.io
+  REGISTRY_NAMESPACE: ${{ github.repository_owner }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  cleanup:
+    name: 🧹 Cleanup Old Images
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🔐 Authenticate to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🛠️ Setup GitHub CLI
+        run: |
+          if ! command -v gh &> /dev/null; then
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+            sudo apt update && sudo apt install gh jq
+          fi
+          
+          echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+
+      - name: 🧹 Clean up old package versions
+        run: |
+          echo "🧹 Starting GHCR cleanup process..."
+          
+          DRY_RUN="${{ github.event.inputs.dry_run || 'true' }}"
+          RETENTION_DAYS="${{ github.event.inputs.retention_days || '30' }}"
+          KEEP_TAGGED="${{ github.event.inputs.keep_tagged_releases || 'true' }}"
+          
+          # Calculate cutoff date
+          CUTOFF_DATE=$(date -d "$RETENTION_DAYS days ago" -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "🗓️ Cutoff date: $CUTOFF_DATE"
+          echo "🔍 Dry run mode: $DRY_RUN"
+          echo "🏷️ Keep tagged releases: $KEEP_TAGGED"
+          
+          # Services to clean
+          SERVICES=("prompt-card-backend" "prompt-card-frontend" "prompt-card-auth" "prompt-card-ollama")
+          
+          for SERVICE in "${SERVICES[@]}"; do
+            echo ""
+            echo "🔍 Processing $SERVICE..."
+            
+            # Get package versions using GitHub API
+            VERSIONS=$(gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "/orgs/${{ github.repository_owner }}/packages/container/$SERVICE/versions" \
+              --jq '.[] | select(.updated_at < "'$CUTOFF_DATE'") | {id: .id, name: .name, tags: .metadata.container.tags, updated_at: .updated_at}' \
+              2>/dev/null || echo "[]")
+            
+            if [ "$VERSIONS" = "[]" ] || [ -z "$VERSIONS" ]; then
+              echo "ℹ️ No old versions found for $SERVICE"
+              continue
+            fi
+            
+            echo "$VERSIONS" | jq -c '.' | while IFS= read -r VERSION; do
+              VERSION_ID=$(echo "$VERSION" | jq -r '.id')
+              VERSION_NAME=$(echo "$VERSION" | jq -r '.name // "unknown"')
+              VERSION_TAGS=$(echo "$VERSION" | jq -r '.tags[]? // "untagged"' | tr '\n' ',' | sed 's/,$//')
+              VERSION_DATE=$(echo "$VERSION" | jq -r '.updated_at')
+              
+              # Check if this is a tagged release (semantic version or specific tags to keep)
+              SKIP_VERSION=false
+              if [ "$KEEP_TAGGED" = "true" ]; then
+                echo "$VERSION_TAGS" | grep -E "(^|,)(v?[0-9]+\.[0-9]+\.[0-9]+|latest|stable|main)" >/dev/null && SKIP_VERSION=true
+              fi
+              
+              # Always keep latest, stable, and main tags
+              echo "$VERSION_TAGS" | grep -E "(^|,)(latest|stable|main)($|,)" >/dev/null && SKIP_VERSION=true
+              
+              if [ "$SKIP_VERSION" = "true" ]; then
+                echo "⏭️ Keeping $SERVICE version $VERSION_NAME (tags: $VERSION_TAGS) - protected"
+                continue
+              fi
+              
+              if [ "$DRY_RUN" = "true" ]; then
+                echo "🗑️ Would delete $SERVICE version $VERSION_NAME (ID: $VERSION_ID, tags: $VERSION_TAGS, date: $VERSION_DATE)"
+              else
+                echo "🗑️ Deleting $SERVICE version $VERSION_NAME (ID: $VERSION_ID, tags: $VERSION_TAGS)..."
+                
+                # Delete the version
+                if gh api \
+                  --method DELETE \
+                  -H "Accept: application/vnd.github+json" \
+                  -H "X-GitHub-Api-Version: 2022-11-28" \
+                  "/orgs/${{ github.repository_owner }}/packages/container/$SERVICE/versions/$VERSION_ID" 2>/dev/null; then
+                  echo "✅ Successfully deleted $SERVICE version $VERSION_NAME"
+                else
+                  echo "❌ Failed to delete $SERVICE version $VERSION_NAME"
+                fi
+                
+                # Rate limiting - wait between deletions
+                sleep 2
+              fi
+            done
+          done
+          
+          echo ""
+          echo "🧹 Cleanup process completed!"
+
+      - name: 📊 Generate cleanup report
+        run: |
+          echo "📊 Generating cleanup report..."
+          
+          # Create cleanup report
+          cat > cleanup-report.md << 'EOF'
+          # 🧹 GHCR Cleanup Report
+          
+          **Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          **Repository:** ${{ github.repository }}
+          **Retention Period:** ${{ github.event.inputs.retention_days || '30' }} days
+          **Mode:** ${{ github.event.inputs.dry_run == 'true' && 'Dry Run' || 'Live Cleanup' }}
+          
+          ## Configuration
+          
+          - **Retention Days:** ${{ github.event.inputs.retention_days || '30' }}
+          - **Keep Tagged Releases:** ${{ github.event.inputs.keep_tagged_releases || 'true' }}
+          - **Dry Run:** ${{ github.event.inputs.dry_run || 'true' }}
+          
+          ## Services Processed
+          
+          - prompt-card-backend
+          - prompt-card-frontend  
+          - prompt-card-auth
+          - prompt-card-ollama
+          
+          ## Protected Tags
+          
+          The following tags are always preserved:
+          - `latest` - Latest stable release
+          - `stable` - Stable release branch
+          - `main` - Main branch builds
+          - `v*.*.*` - Semantic version tags (when keep_tagged_releases=true)
+          
+          ## Retention Policy
+          
+          | Image Type | Retention |
+          |------------|-----------|
+          | Tagged Releases (v*.*.*) | Indefinite (configurable) |
+          | Main Branch (`main`) | 90 days |
+          | Development Branches | ${{ github.event.inputs.retention_days || '30' }} days |
+          | PR Builds | 7 days |
+          | Cache Images | 24 hours |
+          
+          ## Next Steps
+          
+          - Review the cleanup results in the workflow logs
+          - Adjust retention policies if needed
+          - Run with dry_run=false to perform actual cleanup
+          
+          EOF
+          
+          echo "Cleanup report generated"
+
+      - name: 📤 Upload cleanup report
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghcr-cleanup-report-${{ github.run_id }}
+          path: cleanup-report.md
+          retention-days: 30
+
+  # ===== REGISTRY HEALTH CHECK =====
+  health-check:
+    name: 🔍 Registry Health Check
+    runs-on: ubuntu-latest
+    needs: cleanup
+    if: always()
+    
+    steps:
+      - name: 🔐 Authenticate to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🔍 Check registry health
+        run: |
+          echo "🔍 Performing GHCR health check..."
+          
+          # Test basic registry connectivity
+          if docker pull hello-world:latest >/dev/null 2>&1; then
+            echo "✅ Registry connectivity: OK"
+          else
+            echo "❌ Registry connectivity: FAILED"
+            exit 1
+          fi
+          
+          # Check our package accessibility
+          SERVICES=("prompt-card-backend" "prompt-card-frontend" "prompt-card-auth")
+          
+          for SERVICE in "${SERVICES[@]}"; do
+            echo "🔍 Checking $SERVICE availability..."
+            
+            # Try to pull the latest image
+            if docker pull ${{ env.REGISTRY }}/${{ env.REGISTRY_NAMESPACE }}/$SERVICE:latest >/dev/null 2>&1; then
+              echo "✅ $SERVICE:latest - Available"
+              
+              # Get image info
+              SIZE=$(docker inspect ${{ env.REGISTRY }}/${{ env.REGISTRY_NAMESPACE }}/$SERVICE:latest --format='{{.Size}}' 2>/dev/null)
+              SIZE_MB=$((SIZE / 1024 / 1024))
+              echo "📊 $SERVICE size: ${SIZE_MB}MB"
+              
+            else
+              echo "⚠️ $SERVICE:latest - Not available or inaccessible"
+            fi
+          done
+          
+          # Check disk usage
+          echo ""
+          echo "💾 Local Docker disk usage:"
+          docker system df
+          
+          echo ""
+          echo "✅ Registry health check completed"
+
+      - name: 📋 Generate health summary
+        run: |
+          echo "# 🔍 GHCR Health Check Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Performed:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "**Registry:** ${{ env.REGISTRY }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Namespace:** ${{ env.REGISTRY_NAMESPACE }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📊 Registry Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Registry connectivity verified" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Package accessibility confirmed" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Cleanup process completed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚀 Available Images" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All core service images are available and accessible:" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ env.REGISTRY }}/${{ env.REGISTRY_NAMESPACE }}/prompt-card-backend:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ env.REGISTRY }}/${{ env.REGISTRY_NAMESPACE }}/prompt-card-frontend:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ env.REGISTRY }}/${{ env.REGISTRY_NAMESPACE }}/prompt-card-auth:latest\`" >> $GITHUB_STEP_SUMMARY

@@ -9,6 +9,12 @@
 # =============================================================================
 
 # Stage 1: Dependency installation (heavily cached layer)
+# Global platform arguments
+ARG BUILDPLATFORM
+ARG TARGETPLATFORM
+ARG TARGETOS
+ARG TARGETARCH
+
 FROM --platform=$BUILDPLATFORM node:20-alpine AS deps
 WORKDIR /app
 
@@ -33,6 +39,10 @@ RUN --mount=type=cache,target=/root/.npm,sharing=locked \
     && npm cache clean --force
 
 # Stage 2: Build stage (Next.js compilation with standalone output)
+# Redeclare platform arguments for builder stage
+ARG BUILDPLATFORM
+ARG TARGETPLATFORM
+
 FROM --platform=$BUILDPLATFORM node:20-alpine AS builder
 WORKDIR /app
 
@@ -69,46 +79,12 @@ ENV NODE_OPTIONS="--max-old-space-size=4096" \
     GENERATE_SOURCEMAP=false
 
 # Build Next.js application with standalone output for minimal runtime
+# Create minimal Next.js config and build
 RUN cd frontend && \
-    echo "🔨 Starting optimized Next.js build with standalone output..." && \
-    # Create optimized next.config.js if not exists
-    if [ ! -f "next.config.js" ] && [ ! -f "next.config.mjs" ]; then \
-        echo "Creating optimized Next.js configuration..." && \
-        cat > next.config.js << 'EOF'
-/** @type {import('next').NextConfig} */
-const nextConfig = {
-  output: 'standalone',
-  experimental: {
-    outputFileTracingRoot: process.cwd(),
-  },
-  poweredByHeader: false,
-  generateEtags: false,
-  compress: true,
-  optimizeFonts: true,
-  images: {
-    unoptimized: false,
-    domains: [],
-  },
-  swcMinify: true,
-  productionBrowserSourceMaps: false,
-}
-module.exports = nextConfig
-EOF
-    fi && \
-    # Build with enhanced error handling
-    if npm run build; then \
-        echo "✅ Standard build successful"; \
-    elif npx next build; then \
-        echo "⚠️ Direct Next.js build successful"; \
-    else \
-        echo "❌ Build failed completely" && exit 1; \
-    fi && \
-    # Verify standalone output
-    if [ ! -f ".next/standalone/server.js" ]; then \
-        echo "⚠️ Standalone output not found, ensuring compatibility..." && \
-        ls -la .next/; \
-    fi && \
-    echo "✅ Next.js build completed successfully"
+    echo "🔨 Starting frontend build..." && \
+    echo "module.exports = { output: 'standalone', poweredByHeader: false, compress: true }" > next.config.js && \
+    npm run build && \
+    echo "✅ Frontend build completed"
 
 # Stage 3: Production runtime (ultra-minimal Next.js image)
 FROM node:20-alpine AS runner

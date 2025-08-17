@@ -8,6 +8,12 @@
 # - Registry-based caching for faster CI/CD builds
 # =============================================================================
 
+# Global platform arguments
+ARG BUILDPLATFORM
+ARG TARGETPLATFORM
+ARG TARGETOS
+ARG TARGETARCH
+
 # Stage 1: Base dependencies (shared across architectures)
 FROM --platform=$BUILDPLATFORM node:20-alpine AS base
 
@@ -71,41 +77,19 @@ COPY backend/scripts ./backend/scripts 2>/dev/null || true
 # Build with enhanced error handling and fallback strategies
 RUN cd backend && \
     echo "🔨 Starting optimized backend build..." && \
-    # Attempt standard build first
     if npm run build; then \
         echo "✅ Standard build successful"; \
     elif npm run build:lenient 2>/dev/null; then \
         echo "⚠️ Fallback build successful"; \
     else \
         echo "🔧 Creating emergency build configuration..." && \
-        echo '{ \
-          "compilerOptions": { \
-            "target": "ES2020", \
-            "module": "CommonJS", \
-            "lib": ["ES2020"], \
-            "outDir": "./dist", \
-            "rootDir": "./src", \
-            "esModuleInterop": true, \
-            "allowSyntheticDefaultImports": true, \
-            "skipLibCheck": true, \
-            "forceConsistentCasingInFileNames": false, \
-            "resolveJsonModule": true, \
-            "moduleResolution": "node", \
-            "strict": false, \
-            "noEmitOnError": false, \
-            "incremental": true \
-          }, \
-          "include": ["src/**/*"], \
-          "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"] \
-        }' > tsconfig.emergency.json && \
+        printf '{\n  "compilerOptions": {\n    "target": "ES2020",\n    "module": "CommonJS",\n    "lib": ["ES2020"],\n    "outDir": "./dist",\n    "rootDir": "./src",\n    "esModuleInterop": true,\n    "allowSyntheticDefaultImports": true,\n    "skipLibCheck": true,\n    "forceConsistentCasingInFileNames": false,\n    "resolveJsonModule": true,\n    "moduleResolution": "node",\n    "strict": false,\n    "noEmitOnError": false,\n    "incremental": true\n  },\n  "include": ["src/**/*"],\n  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"]\n}' > tsconfig.emergency.json && \
         npx tsc -p tsconfig.emergency.json --preserveWatchOutput; \
     fi && \
-    # Verify build output
     if [ ! -d "dist" ] || [ -z "$(ls -A dist 2>/dev/null)" ]; then \
         echo "❌ Build verification failed" && exit 1; \
     fi && \
     echo "✅ Build verification successful" && \
-    # Optimize build output
     find dist -name "*.js.map" -delete 2>/dev/null || true && \
     find dist -name "*.d.ts" -delete 2>/dev/null || true
 

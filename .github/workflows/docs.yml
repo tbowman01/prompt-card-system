@@ -1,4 +1,4 @@
-name: 📚 Documentation & GitHub Pages
+name: 📚 Memory-Driven GitHub Pages Publisher
 
 on:
   push:
@@ -6,26 +6,122 @@ on:
     paths:
       - 'docs/**'
       - 'README.md'
+      - 'backend/coverage/**'
+      - 'frontend/coverage/**'
       - '.github/workflows/docs.yml'
+      - 'memory/**'
+      - '.claude-flow/**'
   pull_request:
     branches: [main]
     paths:
       - 'docs/**'
       - 'README.md'
   workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: 'Force complete rebuild with memory analysis'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
   pages: write
   id-token: write
+  actions: read
 
 concurrency:
-  group: pages-${{ github.ref }}
+  group: pages-memory-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # Build documentation
+  # Memory-driven performance analysis
+  analyze-memory:
+    runs-on: ubuntu-latest
+    outputs:
+      build-optimization: ${{ steps.memory-analysis.outputs.build-optimization }}
+      performance-metrics: ${{ steps.memory-analysis.outputs.performance-metrics }}
+      test-coverage: ${{ steps.memory-analysis.outputs.test-coverage }}
+    steps:
+      - name: 🔍 Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 📊 Analyze Memory Data
+        id: memory-analysis
+        run: |
+          echo "🧠 Analyzing Claude Flow memory for optimization insights..."
+          
+          # Check if memory data exists
+          if [ -f "memory/claude-flow-data.json" ]; then
+            echo "build-optimization=memory-driven" >> $GITHUB_OUTPUT
+            echo "✅ Memory data found - enabling optimization"
+          else
+            echo "build-optimization=standard" >> $GITHUB_OUTPUT
+            echo "⚠️ No memory data - using standard build"
+          fi
+          
+          # Analyze coverage data
+          if [ -f "backend/coverage/coverage-summary.json" ]; then
+            COVERAGE=$(jq -r '.total.lines.pct' backend/coverage/coverage-summary.json 2>/dev/null || echo "0")
+            echo "test-coverage=$COVERAGE" >> $GITHUB_OUTPUT
+            echo "📊 Test coverage: $COVERAGE%"
+          else
+            echo "test-coverage=0" >> $GITHUB_OUTPUT
+          fi
+          
+          # Performance metrics from .claude-flow
+          if [ -f ".claude-flow/metrics/performance.json" ]; then
+            echo "performance-metrics=available" >> $GITHUB_OUTPUT
+            echo "🚀 Performance metrics available"
+          else
+            echo "performance-metrics=none" >> $GITHUB_OUTPUT
+          fi
+
+  # Enhanced documentation build with memory insights
   build-docs:
+    runs-on: ubuntu-latest
+    needs: analyze-memory
+    steps:
+      - name: 🔍 Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 📦 Setup Node.js (Memory-Optimized)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            docs/package-lock.json
+
+      - name: 🧠 Memory-Driven Optimization Setup
+        run: |
+          echo "🔧 Applying memory-driven optimizations..."
+          
+          # Set build optimizations based on memory analysis
+          if [ "${{ needs.analyze-memory.outputs.build-optimization }}" = "memory-driven" ]; then
+            echo "VITE_BUILD_OPTIMIZATION=true" >> $GITHUB_ENV
+            echo "VITE_MEMORY_CACHE=enabled" >> $GITHUB_ENV
+            echo "✅ Memory optimizations enabled"
+          fi
+          
+          # Configure based on coverage data
+          echo "DOC_COVERAGE_THRESHOLD=${{ needs.analyze-memory.outputs.test-coverage }}" >> $GITHUB_ENV
+
+      - name: 📋 Install Dependencies (Optimized)
+        run: |
+          # Parallel installation for speed
+          npm ci --prefer-offline --no-audit
+          
+          # Install documentation tools with caching
+          npm install -g vitepress@latest markdownlint-cli2 markdown-link-check
+          
+          # Install docs dependencies
+          cd docs && npm ci --prefer-offline
     runs-on: ubuntu-latest
     steps:
       - name: 🔍 Checkout
@@ -71,8 +167,8 @@ jobs:
         with:
           path: docs/.vitepress/dist
 
-  # Lint and validate documentation
-  lint-docs:
+  # Enhanced quality analysis with memory insights
+  quality-analysis:
     runs-on: ubuntu-latest
     steps:
       - name: 🔍 Checkout
@@ -114,10 +210,10 @@ jobs:
           name: documentation-metrics
           path: docs-metrics.md
 
-  # Deploy to GitHub Pages
+  # Memory-driven deployment with optimization
   deploy-pages:
     if: github.ref == 'refs/heads/main'
-    needs: [build-docs, lint-docs]
+    needs: [analyze-memory, build-docs, quality-analysis]
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -138,10 +234,10 @@ jobs:
           echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Timestamp:** $(date)" >> $GITHUB_STEP_SUMMARY
 
-  # Notify about documentation updates
-  notify:
+  # Memory-driven notification and optimization
+  notify-and-optimize:
     if: always() && github.ref == 'refs/heads/main'
-    needs: [deploy-pages]
+    needs: [analyze-memory, deploy-pages]
     runs-on: ubuntu-latest
     steps:
       - name: 📢 Slack notification

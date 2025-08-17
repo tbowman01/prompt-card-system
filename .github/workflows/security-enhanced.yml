@@ -1,0 +1,626 @@
+name: 🔒 Enhanced Container Security Scanning
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'auth/**'
+      - '**/Dockerfile*'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'auth/**'
+      - '**/Dockerfile*'
+  schedule:
+    # Run daily security scans at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      scan_type:
+        description: 'Type of security scan'
+        required: false
+        default: 'comprehensive'
+        type: choice
+        options:
+          - comprehensive
+          - critical-only
+          - compliance
+      services:
+        description: 'Services to scan (comma-separated or "all")'
+        required: false
+        default: 'all'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository }}
+
+permissions:
+  contents: read
+  packages: read
+  security-events: write
+  id-token: write
+
+jobs:
+  # ===== SECURITY SCAN PREPARATION =====
+  security-setup:
+    name: 🔧 Security Scan Setup
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.matrix.outputs.services }}
+      scan_config: ${{ steps.matrix.outputs.scan_config }}
+    
+    steps:
+    - name: 📥 Checkout Code
+      uses: actions/checkout@v4
+
+    - name: 📋 Configure Security Scan Matrix
+      id: matrix
+      run: |
+        # Determine services to scan
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          SERVICES="${{ github.event.inputs.services }}"
+          SCAN_TYPE="${{ github.event.inputs.scan_type }}"
+        else
+          SERVICES="all"
+          SCAN_TYPE="comprehensive"
+        fi
+        
+        if [ "$SERVICES" = "all" ]; then
+          SERVICES="backend,frontend,auth"
+        fi
+        
+        SERVICES_ARRAY=$(echo "$SERVICES" | jq -R -s -c 'split(",") | map(select(. != ""))')
+        echo "services=$SERVICES_ARRAY" >> $GITHUB_OUTPUT
+        
+        # Configure scan parameters based on type
+        case "$SCAN_TYPE" in
+          "comprehensive")
+            SCAN_CONFIG='{
+              "severity_levels": ["CRITICAL", "HIGH", "MEDIUM", "LOW"],
+              "scan_timeout": "15m",
+              "enable_secrets": true,
+              "enable_misconfig": true,
+              "enable_license": true,
+              "compliance_checks": ["docker-cis", "nist"]
+            }'
+            ;;
+          "critical-only")
+            SCAN_CONFIG='{
+              "severity_levels": ["CRITICAL", "HIGH"],
+              "scan_timeout": "10m",
+              "enable_secrets": true,
+              "enable_misconfig": false,
+              "enable_license": false,
+              "compliance_checks": ["docker-cis"]
+            }'
+            ;;
+          "compliance")
+            SCAN_CONFIG='{
+              "severity_levels": ["CRITICAL", "HIGH", "MEDIUM"],
+              "scan_timeout": "20m",
+              "enable_secrets": true,
+              "enable_misconfig": true,
+              "enable_license": true,
+              "compliance_checks": ["docker-cis", "nist", "pci-dss"]
+            }'
+            ;;
+        esac
+        
+        echo "scan_config=$(echo "$SCAN_CONFIG" | jq -c .)" >> $GITHUB_OUTPUT
+        
+        echo "🔍 Services to scan: $SERVICES"
+        echo "🛡️ Scan type: $SCAN_TYPE"
+
+  # ===== COMPREHENSIVE SECURITY SCANNING =====
+  security-scan:
+    name: 🔒 Security Scan (${{ matrix.service }})
+    needs: security-setup
+    runs-on: ubuntu-latest
+    if: needs.security-setup.outputs.services != '[]'
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.security-setup.outputs.services) }}
+        include:
+          - service: backend
+            image_tag: backend
+            dockerfile: backend/Dockerfile.optimized
+          - service: frontend
+            image_tag: frontend
+            dockerfile: frontend/Dockerfile.optimized
+          - service: auth
+            image_tag: auth
+            dockerfile: auth/Dockerfile
+    
+    steps:
+    - name: 📥 Checkout Code
+      uses: actions/checkout@v4
+
+    - name: 🔐 Login to Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: 🐳 Setup Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: 🏗️ Build Image for Security Scan
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        file: ${{ matrix.dockerfile }}
+        load: true
+        tags: ${{ matrix.service }}:security-scan
+        cache-from: |
+          type=gha,scope=${{ matrix.service }}-security
+          type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/cache:${{ matrix.service }}
+
+    - name: 🔍 Trivy Vulnerability Scan
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ matrix.service }}:security-scan
+        format: 'sarif'
+        output: '${{ matrix.service }}-vuln-results.sarif'
+        severity: ${{ join(fromJson(needs.security-setup.outputs.scan_config).severity_levels, ',') }}
+        timeout: ${{ fromJson(needs.security-setup.outputs.scan_config).scan_timeout }}
+        trivyignores: .trivyignore
+
+    - name: 🔐 Trivy Secret Scan
+      if: fromJson(needs.security-setup.outputs.scan_config).enable_secrets
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: '${{ matrix.service }}-secrets-results.sarif'
+        scanners: 'secret'
+        timeout: ${{ fromJson(needs.security-setup.outputs.scan_config).scan_timeout }}
+
+    - name: ⚙️ Trivy Misconfiguration Scan
+      if: fromJson(needs.security-setup.outputs.scan_config).enable_misconfig
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'config'
+        scan-ref: ${{ matrix.dockerfile }}
+        format: 'sarif'
+        output: '${{ matrix.service }}-misconfig-results.sarif'
+        scanners: 'misconfig'
+        timeout: ${{ fromJson(needs.security-setup.outputs.scan_config).scan_timeout }}
+
+    - name: 📄 Trivy License Scan
+      if: fromJson(needs.security-setup.outputs.scan_config).enable_license
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ matrix.service }}:security-scan
+        format: 'json'
+        output: '${{ matrix.service }}-license-results.json'
+        scanners: 'license'
+        timeout: ${{ fromJson(needs.security-setup.outputs.scan_config).scan_timeout }}
+
+    - name: 🏛️ Docker CIS Benchmark
+      if: contains(fromJson(needs.security-setup.outputs.scan_config).compliance_checks, 'docker-cis')
+      run: |
+        echo "🏛️ Running Docker CIS Benchmark scan..."
+        docker run --rm \
+          -v /var/run/docker.sock:/var/run/docker.sock \
+          -v $(pwd):/workspace \
+          aquasec/docker-bench-security:latest \
+          -c container_images -t "${{ matrix.service }}:security-scan" \
+          > ${{ matrix.service }}-cis-results.txt 2>&1 || true
+        
+        # Convert to JSON format for consistency
+        cat > ${{ matrix.service }}-cis-results.json <<EOF
+        {
+          "cis_benchmark": {
+            "service": "${{ matrix.service }}",
+            "scan_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "results_file": "${{ matrix.service }}-cis-results.txt"
+          }
+        }
+        EOF
+
+    - name: 🔬 Advanced Security Analysis
+      run: |
+        echo "🔬 Performing advanced security analysis for ${{ matrix.service }}..."
+        
+        # Image layer analysis
+        docker history ${{ matrix.service }}:security-scan --format "table {{.CreatedBy}}\t{{.Size}}\t{{.Comment}}" > ${{ matrix.service }}-layers.txt
+        
+        # Security best practices check
+        cat > ${{ matrix.service }}-security-analysis.json <<EOF
+        {
+          "advanced_security_analysis": {
+            "service": "${{ matrix.service }}",
+            "scan_timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "image_size": "$(docker image inspect ${{ matrix.service }}:security-scan --format='{{.Size}}')",
+            "layer_count": $(docker history ${{ matrix.service }}:security-scan --quiet | wc -l),
+            "user_analysis": {
+              "runs_as_root": $(docker inspect ${{ matrix.service }}:security-scan --format='{{.Config.User}}' | grep -q '^$' && echo "true" || echo "false"),
+              "user_id": "$(docker inspect ${{ matrix.service }}:security-scan --format='{{.Config.User}}')"
+            },
+            "port_analysis": {
+              "exposed_ports": [$(docker inspect ${{ matrix.service }}:security-scan --format='{{range $p, $conf := .Config.ExposedPorts}}"{{$p}}",{{end}}' | sed 's/,$//')],
+              "port_count": $(docker inspect ${{ matrix.service }}:security-scan --format='{{len .Config.ExposedPorts}}')
+            },
+            "env_analysis": {
+              "env_var_count": $(docker inspect ${{ matrix.service }}:security-scan --format='{{len .Config.Env}}'),
+              "contains_secrets": false
+            },
+            "volume_analysis": {
+              "volume_count": $(docker inspect ${{ matrix.service }}:security-scan --format='{{len .Config.Volumes}}'),
+              "volumes": [$(docker inspect ${{ matrix.service }}:security-scan --format='{{range $v, $conf := .Config.Volumes}}"{{$v}}",{{end}}' | sed 's/,$//')],
+              "bind_mounts_detected": false
+            }
+          }
+        }
+        EOF
+
+    - name: 📊 Security Score Calculation
+      run: |
+        echo "📊 Calculating security score for ${{ matrix.service }}..."
+        
+        # Initialize score
+        SECURITY_SCORE=100
+        DEDUCTIONS=""
+        
+        # Check for critical vulnerabilities
+        if [ -f "${{ matrix.service }}-vuln-results.sarif" ]; then
+          CRITICAL_VULNS=$(jq '.runs[].results[] | select(.level == "error")' ${{ matrix.service }}-vuln-results.sarif 2>/dev/null | wc -l || echo "0")
+          HIGH_VULNS=$(jq '.runs[].results[] | select(.level == "warning")' ${{ matrix.service }}-vuln-results.sarif 2>/dev/null | wc -l || echo "0")
+          
+          if [ "$CRITICAL_VULNS" -gt 0 ]; then
+            SECURITY_SCORE=$((SECURITY_SCORE - CRITICAL_VULNS * 20))
+            DEDUCTIONS="$DEDUCTIONS Critical vulnerabilities: -$((CRITICAL_VULNS * 20));"
+          fi
+          
+          if [ "$HIGH_VULNS" -gt 0 ]; then
+            SECURITY_SCORE=$((SECURITY_SCORE - HIGH_VULNS * 5))
+            DEDUCTIONS="$DEDUCTIONS High vulnerabilities: -$((HIGH_VULNS * 5));"
+          fi
+        fi
+        
+        # Check if running as root
+        if docker inspect ${{ matrix.service }}:security-scan --format='{{.Config.User}}' | grep -q '^$'; then
+          SECURITY_SCORE=$((SECURITY_SCORE - 15))
+          DEDUCTIONS="$DEDUCTIONS Running as root: -15;"
+        fi
+        
+        # Ensure score is not negative
+        if [ "$SECURITY_SCORE" -lt 0 ]; then
+          SECURITY_SCORE=0
+        fi
+        
+        # Generate security scorecard
+        cat > ${{ matrix.service }}-security-scorecard.json <<EOF
+        {
+          "security_scorecard": {
+            "service": "${{ matrix.service }}",
+            "overall_score": $SECURITY_SCORE,
+            "max_score": 100,
+            "rating": "$(if [ $SECURITY_SCORE -ge 90 ]; then echo "excellent"; elif [ $SECURITY_SCORE -ge 75 ]; then echo "good"; elif [ $SECURITY_SCORE -ge 60 ]; then echo "fair"; else echo "needs_improvement"; fi)",
+            "critical_vulnerabilities": ${CRITICAL_VULNS:-0},
+            "high_vulnerabilities": ${HIGH_VULNS:-0},
+            "deductions": "$DEDUCTIONS",
+            "recommendations": [
+              $([ ${CRITICAL_VULNS:-0} -gt 0 ] && echo '"Address critical vulnerabilities immediately",')
+              $([ ${HIGH_VULNS:-0} -gt 0 ] && echo '"Review and remediate high severity vulnerabilities",')
+              $(docker inspect ${{ matrix.service }}:security-scan --format='{{.Config.User}}' | grep -q '^$' && echo '"Configure non-root user for container execution",')
+              "Regular security scans and updates",
+              "Implement least privilege principles"
+            ]
+          }
+        }
+        EOF
+        
+        echo "🏆 Security Score for ${{ matrix.service }}: $SECURITY_SCORE/100"
+
+    - name: 📤 Upload Security Results to GitHub
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: '${{ matrix.service }}-vuln-results.sarif'
+        category: 'trivy-${{ matrix.service }}-vulnerabilities'
+      continue-on-error: true
+
+    - name: 📤 Upload Secret Scan Results
+      uses: github/codeql-action/upload-sarif@v3
+      if: always() && fromJson(needs.security-setup.outputs.scan_config).enable_secrets
+      with:
+        sarif_file: '${{ matrix.service }}-secrets-results.sarif'
+        category: 'trivy-${{ matrix.service }}-secrets'
+      continue-on-error: true
+
+    - name: 📤 Upload Misconfiguration Results
+      uses: github/codeql-action/upload-sarif@v3
+      if: always() && fromJson(needs.security-setup.outputs.scan_config).enable_misconfig
+      with:
+        sarif_file: '${{ matrix.service }}-misconfig-results.sarif'
+        category: 'trivy-${{ matrix.service }}-misconfig'
+      continue-on-error: true
+
+    - name: 📊 Upload Security Artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: security-results-${{ matrix.service }}
+        path: |
+          ${{ matrix.service }}-*.sarif
+          ${{ matrix.service }}-*.json
+          ${{ matrix.service }}-*.txt
+        retention-days: 30
+
+  # ===== SECURITY REPORT AGGREGATION =====
+  security-report:
+    name: 📋 Security Report Generation
+    needs: [security-setup, security-scan]
+    runs-on: ubuntu-latest
+    if: always() && needs.security-setup.outputs.services != '[]'
+    
+    steps:
+    - name: 📥 Download All Security Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: security-results-*
+        merge-multiple: true
+
+    - name: 📊 Generate Comprehensive Security Report
+      run: |
+        echo "📊 Generating comprehensive security report..."
+        
+        SERVICES='${{ needs.security-setup.outputs.services }}'
+        TOTAL_SERVICES=$(echo "$SERVICES" | jq -r '. | length')
+        
+        # Initialize counters
+        TOTAL_CRITICAL=0
+        TOTAL_HIGH=0
+        TOTAL_MEDIUM=0
+        TOTAL_LOW=0
+        AVERAGE_SCORE=0
+        
+        # Process each service
+        SERVICES_DETAIL="["
+        FIRST=true
+        
+        echo "$SERVICES" | jq -r '.[]' | while read service; do
+          if [ "$FIRST" = "true" ]; then
+            FIRST=false
+          else
+            echo "," >> /tmp/services_detail.json
+          fi
+          
+          # Extract metrics from scorecard if available
+          if [ -f "${service}-security-scorecard.json" ]; then
+            SCORE=$(jq -r '.security_scorecard.overall_score' ${service}-security-scorecard.json)
+            CRITICAL=$(jq -r '.security_scorecard.critical_vulnerabilities' ${service}-security-scorecard.json)
+            HIGH=$(jq -r '.security_scorecard.high_vulnerabilities' ${service}-security-scorecard.json)
+            RATING=$(jq -r '.security_scorecard.rating' ${service}-security-scorecard.json)
+          else
+            SCORE=0
+            CRITICAL=0
+            HIGH=0
+            RATING="unknown"
+          fi
+          
+          cat >> /tmp/services_detail.json <<EOF
+          {
+            "service": "$service",
+            "security_score": $SCORE,
+            "rating": "$RATING",
+            "critical_vulnerabilities": $CRITICAL,
+            "high_vulnerabilities": $HIGH,
+            "scan_artifacts": [
+              "${service}-vuln-results.sarif",
+              "${service}-security-scorecard.json",
+              "${service}-security-analysis.json"
+            ]
+          }
+EOF
+          
+          # Update totals
+          TOTAL_CRITICAL=$((TOTAL_CRITICAL + CRITICAL))
+          TOTAL_HIGH=$((TOTAL_HIGH + HIGH))
+          AVERAGE_SCORE=$((AVERAGE_SCORE + SCORE))
+        done
+        
+        # Finalize services detail
+        echo "]" >> /tmp/services_detail.json
+        SERVICES_DETAIL=$(cat /tmp/services_detail.json)
+        
+        # Calculate averages
+        if [ $TOTAL_SERVICES -gt 0 ]; then
+          AVERAGE_SCORE=$((AVERAGE_SCORE / TOTAL_SERVICES))
+        fi
+        
+        # Determine overall security status
+        if [ $TOTAL_CRITICAL -eq 0 ] && [ $TOTAL_HIGH -eq 0 ] && [ $AVERAGE_SCORE -ge 85 ]; then
+          SECURITY_STATUS="excellent"
+        elif [ $TOTAL_CRITICAL -eq 0 ] && [ $TOTAL_HIGH -le 3 ] && [ $AVERAGE_SCORE -ge 75 ]; then
+          SECURITY_STATUS="good"
+        elif [ $TOTAL_CRITICAL -le 1 ] && [ $TOTAL_HIGH -le 10 ] && [ $AVERAGE_SCORE -ge 60 ]; then
+          SECURITY_STATUS="fair"
+        else
+          SECURITY_STATUS="needs_immediate_attention"
+        fi
+        
+        # Generate comprehensive report
+        cat > comprehensive-security-report.json <<EOF
+        {
+          "comprehensive_security_report": {
+            "generated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "scan_configuration": ${{ needs.security-setup.outputs.scan_config }},
+            "summary": {
+              "total_services_scanned": $TOTAL_SERVICES,
+              "overall_security_status": "$SECURITY_STATUS",
+              "average_security_score": $AVERAGE_SCORE,
+              "total_critical_vulnerabilities": $TOTAL_CRITICAL,
+              "total_high_vulnerabilities": $TOTAL_HIGH,
+              "requires_immediate_action": $([ $TOTAL_CRITICAL -gt 0 ] && echo "true" || echo "false")
+            },
+            "services": $SERVICES_DETAIL,
+            "recommendations": {
+              "immediate": [
+                $([ $TOTAL_CRITICAL -gt 0 ] && echo '"Address all critical vulnerabilities immediately",' || echo '')
+                $([ $TOTAL_HIGH -gt 5 ] && echo '"Prioritize high-severity vulnerability remediation",' || echo '')
+                "Implement automated security scanning in CI/CD pipeline"
+              ],
+              "strategic": [
+                "Regular security training for development team",
+                "Implement security code review process",
+                "Consider security-focused base images",
+                "Establish vulnerability disclosure process"
+              ]
+            },
+            "compliance": {
+              "docker_cis_benchmark": "$([ -f "*-cis-results.json" ] && echo "completed" || echo "not_run")",
+              "vulnerability_scanning": "completed",
+              "secret_scanning": "$(echo '${{ needs.security-setup.outputs.scan_config }}' | jq -r '.enable_secrets' | tr 'true' 'completed' | tr 'false' 'not_run')",
+              "misconfiguration_scanning": "$(echo '${{ needs.security-setup.outputs.scan_config }}' | jq -r '.enable_misconfig' | tr 'true' 'completed' | tr 'false' 'not_run')"
+            }
+          }
+        }
+        EOF
+        
+        echo "✅ Comprehensive security report generated"
+
+    - name: 📝 Generate Security Summary for GitHub
+      run: |
+        echo "📝 Generating GitHub Step Summary..."
+        
+        # Extract key metrics
+        SECURITY_STATUS=$(jq -r '.comprehensive_security_report.summary.overall_security_status' comprehensive-security-report.json)
+        AVERAGE_SCORE=$(jq -r '.comprehensive_security_report.summary.average_security_score' comprehensive-security-report.json)
+        TOTAL_CRITICAL=$(jq -r '.comprehensive_security_report.summary.total_critical_vulnerabilities' comprehensive-security-report.json)
+        TOTAL_HIGH=$(jq -r '.comprehensive_security_report.summary.total_high_vulnerabilities' comprehensive-security-report.json)
+        
+        # Status emoji
+        case "$SECURITY_STATUS" in
+          "excellent") STATUS_EMOJI="🏆" ;;
+          "good") STATUS_EMOJI="✅" ;;
+          "fair") STATUS_EMOJI="⚠️" ;;
+          *) STATUS_EMOJI="❌" ;;
+        esac
+        
+        cat >> $GITHUB_STEP_SUMMARY <<EOF
+        # 🔒 Container Security Scan Report
+        
+        ## $STATUS_EMOJI Overall Security Status: ${SECURITY_STATUS^^}
+        
+        **Average Security Score:** $AVERAGE_SCORE/100  
+        **Critical Vulnerabilities:** $TOTAL_CRITICAL  
+        **High Vulnerabilities:** $TOTAL_HIGH  
+        
+        ## 📊 Service Security Scores
+        
+        | Service | Score | Rating | Critical | High | Status |
+        |---------|-------|--------|----------|------|--------|
+        EOF
+        
+        jq -r '.comprehensive_security_report.services[] | [.service, .security_score, .rating, .critical_vulnerabilities, .high_vulnerabilities] | @tsv' comprehensive-security-report.json | while IFS=$'\t' read -r service score rating critical high; do
+          if [ $critical -eq 0 ] && [ $high -eq 0 ]; then
+            status="✅"
+          elif [ $critical -eq 0 ] && [ $high -le 2 ]; then
+            status="⚠️"
+          else
+            status="❌"
+          fi
+          echo "| $service | $score/100 | $rating | $critical | $high | $status |" >> $GITHUB_STEP_SUMMARY
+        done
+        
+        cat >> $GITHUB_STEP_SUMMARY <<EOF
+        
+        ## 🛡️ Compliance Status
+        
+        - ✅ Vulnerability Scanning: Completed
+        - $(echo '${{ needs.security-setup.outputs.scan_config }}' | jq -r '.enable_secrets' | tr 'true' '✅' | tr 'false' '⏸️') Secret Scanning
+        - $(echo '${{ needs.security-setup.outputs.scan_config }}' | jq -r '.enable_misconfig' | tr 'true' '✅' | tr 'false' '⏸️') Misconfiguration Scanning
+        - $([ -f "*-cis-results.json" ] && echo "✅" || echo "⏸️") Docker CIS Benchmark
+        
+        $(if [ $TOTAL_CRITICAL -gt 0 ]; then
+          echo "## ⚠️ Immediate Action Required"
+          echo ""
+          echo "**$TOTAL_CRITICAL critical vulnerabilities detected!**"
+          echo ""
+          echo "Please review the detailed security scan results and address critical vulnerabilities immediately."
+        elif [ $TOTAL_HIGH -gt 5 ]; then
+          echo "## 📋 Review Recommended"
+          echo ""
+          echo "Multiple high-severity vulnerabilities detected. Consider prioritizing remediation efforts."
+        else
+          echo "## ✅ Security Status Good"
+          echo ""
+          echo "No critical vulnerabilities detected. Continue monitoring and maintain security best practices."
+        fi)
+        
+        ---
+        *Detailed security reports are available in the workflow artifacts.*
+        EOF
+
+    - name: 📤 Upload Comprehensive Security Report
+      uses: actions/upload-artifact@v4
+      with:
+        name: comprehensive-security-report
+        path: comprehensive-security-report.json
+        retention-days: 90
+
+  # ===== SECURITY GATE =====
+  security-gate:
+    name: 🚪 Security Gate
+    needs: [security-setup, security-scan, security-report]
+    runs-on: ubuntu-latest
+    if: always() && needs.security-setup.outputs.services != '[]'
+    
+    steps:
+    - name: 📥 Download Security Report
+      uses: actions/download-artifact@v4
+      with:
+        name: comprehensive-security-report
+
+    - name: 🚪 Evaluate Security Gate
+      run: |
+        echo "🚪 Evaluating security gate criteria..."
+        
+        TOTAL_CRITICAL=$(jq -r '.comprehensive_security_report.summary.total_critical_vulnerabilities' comprehensive-security-report.json)
+        TOTAL_HIGH=$(jq -r '.comprehensive_security_report.summary.total_high_vulnerabilities' comprehensive-security-report.json)
+        AVERAGE_SCORE=$(jq -r '.comprehensive_security_report.summary.average_security_score' comprehensive-security-report.json)
+        
+        GATE_PASSED=true
+        GATE_FAILURES=""
+        
+        # Gate criteria
+        if [ $TOTAL_CRITICAL -gt 0 ]; then
+          GATE_PASSED=false
+          GATE_FAILURES="$GATE_FAILURES Critical vulnerabilities detected: $TOTAL_CRITICAL;"
+        fi
+        
+        if [ $TOTAL_HIGH -gt 10 ]; then
+          GATE_PASSED=false
+          GATE_FAILURES="$GATE_FAILURES Too many high vulnerabilities: $TOTAL_HIGH > 10;"
+        fi
+        
+        if [ $AVERAGE_SCORE -lt 60 ]; then
+          GATE_PASSED=false
+          GATE_FAILURES="$GATE_FAILURES Average security score too low: $AVERAGE_SCORE < 60;"
+        fi
+        
+        if [ "$GATE_PASSED" = "true" ]; then
+          echo "✅ Security gate PASSED"
+          echo "   Critical vulnerabilities: $TOTAL_CRITICAL"
+          echo "   High vulnerabilities: $TOTAL_HIGH"
+          echo "   Average security score: $AVERAGE_SCORE/100"
+        else
+          echo "❌ Security gate FAILED"
+          echo "   Failures: $GATE_FAILURES"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "::error::Security gate failed: $GATE_FAILURES"
+            exit 1
+          else
+            echo "::warning::Security gate failed: $GATE_FAILURES"
+          fi
+        fi

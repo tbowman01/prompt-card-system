@@ -1,0 +1,455 @@
+# Comprehensive Test Pipeline for CI/CD
+# This file should be placed in .github/workflows/test-pipeline.yml
+
+name: Comprehensive Test Suite
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+env:
+  NODE_VERSION: '20'
+  DOCKER_BUILDKIT: 1
+  COMPOSE_DOCKER_CLI_BUILD: 1
+
+jobs:
+  # Job 1: Code Quality and Linting
+  code-quality:
+    runs-on: ubuntu-latest
+    name: Code Quality & Linting
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run TypeScript type checking
+        run: npm run type-check
+
+      - name: Security audit
+        run: npm run security:audit
+
+      - name: Upload lint results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lint-results
+          path: |
+            eslint-report.json
+            audit-report.json
+
+  # Job 2: Unit Tests
+  unit-tests:
+    runs-on: ubuntu-latest
+    name: Unit Tests
+    strategy:
+      matrix:
+        service: [backend, frontend, auth]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests - ${{ matrix.service }}
+        run: |
+          cd ${{ matrix.service }}
+          npm run test:coverage
+
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v4
+        with:
+          file: ${{ matrix.service }}/coverage/lcov.info
+          flags: ${{ matrix.service }}-unit
+          name: ${{ matrix.service }}-unit-coverage
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-test-results-${{ matrix.service }}
+          path: |
+            ${{ matrix.service }}/coverage/
+            ${{ matrix.service }}/test-results.xml
+
+  # Job 3: Integration Tests
+  integration-tests:
+    runs-on: ubuntu-latest
+    name: Integration Tests
+    needs: [unit-tests]
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: testdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup test database
+        run: |
+          PGPASSWORD=testpass psql -h localhost -U postgres -d testdb -f database/init/01-init.sql
+
+      - name: Run integration tests
+        env:
+          DATABASE_URL: postgres://postgres:testpass@localhost:5432/testdb
+          REDIS_URL: redis://localhost:6379
+          NODE_ENV: test
+        run: |
+          npx jest --config=tests/jest.config.root.js --selectProjects integration-api,integration-database,integration-services
+
+      - name: Upload integration test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-test-results
+          path: |
+            coverage/integration/
+            test-results-integration.xml
+
+  # Job 4: Performance Tests
+  performance-tests:
+    runs-on: ubuntu-latest
+    name: Performance Tests
+    needs: [integration-tests]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Start services for performance testing
+        run: |
+          docker-compose -f docker/docker-compose.yml up -d
+          sleep 30
+
+      - name: Wait for services
+        run: |
+          timeout 60 bash -c 'until curl -f http://localhost:8000/api/health; do sleep 2; done'
+          timeout 60 bash -c 'until curl -f http://localhost:8005/health; do sleep 2; done'
+
+      - name: Run performance tests
+        run: |
+          npx jest --config=tests/jest.config.root.js --selectProjects performance --testTimeout=600000
+
+      - name: Upload performance results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: performance-test-results
+          path: |
+            performance-report.json
+            performance-metrics.json
+
+      - name: Stop services
+        if: always()
+        run: docker-compose -f docker/docker-compose.yml down
+
+  # Job 5: Docker Tests
+  docker-tests:
+    runs-on: ubuntu-latest
+    name: Docker Container Tests
+    needs: [integration-tests]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker images
+        run: |
+          docker-compose -f docker/docker-compose.yml build
+
+      - name: Run Docker tests
+        run: |
+          npx jest --config=tests/jest.config.root.js --selectProjects docker --testTimeout=900000
+
+      - name: Upload Docker test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: docker-test-results
+          path: |
+            docker-test-report.json
+
+      - name: Cleanup Docker
+        if: always()
+        run: |
+          docker-compose -f docker/docker-compose.yml down -v
+          docker system prune -f
+
+  # Job 6: E2E Tests
+  e2e-tests:
+    runs-on: ubuntu-latest
+    name: End-to-End Tests
+    needs: [docker-tests]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright
+        run: npx playwright install --with-deps
+
+      - name: Start application stack
+        run: |
+          docker-compose -f docker/docker-compose.yml up -d
+          sleep 60
+
+      - name: Wait for application readiness
+        run: |
+          timeout 120 bash -c 'until curl -f http://localhost:3000; do sleep 5; done'
+          timeout 120 bash -c 'until curl -f http://localhost:8000/api/health; do sleep 5; done'
+          timeout 120 bash -c 'until curl -f http://localhost:8005/health; do sleep 5; done'
+
+      - name: Run E2E tests
+        env:
+          CI: true
+        run: |
+          npx jest --config=tests/jest.config.root.js --selectProjects e2e --testTimeout=1200000
+
+      - name: Upload E2E test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-test-results
+          path: |
+            e2e-test-report.html
+            test-results/
+            screenshots/
+
+      - name: Stop application
+        if: always()
+        run: docker-compose -f docker/docker-compose.yml down
+
+  # Job 7: Security Tests
+  security-tests:
+    runs-on: ubuntu-latest
+    name: Security Tests
+    needs: [code-quality]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run security-specific tests
+        run: |
+          cd auth && npm run test:security
+
+      - name: OWASP ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.10.0
+        with:
+          target: 'http://localhost:8000'
+
+  # Job 8: Test Report Generation
+  test-report:
+    runs-on: ubuntu-latest
+    name: Generate Test Report
+    needs: [unit-tests, integration-tests, performance-tests, docker-tests, e2e-tests, security-tests]
+    if: always()
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: test-artifacts
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate comprehensive test report
+        run: |
+          node tests/scripts/generate-ci-report.js test-artifacts/
+
+      - name: Upload comprehensive test report
+        uses: actions/upload-artifact@v4
+        with:
+          name: comprehensive-test-report
+          path: |
+            comprehensive-test-report.html
+            test-summary.json
+
+      - name: Comment PR with test results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = JSON.parse(fs.readFileSync('test-summary.json', 'utf8'));
+            
+            const comment = `## 🧪 Test Results Summary
+            
+            | Test Suite | Status | Passed | Failed | Coverage |
+            |------------|--------|--------|--------|----------|
+            | Unit Tests | ${summary.unit.status} | ${summary.unit.passed} | ${summary.unit.failed} | ${summary.unit.coverage}% |
+            | Integration Tests | ${summary.integration.status} | ${summary.integration.passed} | ${summary.integration.failed} | ${summary.integration.coverage}% |
+            | Performance Tests | ${summary.performance.status} | ${summary.performance.passed} | ${summary.performance.failed} | N/A |
+            | Docker Tests | ${summary.docker.status} | ${summary.docker.passed} | ${summary.docker.failed} | N/A |
+            | E2E Tests | ${summary.e2e.status} | ${summary.e2e.passed} | ${summary.e2e.failed} | N/A |
+            | Security Tests | ${summary.security.status} | ${summary.security.passed} | ${summary.security.failed} | N/A |
+            
+            **Overall Status**: ${summary.overall.status}
+            **Total Tests**: ${summary.overall.total}
+            **Success Rate**: ${summary.overall.successRate}%
+            **Total Duration**: ${summary.overall.duration}
+            
+            ${summary.overall.status === 'FAILED' ? '❌ Some tests failed. Please check the detailed reports.' : '✅ All tests passed!'}
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+  # Job 9: Quality Gate
+  quality-gate:
+    runs-on: ubuntu-latest
+    name: Quality Gate
+    needs: [test-report]
+    if: always()
+    steps:
+      - name: Download test summary
+        uses: actions/download-artifact@v4
+        with:
+          name: comprehensive-test-report
+          path: .
+
+      - name: Evaluate quality gate
+        run: |
+          node -e "
+          const summary = require('./test-summary.json');
+          
+          const thresholds = {
+            unitCoverage: 80,
+            integrationCoverage: 70,
+            successRate: 95
+          };
+          
+          let passed = true;
+          const failures = [];
+          
+          if (summary.unit.coverage < thresholds.unitCoverage) {
+            failures.push(\`Unit test coverage (\${summary.unit.coverage}%) below threshold (\${thresholds.unitCoverage}%)\`);
+            passed = false;
+          }
+          
+          if (summary.integration.coverage < thresholds.integrationCoverage) {
+            failures.push(\`Integration test coverage (\${summary.integration.coverage}%) below threshold (\${thresholds.integrationCoverage}%)\`);
+            passed = false;
+          }
+          
+          if (summary.overall.successRate < thresholds.successRate) {
+            failures.push(\`Overall success rate (\${summary.overall.successRate}%) below threshold (\${thresholds.successRate}%)\`);
+            passed = false;
+          }
+          
+          if (!passed) {
+            console.log('❌ Quality gate failed:');
+            failures.forEach(failure => console.log(\`  - \${failure}\`));
+            process.exit(1);
+          } else {
+            console.log('✅ Quality gate passed!');
+          }
+          "
+
+      - name: Quality gate status
+        if: failure()
+        run: |
+          echo "::error::Quality gate failed. Check the thresholds and test results."
+          exit 1

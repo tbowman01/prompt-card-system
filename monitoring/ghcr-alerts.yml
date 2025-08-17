@@ -1,0 +1,199 @@
+# GHCR Monitoring Alert Rules
+
+groups:
+  - name: ghcr.rules
+    interval: 30s
+    rules:
+      # ===== GHCR AVAILABILITY ALERTS =====
+      - alert: GHCRDown
+        expr: up{job="registry-exporter"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: ghcr
+        annotations:
+          summary: "GHCR is down"
+          description: "GitHub Container Registry is not accessible for {{ $labels.instance }}"
+          
+      - alert: GHCRHighLatency
+        expr: registry_request_duration_seconds{quantile="0.95"} > 5
+        for: 2m
+        labels:
+          severity: warning
+          service: ghcr
+        annotations:
+          summary: "High GHCR latency"
+          description: "GHCR 95th percentile latency is {{ $value }}s for {{ $labels.instance }}"
+
+      # ===== IMAGE AVAILABILITY ALERTS =====
+      - alert: ImagePullFailure
+        expr: increase(registry_pull_errors_total[5m]) > 3
+        for: 1m
+        labels:
+          severity: warning
+          service: ghcr
+        annotations:
+          summary: "Image pull failures detected"
+          description: "{{ $value }} image pull failures in the last 5 minutes for {{ $labels.image }}"
+
+      - alert: ImagePushFailure
+        expr: increase(registry_push_errors_total[5m]) > 1
+        for: 1m
+        labels:
+          severity: critical
+          service: ghcr
+        annotations:
+          summary: "Image push failures detected"
+          description: "{{ $value }} image push failures in the last 5 minutes for {{ $labels.image }}"
+
+      # ===== STORAGE ALERTS =====
+      - alert: GHCRStorageQuotaHigh
+        expr: (registry_storage_bytes_used / registry_storage_bytes_total) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          service: ghcr
+        annotations:
+          summary: "GHCR storage quota high"
+          description: "GHCR storage usage is {{ $value }}% for {{ $labels.namespace }}"
+
+      - alert: GHCRStorageQuotaCritical
+        expr: (registry_storage_bytes_used / registry_storage_bytes_total) * 100 > 95
+        for: 2m
+        labels:
+          severity: critical
+          service: ghcr
+        annotations:
+          summary: "GHCR storage quota critical"
+          description: "GHCR storage usage is {{ $value }}% for {{ $labels.namespace }}"
+
+      # ===== RATE LIMITING ALERTS =====
+      - alert: GHCRRateLimited
+        expr: increase(registry_rate_limit_exceeded_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          service: ghcr
+        annotations:
+          summary: "GHCR rate limiting detected"
+          description: "{{ $value }} rate limit exceeded events in the last 5 minutes"
+
+      # ===== BUILD CACHE ALERTS =====
+      - alert: BuildCacheHitRateLow
+        expr: (increase(buildkit_cache_hits_total[10m]) / (increase(buildkit_cache_hits_total[10m]) + increase(buildkit_cache_misses_total[10m]))) * 100 < 50
+        for: 5m
+        labels:
+          severity: warning
+          service: build-cache
+        annotations:
+          summary: "Low build cache hit rate"
+          description: "Build cache hit rate is {{ $value }}% in the last 10 minutes"
+
+      - alert: BuildCacheStorageHigh
+        expr: buildkit_cache_storage_bytes > 10 * 1024 * 1024 * 1024  # 10GB
+        for: 5m
+        labels:
+          severity: warning
+          service: build-cache
+        annotations:
+          summary: "High build cache storage usage"
+          description: "Build cache is using {{ $value | humanizeBytes }} of storage"
+
+      # ===== IMAGE SIZE ALERTS =====
+      - alert: ImageSizeTooLarge
+        expr: registry_image_size_bytes > 2 * 1024 * 1024 * 1024  # 2GB
+        for: 1m
+        labels:
+          severity: warning
+          service: optimization
+        annotations:
+          summary: "Large image detected"
+          description: "Image {{ $labels.image }}:{{ $labels.tag }} is {{ $value | humanizeBytes }}"
+
+      - alert: ImageLayerCountHigh
+        expr: registry_image_layer_count > 25
+        for: 1m
+        labels:
+          severity: warning
+          service: optimization
+        annotations:
+          summary: "High layer count detected"
+          description: "Image {{ $labels.image }}:{{ $labels.tag }} has {{ $value }} layers"
+
+      # ===== SECURITY ALERTS =====
+      - alert: VulnerabilitiesDetected
+        expr: registry_image_vulnerabilities_total{severity="critical"} > 0
+        for: 1m
+        labels:
+          severity: critical
+          service: security
+        annotations:
+          summary: "Critical vulnerabilities detected"
+          description: "{{ $value }} critical vulnerabilities found in {{ $labels.image }}:{{ $labels.tag }}"
+
+      - alert: HighVulnerabilityCount
+        expr: registry_image_vulnerabilities_total{severity="high"} > 5
+        for: 1m
+        labels:
+          severity: warning
+          service: security
+        annotations:
+          summary: "High vulnerability count"
+          description: "{{ $value }} high-severity vulnerabilities found in {{ $labels.image }}:{{ $labels.tag }}"
+
+      # ===== RETENTION ALERTS =====
+      - alert: OldImagesNotCleaned
+        expr: registry_image_age_days > 60 and registry_image_pulls_total < 5
+        for: 1d
+        labels:
+          severity: info
+          service: retention
+        annotations:
+          summary: "Old unused images detected"
+          description: "Image {{ $labels.image }}:{{ $labels.tag }} is {{ $value }} days old with low usage"
+
+      # ===== PERFORMANCE ALERTS =====
+      - alert: SlowImagePull
+        expr: registry_pull_duration_seconds{quantile="0.95"} > 300  # 5 minutes
+        for: 2m
+        labels:
+          severity: warning
+          service: performance
+        annotations:
+          summary: "Slow image pulls detected"
+          description: "95th percentile pull time is {{ $value }}s for {{ $labels.image }}"
+
+      - alert: HighDiskUsage
+        expr: (node_filesystem_size_bytes{mountpoint="/"} - node_filesystem_avail_bytes{mountpoint="/"}) / node_filesystem_size_bytes{mountpoint="/"} * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "High disk usage"
+          description: "Disk usage is {{ $value }}% on {{ $labels.instance }}"
+
+  - name: ghcr.recording.rules
+    interval: 30s
+    rules:
+      # Recording rules for better performance
+      - record: ghcr:cache_hit_rate
+        expr: (increase(buildkit_cache_hits_total[5m]) / (increase(buildkit_cache_hits_total[5m]) + increase(buildkit_cache_misses_total[5m]))) * 100
+
+      - record: ghcr:pull_rate
+        expr: rate(registry_pulls_total[5m])
+
+      - record: ghcr:push_rate
+        expr: rate(registry_pushes_total[5m])
+
+      - record: ghcr:error_rate
+        expr: rate(registry_errors_total[5m])
+
+      - record: ghcr:storage_utilization
+        expr: (registry_storage_bytes_used / registry_storage_bytes_total) * 100
+
+      - record: ghcr:average_image_size
+        expr: avg(registry_image_size_bytes) by (namespace)
+
+      - record: ghcr:total_images
+        expr: count(registry_image_size_bytes) by (namespace)

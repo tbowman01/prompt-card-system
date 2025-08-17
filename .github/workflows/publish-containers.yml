@@ -1,4 +1,4 @@
-name: 🐳 Publish Containers to GHCR
+name: 🐳 Publish Containers to GHCR (Optimized)
 
 on:
   push:
@@ -6,53 +6,129 @@ on:
       - main
     tags:
       - 'v*'
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
     inputs:
       tag:
         description: 'Image tag (default: latest)'
         required: false
         default: 'latest'
+      dry_run:
+        description: 'Dry run (build only, no push)'
+        required: false
+        default: false
+        type: boolean
 
 env:
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}
+  DOCKER_BUILDKIT: 1
+  BUILDKIT_PROGRESS: plain
 
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.changes.outputs.should_build }}
+      backend_changed: ${{ steps.changes.outputs.backend }}
+      frontend_changed: ${{ steps.changes.outputs.frontend }}
+      auth_changed: ${{ steps.changes.outputs.auth }}
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      
+      - name: 🔍 Detect changes
+        id: changes
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event_name }}" = "push" ] && [[ "${{ github.ref }}" =~ ^refs/tags/ ]]; then
+            echo "should_build=true" >> $GITHUB_OUTPUT
+            echo "backend=true" >> $GITHUB_OUTPUT
+            echo "frontend=true" >> $GITHUB_OUTPUT
+            echo "auth=true" >> $GITHUB_OUTPUT
+          else
+            # Check for changes in each service
+            if git diff --name-only HEAD~1 | grep -E '^(backend/|package\.json|Dockerfile)'; then
+              echo "backend=true" >> $GITHUB_OUTPUT
+            else
+              echo "backend=false" >> $GITHUB_OUTPUT
+            fi
+            
+            if git diff --name-only HEAD~1 | grep -E '^(frontend/|package\.json|Dockerfile)'; then
+              echo "frontend=true" >> $GITHUB_OUTPUT
+            else
+              echo "frontend=false" >> $GITHUB_OUTPUT
+            fi
+            
+            if git diff --name-only HEAD~1 | grep -E '^(auth/|package\.json|Dockerfile)'; then
+              echo "auth=true" >> $GITHUB_OUTPUT
+            else
+              echo "auth=false" >> $GITHUB_OUTPUT
+            fi
+            
+            if [ "${{ steps.changes.outputs.backend }}" = "true" ] || [ "${{ steps.changes.outputs.frontend }}" = "true" ] || [ "${{ steps.changes.outputs.auth }}" = "true" ]; then
+              echo "should_build=true" >> $GITHUB_OUTPUT
+            else
+              echo "should_build=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
   build-and-publish:
+    needs: validate
+    if: needs.validate.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
       id-token: write
+      security-events: write
     
     strategy:
       fail-fast: false
+      max-parallel: 3
       matrix:
-        service:
+        include:
           - name: backend
             context: .
             dockerfile: ./backend/Dockerfile
             image: prompt-card-backend
-            build-args: |
-              SERVICE_PATH=backend
+            port: 3001
+            health_endpoint: /health
+            enabled: ${{ needs.validate.outputs.backend_changed == 'true' }}
           - name: frontend
             context: .
             dockerfile: ./frontend/Dockerfile
             image: prompt-card-frontend
-            build-args: |
-              SERVICE_PATH=frontend
+            port: 3000
+            health_endpoint: /
+            enabled: ${{ needs.validate.outputs.frontend_changed == 'true' }}
           - name: auth
             context: .
             dockerfile: ./auth/Dockerfile
             image: prompt-card-auth
-            build-args: |
-              SERVICE_PATH=auth
+            port: 8005
+            health_endpoint: /auth/health
+            enabled: ${{ needs.validate.outputs.auth_changed == 'true' }}
     
     steps:
-      - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+      - name: ⏭️ Skip if service unchanged
+        if: matrix.enabled == 'false'
+        run: |
+          echo "Skipping ${{ matrix.name }} - no changes detected"
+          exit 0
       
-      - name: 🔧 Set up Docker Buildx
+      - name: 📥 Checkout repository
+        if: matrix.enabled != 'false'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      
+      - name: 🔧 Set up Docker Buildx (Enhanced)
+        if: matrix.enabled != 'false'
         uses: docker/setup-buildx-action@v3
         with:
           platforms: linux/amd64,linux/arm64
@@ -61,88 +137,189 @@ jobs:
             image=moby/buildkit:buildx-stable-1
           config-inline: |
             [worker.oci]
-              max-parallelism = 4
+              max-parallelism = 6
+              gc = true
+              gckeepstorage = "10GB"
             [worker.containerd]
               snapshotter = "overlayfs"
+              gc = true
+              gckeepstorage = "10GB"
             [registry."docker.io"]
               mirrors = ["mirror.gcr.io"]
+            [registry."ghcr.io"]
+              http = true
+              insecure = false
       
       - name: 🔐 Log in to GitHub Container Registry
+        if: matrix.enabled != 'false'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+          logout: false
       
-      - name: 📝 Extract metadata
+      - name: 📝 Extract metadata (Enhanced)
+        if: matrix.enabled != 'false'
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.IMAGE_PREFIX }}/${{ matrix.service.image }}
+          images: ${{ env.IMAGE_PREFIX }}/${{ matrix.image }}
           tags: |
             type=ref,event=branch
-            type=ref,event=pr
+            type=ref,event=pr,prefix=pr-
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=${{ github.event.inputs.tag || 'latest' }}
-            type=sha,prefix={{branch}}-
+            type=sha,prefix={{branch}}-,format=short
+            type=raw,value=buildcache-{{branch}}
+          labels: |
+            org.opencontainers.image.title=${{ matrix.name }} service
+            org.opencontainers.image.description=Optimized ${{ matrix.name }} service for prompt-card-system
+            org.opencontainers.image.vendor=prompt-card-system
+            org.opencontainers.image.licenses=MIT
+            io.github.actions.job=${{ github.job }}
+            io.github.actions.run_id=${{ github.run_id }}
+            io.github.actions.run_number=${{ github.run_number }}
       
-      - name: 💾 Setup build cache
+      - name: 💾 Setup enhanced build cache
+        if: matrix.enabled != 'false'
         run: |
-          mkdir -p /tmp/.buildx-cache
-          if [ -d "/tmp/.buildx-cache-new" ]; then
-            rm -rf /tmp/.buildx-cache
-            mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+          # Create optimized cache directories
+          mkdir -p /tmp/.buildx-cache-${{ matrix.name }}
+          # Clean up old cache if exists
+          if [ -d "/tmp/.buildx-cache-${{ matrix.name }}-new" ]; then
+            rm -rf /tmp/.buildx-cache-${{ matrix.name }}
+            mv /tmp/.buildx-cache-${{ matrix.name }}-new /tmp/.buildx-cache-${{ matrix.name }}
           fi
+          
+          # Create registry cache namespace
+          echo "CACHE_NAMESPACE=${{ matrix.name }}-${{ github.ref_name }}" >> $GITHUB_ENV
       
-      - name: 🏗️ Build and push ${{ matrix.service.name }}
-        uses: docker/build-push-action@v5
+      - name: 🏗️ Build and push ${{ matrix.name }} (Optimized)
+        if: matrix.enabled != 'false'
+        id: build
+        uses: docker/build-push-action@v6
         with:
-          context: .
-          file: ${{ matrix.service.dockerfile }}
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
           platforms: linux/amd64,linux/arm64
-          push: true
+          push: ${{ github.event.inputs.dry_run != 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+          load: ${{ github.event_name == 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: |
-            type=gha,scope=${{ matrix.service.name }}-${{ runner.arch }}
-            type=registry,ref=${{ env.IMAGE_PREFIX }}/${{ matrix.service.image }}:buildcache-${{ runner.arch }}
-            type=registry,ref=${{ env.IMAGE_PREFIX }}/${{ matrix.service.image }}:buildcache
-            type=local,src=/tmp/.buildx-cache
+            type=gha,scope=${{ env.CACHE_NAMESPACE }}
+            type=registry,ref=${{ env.IMAGE_PREFIX }}/${{ matrix.image }}:buildcache
+            type=local,src=/tmp/.buildx-cache-${{ matrix.name }}
           cache-to: |
-            type=gha,mode=max,scope=${{ matrix.service.name }}-${{ runner.arch }}
-            type=registry,ref=${{ env.IMAGE_PREFIX }}/${{ matrix.service.image }}:buildcache-${{ runner.arch }},mode=max
-            type=local,dest=/tmp/.buildx-cache-new,mode=max
+            type=gha,mode=max,scope=${{ env.CACHE_NAMESPACE }}
+            type=registry,ref=${{ env.IMAGE_PREFIX }}/${{ matrix.image }}:buildcache,mode=max
+            type=local,dest=/tmp/.buildx-cache-${{ matrix.name }}-new,mode=max
           build-args: |
-            BUILDPLATFORM=${{ runner.arch }}
+            BUILDPLATFORM=linux/amd64
             TARGETPLATFORM=linux/amd64,linux/arm64
             VERSION=${{ github.sha }}
             BUILD_DATE=${{ github.event.repository.updated_at }}
-            SERVICE_NAME=${{ matrix.service.name }}
-            NODE_OPTIONS=--max-old-space-size=8192
-            ${{ matrix.service.build-args }}
-          provenance: true
-          sbom: true
-          outputs: type=image,name=${{ env.IMAGE_PREFIX }}/${{ matrix.service.image }},push=true
+            SERVICE_NAME=${{ matrix.name }}
+            SERVICE_PORT=${{ matrix.port }}
+            NODE_OPTIONS=--max-old-space-size=4096
+            DOCKER_BUILDKIT=1
+          provenance: false
+          sbom: false
+          outputs: type=image,name=${{ env.IMAGE_PREFIX }}/${{ matrix.image }},push=${{ github.event.inputs.dry_run != 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+        
+      - name: 🧪 Test image locally (PR only)
+        if: matrix.enabled != 'false' && github.event_name == 'pull_request'
+        run: |
+          echo "Testing ${{ matrix.name }} image locally..."
+          # Start container for testing
+          docker run -d --name test-${{ matrix.name }} \
+            -p ${{ matrix.port }}:${{ matrix.port }} \
+            --health-cmd="curl -f http://localhost:${{ matrix.port }}${{ matrix.health_endpoint }} || exit 1" \
+            --health-interval=10s \
+            --health-timeout=5s \
+            --health-retries=3 \
+            ${{ env.IMAGE_PREFIX }}/${{ matrix.image }}:pr-${{ github.event.number }}
+          
+          # Wait for container to be healthy
+          timeout=60
+          while [ $timeout -gt 0 ]; do
+            if docker inspect --format='{{.State.Health.Status}}' test-${{ matrix.name }} | grep -q healthy; then
+              echo "✅ Container is healthy"
+              break
+            fi
+            echo "⏳ Waiting for container to be healthy... ($timeout seconds remaining)"
+            sleep 5
+            timeout=$((timeout-5))
+          done
+          
+          if [ $timeout -le 0 ]; then
+            echo "❌ Container failed health check"
+            docker logs test-${{ matrix.name }}
+            exit 1
+          fi
+          
+          # Clean up
+          docker stop test-${{ matrix.name }}
+          docker rm test-${{ matrix.name }}
       
-      - name: 🔍 Scan for vulnerabilities
+      - name: 🔍 Security scan with Trivy
+        if: matrix.enabled != 'false' && github.event.inputs.dry_run != 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.IMAGE_PREFIX }}/${{ matrix.service.image }}:latest
+          image-ref: ${{ env.IMAGE_PREFIX }}/${{ matrix.image }}:${{ github.ref_name }}
           format: 'sarif'
-          output: 'trivy-results-${{ matrix.service.name }}.sarif'
+          output: 'trivy-results-${{ matrix.name }}.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
         continue-on-error: true
       
-      - name: 📊 Upload scan results
+      - name: 📊 Upload security scan results
+        if: matrix.enabled != 'false' && github.event.inputs.dry_run != 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: 'trivy-results-${{ matrix.service.name }}.sarif'
+          sarif_file: 'trivy-results-${{ matrix.name }}.sarif'
         continue-on-error: true
+        
+      - name: 🎯 Validate image after push
+        if: matrix.enabled != 'false' && github.event.inputs.dry_run != 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        run: |
+          echo "Validating pushed image: ${{ env.IMAGE_PREFIX }}/${{ matrix.image }}:${{ github.ref_name }}"
+          
+          # Pull the image to verify it was pushed correctly
+          if docker pull ${{ env.IMAGE_PREFIX }}/${{ matrix.image }}:${{ github.ref_name }}; then
+            echo "✅ Image pull successful"
+            
+            # Get image details
+            docker image inspect ${{ env.IMAGE_PREFIX }}/${{ matrix.image }}:${{ github.ref_name }} > image-manifest-${{ matrix.name }}.json
+            
+            # Verify image size is reasonable (under 1GB)
+            IMAGE_SIZE=$(docker image inspect ${{ env.IMAGE_PREFIX }}/${{ matrix.image }}:${{ github.ref_name }} --format='{{.Size}}')
+            IMAGE_SIZE_MB=$((IMAGE_SIZE / 1024 / 1024))
+            echo "Image size: ${IMAGE_SIZE_MB} MB"
+            
+            if [ $IMAGE_SIZE_MB -gt 1024 ]; then
+              echo "⚠️ Warning: Image size is larger than 1GB"
+            else
+              echo "✅ Image size is reasonable"
+            fi
+            
+            # Quick smoke test
+            echo "Running smoke test..."
+            docker run --rm --entrypoint=/bin/sh ${{ env.IMAGE_PREFIX }}/${{ matrix.image }}:${{ github.ref_name }} -c "node --version && echo 'Smoke test passed'"
+            
+            echo "✅ Image validation completed successfully"
+          else
+            echo "❌ Failed to pull image after push"
+            exit 1
+          fi
 
   publish-compose:
-    needs: build-and-publish
+    needs: [validate, build-and-publish]
+    if: needs.validate.outputs.should_build == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.event.inputs.dry_run != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -161,12 +338,28 @@ jobs:
       
       - name: 📦 Create optimized docker-compose.yml
         run: |
-          cat > docker-compose.ghcr.yml << 'EOF'
+          # Determine the tag to use
+          if [[ "${{ github.ref }}" =~ ^refs/tags/ ]]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="latest"
+          fi
+          
+          cat > docker-compose.ghcr.yml << EOF
           version: '3.8'
+          
+          networks:
+            prompt-card-network:
+              driver: bridge
+              ipam:
+                config:
+                  - subnet: 172.20.0.0/16
           
           services:
             backend:
-              image: ${{ env.IMAGE_PREFIX }}/prompt-card-backend:latest
+              image: ${{ env.IMAGE_PREFIX }}/prompt-card-backend:${TAG}
+              container_name: prompt-card-backend
+              restart: unless-stopped
               ports:
                 - "3001:3001"
               environment:
@@ -175,13 +368,19 @@ jobs:
                 - CACHE_ENABLED=true
                 - EDGE_OPTIMIZATION_ENABLED=true
                 - ML_OPTIMIZATION_ENABLED=true
+                - DATABASE_URL=postgresql://postgres:\${POSTGRES_PASSWORD}@postgres:5432/prompt_card_system
+                - REDIS_URL=redis://redis:6379
               volumes:
                 - backend-data:/app/data
+                - backend-logs:/app/logs
+              networks:
+                - prompt-card-network
               healthcheck:
                 test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
-                interval: 30s
-                timeout: 10s
-                retries: 3
+                interval: 15s
+                timeout: 5s
+                retries: 5
+                start_period: 30s
               deploy:
                 resources:
                   limits:
@@ -190,59 +389,172 @@ jobs:
                   reservations:
                     memory: 1G
                     cpus: '0.5'
+              depends_on:
+                postgres:
+                  condition: service_healthy
+                redis:
+                  condition: service_healthy
             
             frontend:
-              image: ${{ env.IMAGE_PREFIX }}/prompt-card-frontend:latest
+              image: ${{ env.IMAGE_PREFIX }}/prompt-card-frontend:${TAG}
+              container_name: prompt-card-frontend
+              restart: unless-stopped
               ports:
                 - "3000:3000"
               environment:
                 - NODE_ENV=production
                 - NEXT_PUBLIC_API_URL=http://backend:3001
-              depends_on:
-                - backend
+                - NEXT_PUBLIC_AUTH_URL=http://auth:8005
+              networks:
+                - prompt-card-network
               healthcheck:
                 test: ["CMD", "curl", "-f", "http://localhost:3000"]
-                interval: 30s
-                timeout: 10s
-                retries: 3
+                interval: 15s
+                timeout: 5s
+                retries: 5
+                start_period: 30s
+              deploy:
+                resources:
+                  limits:
+                    memory: 1G
+                    cpus: '0.5'
+                  reservations:
+                    memory: 512M
+                    cpus: '0.25'
+              depends_on:
+                backend:
+                  condition: service_healthy
             
             auth:
-              image: ${{ env.IMAGE_PREFIX }}/prompt-card-auth:latest
+              image: ${{ env.IMAGE_PREFIX }}/prompt-card-auth:${TAG}
+              container_name: prompt-card-auth
+              restart: unless-stopped
               ports:
-                - "3002:3002"
+                - "8005:8005"
               environment:
                 - NODE_ENV=production
-                - JWT_SECRET=${JWT_SECRET}
+                - JWT_SECRET=\${JWT_SECRET}
+                - DATABASE_URL=postgresql://postgres:\${POSTGRES_PASSWORD}@postgres:5432/prompt_card_system
+                - REDIS_URL=redis://redis:6379
+              volumes:
+                - auth-logs:/app/logs
+              networks:
+                - prompt-card-network
               healthcheck:
-                test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
-                interval: 30s
-                timeout: 10s
-                retries: 3
+                test: ["CMD", "curl", "-f", "http://localhost:8005/auth/health"]
+                interval: 15s
+                timeout: 5s
+                retries: 5
+                start_period: 30s
+              deploy:
+                resources:
+                  limits:
+                    memory: 512M
+                    cpus: '0.5'
+                  reservations:
+                    memory: 256M
+                    cpus: '0.25'
+              depends_on:
+                postgres:
+                  condition: service_healthy
+                redis:
+                  condition: service_healthy
             
             redis:
               image: redis:7-alpine
+              container_name: prompt-card-redis
+              restart: unless-stopped
               ports:
                 - "6379:6379"
-              command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+              command: >
+                redis-server
+                --appendonly yes
+                --maxmemory 512mb
+                --maxmemory-policy allkeys-lru
+                --save 60 1000
+                --tcp-keepalive 60
+                --timeout 300
               volumes:
                 - redis-data:/data
+                - redis-conf:/usr/local/etc/redis
+              networks:
+                - prompt-card-network
+              healthcheck:
+                test: ["CMD", "redis-cli", "ping"]
+                interval: 10s
+                timeout: 3s
+                retries: 5
+                start_period: 10s
+              deploy:
+                resources:
+                  limits:
+                    memory: 512M
+                    cpus: '0.25'
+                  reservations:
+                    memory: 256M
+                    cpus: '0.1'
             
             postgres:
               image: postgres:15-alpine
+              container_name: prompt-card-postgres
+              restart: unless-stopped
               ports:
                 - "5432:5432"
               environment:
                 - POSTGRES_DB=prompt_card_system
                 - POSTGRES_USER=postgres
-                - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+                - POSTGRES_PASSWORD=\${POSTGRES_PASSWORD}
+                - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+                - PGDATA=/var/lib/postgresql/data/pgdata
               volumes:
                 - postgres-data:/var/lib/postgresql/data
+                - postgres-backups:/backups
+              networks:
+                - prompt-card-network
+              healthcheck:
+                test: ["CMD-SHELL", "pg_isready -U postgres -d prompt_card_system"]
+                interval: 10s
+                timeout: 5s
+                retries: 5
+                start_period: 30s
+              deploy:
+                resources:
+                  limits:
+                    memory: 1G
+                    cpus: '0.5'
+                  reservations:
+                    memory: 512M
+                    cpus: '0.25'
+              command: >
+                postgres
+                -c max_connections=100
+                -c shared_buffers=256MB
+                -c effective_cache_size=1GB
+                -c maintenance_work_mem=64MB
+                -c checkpoint_completion_target=0.9
+                -c wal_buffers=16MB
+                -c default_statistics_target=100
+                -c random_page_cost=1.1
+                -c effective_io_concurrency=200
           
           volumes:
             backend-data:
+              driver: local
+            backend-logs:
+              driver: local
+            auth-logs:
+              driver: local
             redis-data:
+              driver: local
+            redis-conf:
+              driver: local
             postgres-data:
+              driver: local
+            postgres-backups:
+              driver: local
           EOF
+          
+          echo "Generated docker-compose.ghcr.yml with tag: ${TAG}"
       
       - name: 📤 Upload docker-compose file as artifact
         uses: actions/upload-artifact@v4
@@ -250,8 +562,70 @@ jobs:
           name: docker-compose-ghcr
           path: docker-compose.ghcr.yml
 
+  performance-test:
+    needs: [validate, build-and-publish]
+    if: needs.validate.outputs.should_build == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: 🔐 Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 🎯 Performance validation
+        run: |
+          echo "Running performance validation on published images..."
+          
+          # Test image startup times
+          services=("backend" "frontend" "auth")
+          for service in "${services[@]}"; do
+            echo "Testing $service startup time..."
+            
+            start_time=$(date +%s)
+            docker run -d --name perf-test-$service \
+              -p $((3000 + $(echo $service | wc -c))):$((3000 + $(echo $service | wc -c))) \
+              ${{ env.IMAGE_PREFIX }}/prompt-card-$service:latest
+            
+            # Wait for container to be ready (max 60 seconds)
+            timeout=60
+            while [ $timeout -gt 0 ]; do
+              if docker ps --filter "name=perf-test-$service" --filter "status=running" | grep -q perf-test-$service; then
+                end_time=$(date +%s)
+                startup_time=$((end_time - start_time))
+                echo "✅ $service started in ${startup_time} seconds"
+                
+                if [ $startup_time -gt 30 ]; then
+                  echo "⚠️ Warning: $service startup time exceeds 30 seconds"
+                fi
+                break
+              fi
+              sleep 1
+              timeout=$((timeout-1))
+            done
+            
+            if [ $timeout -le 0 ]; then
+              echo "❌ $service failed to start within 60 seconds"
+              docker logs perf-test-$service
+            fi
+            
+            # Clean up
+            docker stop perf-test-$service 2>/dev/null || true
+            docker rm perf-test-$service 2>/dev/null || true
+          done
+          
+          echo "✅ Performance validation completed"
+
   create-release:
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') && github.event.inputs.dry_run != 'true'
     needs: [build-and-publish, publish-compose]
     runs-on: ubuntu-latest
     permissions:

@@ -1,0 +1,90 @@
+# syntax=docker/dockerfile:1.7-labs
+# Shared Dependencies Optimization Layer
+# This Dockerfile creates a shared dependency cache that can be reused across all services
+
+FROM --platform=$BUILDPLATFORM node:20-alpine AS base
+ARG BUILDPLATFORM
+ARG TARGETPLATFORM
+ARG CACHE_KEY
+
+# Install system dependencies for native modules
+RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
+    apk update && apk add --no-cache \
+    python3 make g++ \
+    cairo-dev jpeg-dev pango-dev musl-dev \
+    giflib-dev pixman-dev libjpeg-turbo-dev freetype-dev \
+    && rm -rf /var/cache/apk/*
+
+# Create optimized workspace
+WORKDIR /shared-deps
+
+# Copy all package.json files for comprehensive dependency resolution
+COPY package*.json ./
+COPY backend/package*.json ./backend/ 2>/dev/null || true
+COPY frontend/package*.json ./frontend/ 2>/dev/null || true
+COPY auth/package*.json ./auth/ 2>/dev/null || true
+
+# Install shared dependencies with aggressive optimization
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+    --mount=type=cache,target=/shared-deps/.npm-cache,sharing=locked \
+    # Configure npm for maximum performance
+    npm config set cache /shared-deps/.npm-cache && \
+    npm config set prefer-offline true && \
+    npm config set no-audit true && \
+    npm config set no-fund true && \
+    npm config set maxsockets 50 && \
+    npm config set registry https://registry.npmjs.org/ && \
+    # Install all dependencies for sharing
+    npm ci --ignore-scripts && \
+    # Clean up to reduce layer size
+    npm cache clean --force && \
+    rm -rf /tmp/* /var/tmp/*
+
+# Create service-specific dependency layers
+FROM base AS backend-deps
+WORKDIR /app
+COPY backend/package*.json ./
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+    --mount=type=cache,target=/app/.npm-cache,sharing=locked \
+    --mount=from=base,source=/shared-deps/node_modules,target=/shared-cache \
+    cp -r /shared-cache ./node_modules && \
+    npm ci --ignore-scripts
+
+FROM base AS frontend-deps
+WORKDIR /app
+COPY frontend/package*.json ./
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+    --mount=type=cache,target=/app/.npm-cache,sharing=locked \
+    --mount=from=base,source=/shared-deps/node_modules,target=/shared-cache \
+    cp -r /shared-cache ./node_modules && \
+    npm ci --ignore-scripts
+
+FROM base AS auth-deps
+WORKDIR /app
+COPY auth/package*.json ./
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+    --mount=type=cache,target=/app/.npm-cache,sharing=locked \
+    --mount=from=base,source=/shared-deps/node_modules,target=/shared-cache \
+    cp -r /shared-cache ./node_modules && \
+    npm ci --ignore-scripts
+
+# Final optimized shared layer
+FROM node:20-alpine AS shared-deps-final
+
+# Install minimal runtime dependencies
+RUN apk add --no-cache \
+    cairo jpeg pango musl giflib pixman libjpeg-turbo freetype \
+    dumb-init tini curl
+
+# Copy optimized shared dependencies
+COPY --from=base /shared-deps/node_modules /shared-deps/node_modules
+
+# Metadata for cache identification
+LABEL cache.key="${CACHE_KEY}"
+LABEL cache.type="shared-dependencies"
+LABEL optimization.level="maximum"
+LABEL build.timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+# Export shared dependencies for mounting
+VOLUME ["/shared-deps"]
+CMD ["echo", "Shared dependencies layer ready"]
