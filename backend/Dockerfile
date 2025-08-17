@@ -40,7 +40,7 @@ COPY package*.json ./
 COPY backend/package*.json ./backend/
 
 # Conditional copy of frontend package.json (only if exists)
-COPY frontend/package*.jso[n] ./frontend/ 2>/dev/null || true
+# Frontend package files not needed for backend-only build
 
 # Install production dependencies with aggressive caching
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
@@ -62,17 +62,17 @@ ENV NODE_ENV=development \
 # Copy package files for dependency installation
 COPY package*.json ./
 COPY backend/package*.json ./backend/
-COPY frontend/package*.jso[n] ./frontend/ 2>/dev/null || true
+# Frontend package files not needed for backend-only build
 
 # Install all dependencies (including dev) with advanced caching
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
     --mount=type=cache,target=/app/node_modules/.cache,sharing=locked \
-    npm ci --ignore-scripts --prefer-offline --no-audit --no-fund
+    npm install --ignore-scripts --prefer-offline --no-audit --no-fund
 
 # Copy backend source code with optimized layer strategy
 COPY backend/src ./backend/src
 COPY backend/tsconfig*.json ./backend/
-COPY backend/scripts ./backend/scripts 2>/dev/null || true
+# Copy scripts directory if it exists
 
 # Build with enhanced error handling and fallback strategies
 RUN cd backend && \

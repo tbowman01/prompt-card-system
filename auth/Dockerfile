@@ -62,7 +62,7 @@ COPY --chown=authuser:authuser auth/package*.json ./
 
 # Install all dependencies with enhanced caching
 RUN --mount=type=cache,target=/home/authuser/.npm,sharing=locked,uid=1001,gid=1001 \
-    npm ci --include=dev --prefer-offline --no-audit --no-fund
+    npm install --include=dev --prefer-offline --no-audit --no-fund
 
 # Copy source code in optimal order for caching
 COPY --chown=authuser:authuser auth/src ./src
@@ -105,7 +105,7 @@ COPY --chown=authuser:authuser auth/package*.json ./
 
 # Install only production dependencies with caching
 RUN --mount=type=cache,target=/home/authuser/.npm,sharing=locked,uid=1001,gid=1001 \
-    npm ci --omit=dev --prefer-offline --no-audit --no-fund && \
+    npm install --omit=dev --prefer-offline --no-audit --no-fund && \
     npm cache clean --force
 
 # Copy built application with verification

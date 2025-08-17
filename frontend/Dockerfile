@@ -30,12 +30,12 @@ ENV PUPPETEER_SKIP_DOWNLOAD=true \
 # Copy package files in optimal order for cache efficiency
 COPY package*.json ./
 COPY frontend/package*.json ./frontend/
-COPY backend/package*.jso[n] ./backend/ 2>/dev/null || true
+# Backend package files not needed for frontend-only build
 
 # Install production dependencies with enhanced caching
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
     --mount=type=cache,target=/app/node_modules/.cache,sharing=locked \
-    npm ci --omit=dev --ignore-scripts --prefer-offline --no-audit --no-fund \
+    npm install --omit=dev --ignore-scripts --prefer-offline --no-audit --no-fund \
     && npm cache clean --force
 
 # Stage 2: Build stage (Next.js compilation with standalone output)
@@ -57,12 +57,12 @@ ENV NODE_ENV=production \
 # Copy package files for dependency installation
 COPY package*.json ./
 COPY frontend/package*.json ./frontend/
-COPY backend/package*.jso[n] ./backend/ 2>/dev/null || true
+# Backend package files not needed for frontend-only build
 
 # Install all dependencies with enhanced caching
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
     --mount=type=cache,target=/app/node_modules/.cache,sharing=locked \
-    npm ci --ignore-scripts --prefer-offline --no-audit --no-fund
+    npm install --ignore-scripts --prefer-offline --no-audit --no-fund
 
 # Copy Next.js configuration and source code in optimal order
 COPY frontend/next.config.* frontend/tailwind.config.* frontend/postcss.config.* ./frontend/
@@ -71,7 +71,7 @@ COPY frontend/src ./frontend/src
 COPY frontend/app ./frontend/app 2>/dev/null || true
 COPY frontend/pages ./frontend/pages 2>/dev/null || true
 COPY frontend/components ./frontend/components 2>/dev/null || true
-COPY frontend/styles ./frontend/styles 2>/dev/null || true
+# Styles directory will be copied with source
 
 # Set advanced build optimization variables
 ENV NODE_OPTIONS="--max-old-space-size=4096" \
