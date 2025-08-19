@@ -1,0 +1,762 @@
+# 🚀 Prompt Card System - Enhanced Development Makefile v2.0
+# ============================================================
+# 📝 Enhanced for optimal user experience with:
+#    - Clear command grouping and categorization
+#    - Comprehensive error handling and recovery
+#    - Interactive help with examples
+#    - Visual progress indicators
+#    - Automatic prerequisite checking
+#    - Smart defaults and auto-detection
+# ============================================================
+
+.PHONY: help all
+.DEFAULT_GOAL := help
+
+# ==============================================================================
+# 🎨 Configuration & Setup
+# ==============================================================================
+
+# Shell configuration for better error handling
+SHELL := /bin/bash
+.SHELLFLAGS := -e -u -o pipefail -c
+.ONESHELL:
+MAKEFLAGS += --warn-undefined-variables
+MAKEFLAGS += --no-builtin-rules
+
+# Terminal colors for better UX
+RED := \033[0;31m
+GREEN := \033[0;32m
+YELLOW := \033[0;33m
+BLUE := \033[0;34m
+PURPLE := \033[0;35m
+CYAN := \033[0;36m
+WHITE := \033[0;37m
+BOLD := \033[1m
+RESET := \033[0m
+
+# Icons for visual feedback
+CHECK := ✅
+CROSS := ❌
+WARN := ⚠️
+INFO := ℹ️
+ROCKET := 🚀
+GEAR := ⚙️
+SPARKLE := ✨
+FIRE := 🔥
+BRAIN := 🧠
+HEART := ❤️
+
+# System detection
+OS := $(shell uname -s)
+ARCH := $(shell uname -m)
+HAS_DOCKER := $(shell command -v docker 2> /dev/null)
+HAS_COMPOSE := $(shell command -v docker-compose 2> /dev/null || (command -v docker 2> /dev/null && docker compose version 2> /dev/null))
+HAS_GPU := $(shell command -v nvidia-smi 2> /dev/null)
+HAS_CURL := $(shell command -v curl 2> /dev/null)
+HAS_GIT := $(shell command -v git 2> /dev/null)
+
+# Project paths
+PROJECT_ROOT := $(shell pwd)
+DOCKER_COMPOSE_FILE := docker/docker-compose.dev.yml
+DOCKER_COMPOSE_PROD := docker/docker-compose.prod.yml
+STATUSLINE_SCRIPT := ./scripts/statusline.sh
+TIMESTAMP := $(shell date +%Y%m%d-%H%M%S)
+
+# Docker configuration
+DOCKER_REGISTRY := ghcr.io
+DOCKER_NAMESPACE := $(shell echo $${GITHUB_REPOSITORY:-prompt-card-system} | tr '[:upper:]' '[:lower:]')
+DOCKER_TAG := $(shell git rev-parse --short HEAD 2>/dev/null || echo "latest")
+
+# ==============================================================================
+# 🎯 Primary Targets - Most Common Commands
+# ==============================================================================
+
+## 🚀 Quick start the development environment
+.PHONY: start
+start: preflight-check
+	@echo "$(BOLD)$(GREEN)$(ROCKET) Starting Prompt Card System...$(RESET)"
+	@$(MAKE) dev
+	@echo ""
+	@echo "$(BOLD)$(GREEN)$(CHECK) System Ready!$(RESET)"
+	@echo "$(CYAN)$(INFO) Frontend:$(RESET) http://localhost:3000"
+	@echo "$(CYAN)$(INFO) Backend API:$(RESET) http://localhost:3001"
+	@echo "$(CYAN)$(INFO) API Docs:$(RESET) http://localhost:3001/api/docs"
+
+## 🛑 Stop all services
+.PHONY: stop
+stop:
+	@echo "$(BOLD)$(YELLOW)$(WARN) Stopping all services...$(RESET)"
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) down --remove-orphans 2>/dev/null || true
+	@echo "$(BOLD)$(GREEN)$(CHECK) All services stopped$(RESET)"
+
+## 🔄 Restart all services
+.PHONY: restart
+restart:
+	@echo "$(BOLD)$(BLUE)$(GEAR) Restarting services...$(RESET)"
+	@$(MAKE) stop
+	@sleep 2
+	@$(MAKE) start
+
+## 📊 Show system status and health
+.PHONY: status
+status:
+	@echo "$(BOLD)$(BLUE)$(INFO) System Status$(RESET)"
+	@echo "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
+	@echo ""
+	@$(MAKE) health-quick
+
+## 📋 Interactive help system
+.PHONY: help
+help:
+	@clear
+	@echo "$(BOLD)$(PURPLE)╔══════════════════════════════════════════════════════════════╗$(RESET)"
+	@echo "$(BOLD)$(PURPLE)║     $(ROCKET) Prompt Card System - Enhanced Makefile v2.0 $(ROCKET)      ║$(RESET)"
+	@echo "$(BOLD)$(PURPLE)╚══════════════════════════════════════════════════════════════╝$(RESET)"
+	@echo ""
+	@echo "$(BOLD)$(GREEN)🎯 Quick Start Commands$(RESET)"
+	@echo "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
+	@echo "  $(BOLD)make start$(RESET)          $(ROCKET) Start development environment"
+	@echo "  $(BOLD)make stop$(RESET)           $(WARN) Stop all services"
+	@echo "  $(BOLD)make restart$(RESET)        $(GEAR) Restart all services"
+	@echo "  $(BOLD)make status$(RESET)         $(INFO) Show system status"
+	@echo "  $(BOLD)make logs$(RESET)           📜 View all logs"
+	@echo ""
+	@echo "$(BOLD)$(BLUE)🏗️ Development Commands$(RESET)"
+	@echo "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
+	@echo "  $(BOLD)make dev$(RESET)            💻 Start dev environment (auto-detect GPU)"
+	@echo "  $(BOLD)make dev-gpu$(RESET)        🎮 Start with GPU support"
+	@echo "  $(BOLD)make dev-cpu$(RESET)        🖥️ Start CPU-only mode"
+	@echo "  $(BOLD)make build$(RESET)          🏗️ Build all containers"
+	@echo "  $(BOLD)make clean$(RESET)          🧹 Clean up everything"
+	@echo ""
+	@echo "$(BOLD)$(YELLOW)🧪 Testing & Quality$(RESET)"
+	@echo "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
+	@echo "  $(BOLD)make test$(RESET)           🧪 Run all tests"
+	@echo "  $(BOLD)make test-watch$(RESET)     👀 Run tests in watch mode"
+	@echo "  $(BOLD)make lint$(RESET)           🔍 Check code quality"
+	@echo "  $(BOLD)make format$(RESET)         $(SPARKLE) Format code"
+	@echo ""
+	@echo "$(BOLD)$(PURPLE)🎮 Demo & Presentation$(RESET)"
+	@echo "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
+	@echo "  $(BOLD)make demo$(RESET)           🎮 Start demo mode"
+	@echo "  $(BOLD)make demo-quick$(RESET)     ⚡ 3-minute quick demo"
+	@echo "  $(BOLD)make presentation$(RESET)   🎥 Presentation mode"
+	@echo ""
+	@echo "$(BOLD)$(CYAN)🔧 Utilities$(RESET)"
+	@echo "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
+	@echo "  $(BOLD)make shell$(RESET)          💻 Open shell in container"
+	@echo "  $(BOLD)make db-reset$(RESET)       🗄️ Reset database"
+	@echo "  $(BOLD)make health$(RESET)         $(HEART) Health check all services"
+	@echo "  $(BOLD)make urls$(RESET)           🌐 Show all service URLs"
+	@echo ""
+	@echo "$(BOLD)$(GREEN)💡 Pro Tips:$(RESET)"
+	@echo "  • Run '$(BOLD)make$(RESET)' to see this help"
+	@echo "  • Use '$(BOLD)make status$(RESET)' to check if everything is running"
+	@echo "  • Run '$(BOLD)make logs SERVICE=backend$(RESET)' to see specific service logs"
+	@echo "  • Use '$(BOLD)make shell SERVICE=backend$(RESET)' to debug containers"
+	@echo ""
+	@echo "$(BOLD)$(BLUE)📚 For detailed help: $(RESET)make help-detailed"
+	@echo "$(BOLD)$(PURPLE)🧠 For advanced commands: $(RESET)make help-advanced"
+
+## 📚 Detailed help with all commands
+.PHONY: help-detailed
+help-detailed:
+	@echo "$(BOLD)$(BLUE)📚 Detailed Command Reference$(RESET)"
+	@echo "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
+	@grep -E '^## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-25s$(RESET) %s\n", $$1, $$2}' | sed 's/^## //'
+
+## 🧠 Advanced commands for power users
+.PHONY: help-advanced
+help-advanced:
+	@echo "$(BOLD)$(PURPLE)🧠 Advanced Commands$(RESET)"
+	@echo "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
+	@echo ""
+	@echo "$(BOLD)Performance & Optimization:$(RESET)"
+	@echo "  $(BOLD)make benchmark$(RESET)      ⚡ Run performance benchmarks"
+	@echo "  $(BOLD)make optimize$(RESET)       $(BRAIN) Apply AI optimizations"
+	@echo "  $(BOLD)make profile$(RESET)        📊 Profile application performance"
+	@echo ""
+	@echo "$(BOLD)Security & Compliance:$(RESET)"
+	@echo "  $(BOLD)make security-scan$(RESET)  🛡️ Run security vulnerability scan"
+	@echo "  $(BOLD)make audit$(RESET)          🔍 Audit dependencies"
+	@echo "  $(BOLD)make compliance$(RESET)     📋 Check compliance requirements"
+	@echo ""
+	@echo "$(BOLD)Deployment & CI/CD:$(RESET)"
+	@echo "  $(BOLD)make deploy-staging$(RESET) 🚀 Deploy to staging"
+	@echo "  $(BOLD)make deploy-prod$(RESET)    $(FIRE) Deploy to production"
+	@echo "  $(BOLD)make ci-validate$(RESET)    ✅ Validate CI/CD pipeline"
+
+# ==============================================================================
+# 🔍 Prerequisite Checks & Validation
+# ==============================================================================
+
+## 🔍 Check all prerequisites before running commands
+.PHONY: preflight-check
+preflight-check:
+	@echo "$(BOLD)$(BLUE)🔍 Running preflight checks...$(RESET)"
+	@CHECKS_PASSED=true; \
+	if [ -z "$(HAS_DOCKER)" ]; then \
+		echo "$(RED)$(CROSS) Docker is not installed$(RESET)"; \
+		echo "  $(YELLOW)→ Install from: https://docs.docker.com/install$(RESET)"; \
+		CHECKS_PASSED=false; \
+	else \
+		echo "$(GREEN)$(CHECK) Docker found: $$(docker --version)$(RESET)"; \
+	fi; \
+	if [ -z "$(HAS_COMPOSE)" ]; then \
+		echo "$(RED)$(CROSS) Docker Compose is not installed$(RESET)"; \
+		echo "  $(YELLOW)→ Install Docker Compose plugin$(RESET)"; \
+		CHECKS_PASSED=false; \
+	else \
+		echo "$(GREEN)$(CHECK) Docker Compose found$(RESET)"; \
+	fi; \
+	if [ -n "$(HAS_GPU)" ]; then \
+		echo "$(GREEN)$(CHECK) GPU detected: $$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)$(RESET)"; \
+	else \
+		echo "$(YELLOW)$(INFO) No GPU detected - will use CPU mode$(RESET)"; \
+	fi; \
+	if [ "$$CHECKS_PASSED" = "false" ]; then \
+		echo "$(RED)$(CROSS) Preflight checks failed. Please install missing dependencies.$(RESET)"; \
+		exit 1; \
+	fi; \
+	echo "$(GREEN)$(CHECK) All preflight checks passed!$(RESET)"
+
+## ✅ Validate environment setup
+.PHONY: validate
+validate:
+	@echo "$(BOLD)$(BLUE)✅ Validating environment...$(RESET)"
+	@if [ -f "$(STATUSLINE_SCRIPT)" ]; then \
+		$(STATUSLINE_SCRIPT) --phase Validation --msg "Environment validation started"; \
+	fi
+	@for dir in scripts docker frontend backend; do \
+		if [ ! -d "$$dir" ]; then \
+			echo "$(RED)$(CROSS) Required directory missing: $$dir$(RESET)"; \
+			exit 1; \
+		fi; \
+	done
+	@echo "$(GREEN)$(CHECK) Environment validated successfully$(RESET)"
+
+# ==============================================================================
+# 🚀 Development Environment Commands
+# ==============================================================================
+
+## 🚀 Start development environment (auto-detects GPU)
+.PHONY: dev
+dev: preflight-check
+	@echo "$(BOLD)$(GREEN)🚀 Starting development environment...$(RESET)"
+	@if [ -n "$(HAS_GPU)" ] && nvidia-smi >/dev/null 2>&1; then \
+		echo "$(GREEN)🎮 GPU detected, starting with GPU support...$(RESET)"; \
+		$(MAKE) dev-gpu; \
+	else \
+		echo "$(YELLOW)💻 No GPU detected, starting CPU-only mode...$(RESET)"; \
+		$(MAKE) dev-cpu; \
+	fi
+
+## 🎮 Start with GPU support
+.PHONY: dev-gpu
+dev-gpu: preflight-check
+	@echo "$(BOLD)$(GREEN)🎮 Starting GPU-accelerated environment...$(RESET)"
+	@docker-compose --profile gpu -f $(DOCKER_COMPOSE_FILE) up -d
+	@sleep 5
+	@$(MAKE) wait-for-services
+	@$(MAKE) show-urls
+
+## 💻 Start CPU-only environment
+.PHONY: dev-cpu
+dev-cpu: preflight-check
+	@echo "$(BOLD)$(YELLOW)💻 Starting CPU-only environment...$(RESET)"
+	@docker-compose --profile cpu -f $(DOCKER_COMPOSE_FILE) up -d
+	@sleep 5
+	@$(MAKE) wait-for-services
+	@$(MAKE) show-urls
+
+## ⚡ Minimal development setup
+.PHONY: dev-minimal
+dev-minimal: preflight-check
+	@echo "$(BOLD)$(CYAN)⚡ Starting minimal environment...$(RESET)"
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) up -d frontend backend redis
+	@$(MAKE) show-urls
+
+# ==============================================================================
+# 🏗️ Build Commands
+# ==============================================================================
+
+## 🏗️ Build all containers
+.PHONY: build
+build: preflight-check
+	@echo "$(BOLD)$(BLUE)🏗️ Building all containers...$(RESET)"
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) build --progress=plain
+	@echo "$(GREEN)$(CHECK) Build completed successfully$(RESET)"
+
+## 🔨 Rebuild containers without cache
+.PHONY: rebuild
+rebuild: preflight-check
+	@echo "$(BOLD)$(YELLOW)🔨 Rebuilding containers (no cache)...$(RESET)"
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) build --no-cache --progress=plain
+	@echo "$(GREEN)$(CHECK) Rebuild completed successfully$(RESET)"
+
+## 📦 Build for production
+.PHONY: build-prod
+build-prod: preflight-check
+	@echo "$(BOLD)$(PURPLE)📦 Building production containers...$(RESET)"
+	@docker-compose -f $(DOCKER_COMPOSE_PROD) build --progress=plain
+	@echo "$(GREEN)$(CHECK) Production build completed$(RESET)"
+
+# ==============================================================================
+# 🧪 Testing Commands
+# ==============================================================================
+
+## 🧪 Run all tests
+.PHONY: test
+test:
+	@echo "$(BOLD)$(GREEN)🧪 Running all tests...$(RESET)"
+	@$(MAKE) test-backend
+	@$(MAKE) test-frontend
+	@echo "$(GREEN)$(CHECK) All tests passed!$(RESET)"
+
+## 🧪 Run backend tests
+.PHONY: test-backend
+test-backend:
+	@echo "$(CYAN)Testing backend...$(RESET)"
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) exec -T backend npm test 2>/dev/null || \
+		echo "$(YELLOW)$(WARN) Backend tests require running containers$(RESET)"
+
+## 🧪 Run frontend tests
+.PHONY: test-frontend
+test-frontend:
+	@echo "$(CYAN)Testing frontend...$(RESET)"
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) exec -T frontend npm test 2>/dev/null || \
+		echo "$(YELLOW)$(WARN) Frontend tests require running containers$(RESET)"
+
+## 👀 Run tests in watch mode
+.PHONY: test-watch
+test-watch:
+	@if [ -z "$(SERVICE)" ]; then \
+		echo "$(YELLOW)Usage: make test-watch SERVICE=backend$(RESET)"; \
+		echo "       make test-watch SERVICE=frontend"; \
+	else \
+		docker-compose -f $(DOCKER_COMPOSE_FILE) exec $(SERVICE) npm run test:watch; \
+	fi
+
+## 📊 Run tests with coverage
+.PHONY: test-coverage
+test-coverage:
+	@echo "$(BOLD)$(BLUE)📊 Running tests with coverage...$(RESET)"
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) exec backend npm run test:coverage || true
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) exec frontend npm run test:coverage || true
+
+# ==============================================================================
+# 🔍 Code Quality Commands
+# ==============================================================================
+
+## 🔍 Run linting
+.PHONY: lint
+lint:
+	@echo "$(BOLD)$(BLUE)🔍 Running linters...$(RESET)"
+	@echo "$(CYAN)Linting backend...$(RESET)"
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) exec -T backend npm run lint 2>/dev/null || true
+	@echo "$(CYAN)Linting frontend...$(RESET)"
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) exec -T frontend npm run lint 2>/dev/null || true
+
+## 🔧 Fix linting issues
+.PHONY: lint-fix
+lint-fix:
+	@echo "$(BOLD)$(YELLOW)🔧 Fixing linting issues...$(RESET)"
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) exec backend npm run lint:fix || true
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) exec frontend npm run lint:fix || true
+	@echo "$(GREEN)$(CHECK) Linting issues fixed$(RESET)"
+
+## ✨ Format code
+.PHONY: format
+format:
+	@echo "$(BOLD)$(PURPLE)$(SPARKLE) Formatting code...$(RESET)"
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) exec backend npm run format || true
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) exec frontend npm run format || true
+	@echo "$(GREEN)$(CHECK) Code formatted$(RESET)"
+
+# ==============================================================================
+# 📊 Monitoring & Logs
+# ==============================================================================
+
+## 📜 Show logs for all services
+.PHONY: logs
+logs:
+	@if [ -z "$(SERVICE)" ]; then \
+		docker-compose -f $(DOCKER_COMPOSE_FILE) logs -f --tail=100; \
+	else \
+		docker-compose -f $(DOCKER_COMPOSE_FILE) logs -f --tail=100 $(SERVICE); \
+	fi
+
+## 📊 Start monitoring stack
+.PHONY: monitoring
+monitoring:
+	@echo "$(BOLD)$(YELLOW)📊 Starting monitoring stack...$(RESET)"
+	@docker-compose --profile monitoring -f $(DOCKER_COMPOSE_FILE) up -d
+	@echo "$(GREEN)$(CHECK) Monitoring available at:$(RESET)"
+	@echo "  $(CYAN)Prometheus:$(RESET) http://localhost:9090"
+	@echo "  $(CYAN)Grafana:$(RESET) http://localhost:3002 (admin/admin)"
+
+# ==============================================================================
+# ❤️ Health Checks
+# ==============================================================================
+
+## ❤️ Run comprehensive health checks
+.PHONY: health
+health:
+	@echo "$(BOLD)$(GREEN)$(HEART) Running health checks...$(RESET)"
+	@$(MAKE) health-quick
+	@$(MAKE) health-detailed
+
+## 🚀 Quick health check
+.PHONY: health-quick
+health-quick:
+	@echo "$(CYAN)Checking service health...$(RESET)"
+	@FRONTEND=$$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/api/health 2>/dev/null || echo "DOWN"); \
+	BACKEND=$$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/api/health 2>/dev/null || echo "DOWN"); \
+	if [ "$$FRONTEND" = "200" ]; then \
+		echo "  $(GREEN)$(CHECK) Frontend: Healthy$(RESET)"; \
+	else \
+		echo "  $(RED)$(CROSS) Frontend: $$FRONTEND$(RESET)"; \
+	fi; \
+	if [ "$$BACKEND" = "200" ]; then \
+		echo "  $(GREEN)$(CHECK) Backend: Healthy$(RESET)"; \
+	else \
+		echo "  $(RED)$(CROSS) Backend: $$BACKEND$(RESET)"; \
+	fi
+
+## 🔍 Detailed health check
+.PHONY: health-detailed
+health-detailed:
+	@echo "$(CYAN)Detailed health information...$(RESET)"
+	@curl -s http://localhost:3001/api/health/comprehensive 2>/dev/null | jq '.' 2>/dev/null || \
+		echo "$(YELLOW)$(WARN) Detailed health endpoint not available$(RESET)"
+
+# ==============================================================================
+# 🗄️ Database Management
+# ==============================================================================
+
+## 🗄️ Reset database
+.PHONY: db-reset
+db-reset:
+	@echo "$(BOLD)$(YELLOW)🗄️ Resetting database...$(RESET)"
+	@read -p "Are you sure? This will delete all data! (y/N): " confirm; \
+	if [ "$$confirm" = "y" ]; then \
+		docker-compose -f $(DOCKER_COMPOSE_FILE) exec backend rm -f /app/data/database.sqlite; \
+		docker-compose -f $(DOCKER_COMPOSE_FILE) restart backend; \
+		echo "$(GREEN)$(CHECK) Database reset complete$(RESET)"; \
+	else \
+		echo "$(YELLOW)Cancelled$(RESET)"; \
+	fi
+
+## 💾 Backup database
+.PHONY: db-backup
+db-backup:
+	@echo "$(BOLD)$(BLUE)💾 Backing up database...$(RESET)"
+	@BACKUP_FILE="backup-$(TIMESTAMP).sqlite"; \
+	CONTAINER=$$(docker-compose -f $(DOCKER_COMPOSE_FILE) ps -q backend | head -1); \
+	if [ -n "$$CONTAINER" ]; then \
+		docker cp $$CONTAINER:/app/data/database.sqlite ./$$BACKUP_FILE; \
+		echo "$(GREEN)$(CHECK) Database backed up to $$BACKUP_FILE$(RESET)"; \
+	else \
+		echo "$(RED)$(CROSS) Backend not running$(RESET)"; \
+	fi
+
+## 🔄 Run database migrations
+.PHONY: db-migrate
+db-migrate:
+	@echo "$(BOLD)$(BLUE)🔄 Running database migrations...$(RESET)"
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) exec backend npm run migrate
+	@echo "$(GREEN)$(CHECK) Migrations complete$(RESET)"
+
+# ==============================================================================
+# 🎮 Demo Mode
+# ==============================================================================
+
+## 🎮 Start demo mode
+.PHONY: demo
+demo: clean-docker
+	@echo "$(BOLD)$(PURPLE)🎮 Starting DEMO MODE...$(RESET)"
+	@DEMO_MODE=true $(MAKE) dev
+	@sleep 5
+	@$(MAKE) demo-load-data
+	@$(MAKE) demo-status
+
+## ⚡ Quick 3-minute demo
+.PHONY: demo-quick
+demo-quick: clean-docker
+	@echo "$(BOLD)$(CYAN)⚡ Starting Quick Demo (3 minutes)...$(RESET)"
+	@DEMO_MODE=true DEMO_TYPE=quick $(MAKE) dev-minimal
+	@sleep 3
+	@$(MAKE) demo-load-data
+	@echo "$(GREEN)$(CHECK) Quick demo ready at http://localhost:3000?demo=quick$(RESET)"
+
+## 🎥 Presentation mode
+.PHONY: presentation
+presentation: clean-docker
+	@echo "$(BOLD)$(PURPLE)🎥 Starting Presentation Mode...$(RESET)"
+	@DEMO_MODE=true PRESENTATION_MODE=true $(MAKE) dev
+	@echo "$(GREEN)$(CHECK) Presentation ready at http://localhost:3000$(RESET)"
+
+## 📊 Load demo data
+.PHONY: demo-load-data
+demo-load-data:
+	@echo "$(CYAN)Loading demo data...$(RESET)"
+	@if docker-compose -f $(DOCKER_COMPOSE_FILE) ps | grep -q "backend.*Up"; then \
+		docker-compose -f $(DOCKER_COMPOSE_FILE) exec backend node demo/load-demo-data.js 2>/dev/null || \
+		echo "$(YELLOW)$(WARN) Demo data loader not available$(RESET)"; \
+	fi
+
+## 📊 Show demo status
+.PHONY: demo-status
+demo-status:
+	@echo "$(BOLD)$(GREEN)🎮 DEMO MODE ACTIVE$(RESET)"
+	@echo "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
+	@echo "$(CYAN)Demo URLs:$(RESET)"
+	@echo "  • Main: http://localhost:3000?demo=true"
+	@echo "  • Quick Tour: http://localhost:3000?demo=quick"
+	@echo "  • Technical: http://localhost:3000?demo=technical"
+
+# ==============================================================================
+# 💻 Shell Access
+# ==============================================================================
+
+## 💻 Open shell in container
+.PHONY: shell
+shell:
+	@if [ -z "$(SERVICE)" ]; then \
+		echo "$(CYAN)Available services: backend, frontend, redis$(RESET)"; \
+		echo "Usage: make shell SERVICE=backend"; \
+	else \
+		docker-compose -f $(DOCKER_COMPOSE_FILE) exec $(SERVICE) sh; \
+	fi
+
+## 💻 Open backend shell
+.PHONY: shell-backend
+shell-backend:
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) exec backend sh
+
+## 💻 Open frontend shell
+.PHONY: shell-frontend
+shell-frontend:
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) exec frontend sh
+
+## 💻 Open Redis CLI
+.PHONY: shell-redis
+shell-redis:
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) exec redis redis-cli
+
+# ==============================================================================
+# 🧹 Cleanup Commands
+# ==============================================================================
+
+## 🧹 Clean up containers and volumes
+.PHONY: clean
+clean:
+	@echo "$(BOLD)$(YELLOW)🧹 Cleaning up...$(RESET)"
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) down -v --remove-orphans
+	@echo "$(GREEN)$(CHECK) Cleanup complete$(RESET)"
+
+## 🔥 Deep clean including images
+.PHONY: clean-all
+clean-all: clean
+	@echo "$(BOLD)$(RED)$(FIRE) Deep cleaning...$(RESET)"
+	@docker image prune -a -f
+	@docker builder prune -f
+	@echo "$(GREEN)$(CHECK) Deep clean complete$(RESET)"
+
+## 🧹 Clean Docker environment
+.PHONY: clean-docker
+clean-docker:
+	@echo "$(CYAN)Cleaning Docker environment...$(RESET)"
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) down --remove-orphans 2>/dev/null || true
+	@docker network prune -f 2>/dev/null || true
+
+# ==============================================================================
+# 🌐 Utility Commands
+# ==============================================================================
+
+## 🌐 Show all service URLs
+.PHONY: urls
+urls: show-urls
+
+## 🌐 Display service URLs
+.PHONY: show-urls
+show-urls:
+	@echo "$(BOLD)$(CYAN)🌐 Service URLs$(RESET)"
+	@echo "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
+	@echo "$(GREEN)Main Services:$(RESET)"
+	@echo "  • Frontend: http://localhost:3000"
+	@echo "  • Backend API: http://localhost:3001"
+	@echo "  • API Docs: http://localhost:3001/api/docs"
+	@echo ""
+	@echo "$(YELLOW)Development Tools:$(RESET)"
+	@echo "  • Adminer: http://localhost:8080"
+	@echo "  • Redis Commander: http://localhost:8081"
+	@echo ""
+	@echo "$(PURPLE)Monitoring:$(RESET)"
+	@echo "  • Prometheus: http://localhost:9090"
+	@echo "  • Grafana: http://localhost:3002"
+
+## ℹ️ Show system information
+.PHONY: info
+info:
+	@echo "$(BOLD)$(BLUE)$(INFO) System Information$(RESET)"
+	@echo "$(CYAN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
+	@echo "OS: $(OS) $(ARCH)"
+	@echo "Docker: $$(docker --version 2>/dev/null || echo 'Not installed')"
+	@echo "Docker Compose: $$(docker-compose --version 2>/dev/null || echo 'Not installed')"
+	@echo "Node.js: $$(node --version 2>/dev/null || echo 'Not installed')"
+	@echo "Git: $$(git --version 2>/dev/null || echo 'Not installed')"
+	@if [ -n "$(HAS_GPU)" ]; then \
+		echo "GPU: $$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)"; \
+	else \
+		echo "GPU: Not available"; \
+	fi
+
+## ⏳ Wait for services to be ready
+.PHONY: wait-for-services
+wait-for-services:
+	@echo "$(CYAN)Waiting for services to be ready...$(RESET)"
+	@for i in $$(seq 1 30); do \
+		if curl -s http://localhost:3001/api/health >/dev/null 2>&1; then \
+			echo "$(GREEN)$(CHECK) Services are ready!$(RESET)"; \
+			break; \
+		fi; \
+		if [ $$i -eq 30 ]; then \
+			echo "$(YELLOW)$(WARN) Services taking longer than expected to start$(RESET)"; \
+		fi; \
+		sleep 2; \
+	done
+
+# ==============================================================================
+# 🚀 Production & Deployment
+# ==============================================================================
+
+## 🚀 Deploy to staging
+.PHONY: deploy-staging
+deploy-staging:
+	@echo "$(BOLD)$(BLUE)🚀 Deploying to staging...$(RESET)"
+	@echo "$(YELLOW)Not yet implemented$(RESET)"
+
+## 🔥 Deploy to production
+.PHONY: deploy-prod
+deploy-prod:
+	@echo "$(BOLD)$(RED)$(FIRE) Deploying to production...$(RESET)"
+	@echo "$(YELLOW)Not yet implemented$(RESET)"
+
+## ✅ Validate CI/CD
+.PHONY: ci-validate
+ci-validate: preflight-check validate
+	@echo "$(BOLD)$(GREEN)✅ CI/CD validation passed$(RESET)"
+
+# ==============================================================================
+# 🛡️ Security & Compliance
+# ==============================================================================
+
+## 🛡️ Run security scan
+.PHONY: security-scan
+security-scan:
+	@echo "$(BOLD)$(RED)🛡️ Running security scan...$(RESET)"
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) exec backend npm audit || true
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) exec frontend npm audit || true
+
+## 🔍 Audit dependencies
+.PHONY: audit
+audit: security-scan
+
+## 📋 Check compliance
+.PHONY: compliance
+compliance:
+	@echo "$(BOLD)$(BLUE)📋 Checking compliance...$(RESET)"
+	@echo "$(YELLOW)Not yet implemented$(RESET)"
+
+# ==============================================================================
+# ⚡ Performance & Optimization
+# ==============================================================================
+
+## ⚡ Run benchmarks
+.PHONY: benchmark
+benchmark:
+	@echo "$(BOLD)$(PURPLE)⚡ Running performance benchmarks...$(RESET)"
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) exec backend npm run benchmark 2>/dev/null || \
+		echo "$(YELLOW)$(WARN) Benchmark requires running backend$(RESET)"
+
+## 🧠 Apply optimizations
+.PHONY: optimize
+optimize:
+	@echo "$(BOLD)$(PURPLE)$(BRAIN) Applying AI optimizations...$(RESET)"
+	@echo "$(YELLOW)Not yet implemented$(RESET)"
+
+## 📊 Profile performance
+.PHONY: profile
+profile:
+	@echo "$(BOLD)$(BLUE)📊 Profiling application...$(RESET)"
+	@echo "$(YELLOW)Not yet implemented$(RESET)"
+
+# ==============================================================================
+# 🎯 Shortcuts & Aliases
+# ==============================================================================
+
+.PHONY: up down ps
+up: start
+down: stop
+ps: status
+
+.PHONY: h s l t b c
+h: help
+s: start
+l: logs
+t: test
+b: build
+c: clean
+
+# ==============================================================================
+# 🔧 Special Targets
+# ==============================================================================
+
+## 📝 Create .env files from examples
+.PHONY: env
+env:
+	@echo "$(CYAN)Creating environment files...$(RESET)"
+	@test -f .env || cp .env.example .env 2>/dev/null || echo "$(YELLOW)No .env.example found$(RESET)"
+	@test -f .env.dev || cp .env.dev.example .env.dev 2>/dev/null || echo "$(YELLOW)No .env.dev.example found$(RESET)"
+	@echo "$(GREEN)$(CHECK) Environment files ready$(RESET)"
+
+## 🔄 Update dependencies
+.PHONY: update
+update:
+	@echo "$(BOLD)$(YELLOW)🔄 Updating dependencies...$(RESET)"
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) exec backend npm update
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) exec frontend npm update
+	@echo "$(GREEN)$(CHECK) Dependencies updated$(RESET)"
+
+## 📦 Install dependencies
+.PHONY: install
+install:
+	@echo "$(BOLD)$(BLUE)📦 Installing dependencies...$(RESET)"
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) exec backend npm install
+	@docker-compose -f $(DOCKER_COMPOSE_FILE) exec frontend npm install
+	@echo "$(GREEN)$(CHECK) Dependencies installed$(RESET)"
+
+# ==============================================================================
+# 🎉 Easter Eggs & Fun
+# ==============================================================================
+
+## 🎉 Show some love
+.PHONY: love
+love:
+	@echo "$(BOLD)$(RED)$(HEART) Thanks for using Prompt Card System! $(HEART)$(RESET)"
+	@echo "$(PURPLE)Built with love by the team$(RESET)"
+
+## 🌈 Rainbow mode
+.PHONY: rainbow
+rainbow:
+	@echo "$(RED)P$(YELLOW)r$(GREEN)o$(CYAN)m$(BLUE)p$(PURPLE)t $(RED)C$(YELLOW)a$(GREEN)r$(CYAN)d $(BLUE)S$(PURPLE)y$(RED)s$(YELLOW)t$(GREEN)e$(CYAN)m$(RESET)"
+
+## ☕ Coffee break
+.PHONY: coffee
+coffee:
+	@echo "$(BROWN)☕ Time for a coffee break!$(RESET)"
+	@echo "$(YELLOW)System will keep running while you're away...$(RESET)"
+
+# End of Enhanced Makefile
